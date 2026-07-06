@@ -1,0 +1,10 @@
+# Thème de l'application (vert pharmacie, fond clair).
+[theme]
+base = "light"
+primaryColor = "#0f766e"
+backgroundColor = "#fcfcfb"
+secondaryBackgroundColor = "#f2f6f5"
+textColor = "#0b0b0b"
+
+[browser]
+gatherUsageStats = false

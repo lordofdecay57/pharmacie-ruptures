@@ -48,6 +48,11 @@ pip install -r requirements.txt
 Le navigateur s'ouvre sur `http://localhost:8501`. Pour arrêter l'app :
 fermez la fenêtre noire (ou Ctrl+C dedans).
 
+💡 **Pour découvrir l'outil sans fichiers** : cliquez sur
+« 🧪 Essayer avec des données de démonstration » sur l'écran d'accueil —
+l'analyse tourne sur un jeu fictif (Titanoréine, Ozempic, Aranesp…) sans
+toucher à votre configuration.
+
 ## Utilisation (chaque semaine)
 
 1. **Déposez les 3 fichiers** (`.xlsx`, `.xls` ou `.csv`) dans les trois zones.
@@ -56,7 +61,8 @@ fermez la fenêtre noire (ou Ctrl+C dedans).
    besoin. Votre choix est **mémorisé** (`config.yaml`) : la semaine suivante,
    il est pré-rempli.
 3. Choisissez la **date d'analyse** et la **période de rotation** (moyenne
-   annuelle par défaut, ou 3 derniers mois).
+   annuelle par défaut, ou 3 derniers mois) dans la **barre latérale** — qui
+   affiche aussi la progression (fichiers déposés, analyse lancée).
 4. Cliquez **« Lancer l'analyse »** : les 3 onglets s'affichent à l'écran avec
    le code couleur d'urgence et un bandeau de résumé.
 5. Cliquez **« Télécharger le fichier Excel »**.
@@ -71,6 +77,7 @@ présent dans les fichiers — c'est le plus fiable.
 ```
 pharmacie-ruptures/
 ├── app.py                 # interface (Streamlit) — n'appelle que le moteur
+├── .streamlit/config.toml # thème de l'interface (vert pharmacie)
 ├── moteur_ruptures.py     # moteur métier pur, testable indépendamment
 ├── config.yaml            # mapping de colonnes mémorisé (créé au 1er lancement)
 ├── requirements.txt       # dépendances Python
