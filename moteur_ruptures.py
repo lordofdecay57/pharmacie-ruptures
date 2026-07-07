@@ -46,6 +46,7 @@ COUVERTURE_SANS_DATE_JOURS = 30   # objectif de couverture quand pas de réappro
 JOURS_PAR_MOIS = 30               # convention rotation mensuelle → journalière
 SEUIL_ALERTE_PEREMPTION_JOURS = 90  # DLUO à moins de ~3 mois → alerte
 SEUIL_VIGILANCE_JOURS = 7         # couverture < 7 j hors rupture → vigilance
+ROTATION_MIN_VIGILANCE = 5        # < 5 ventes/mois → pas de vigilance (bruit)
 SEUIL_MARGE_JUSTESSE_JOURS = 3    # écarté avec < 3 j de marge → à surveiller
 SEUIL_TENDANCE = 0.20             # ±20 % entre 3 mois et annuelle → ↗ / ↘
 
@@ -182,12 +183,127 @@ def charger_fichier(contenu, nom_fichier: str) -> pd.DataFrame:
         df = pd.read_excel(io.BytesIO(data), engine="openpyxl")
     elif nom.endswith(".xls"):
         df = pd.read_excel(io.BytesIO(data))  # xlrd requis pour les vieux .xls
+    elif nom.endswith(".pdf"):
+        df = _charger_pdf(data, nom_fichier)
     else:
         raise ValueError(
-            f"Format non géré : {nom_fichier} (attendu .xlsx, .xls ou .csv)")
+            f"Format non géré : {nom_fichier} (attendu .xlsx, .xls, .csv ou .pdf)")
 
     df.columns = [str(c).strip() for c in df.columns]
     return df
+
+
+def _charger_pdf(data: bytes, nom_fichier: str) -> pd.DataFrame:
+    """Extrait le tableau d'un PDF multi-pages (export type cadencier).
+
+    Le cadencier WinPharma (en-tête « Codes produit ») est reconnu et passe
+    par un parseur dédié. Sinon : la première ligne non vide sert d'en-tête,
+    l'en-tête répété en haut de chaque page est éliminé. PDF sans traits de
+    tableau : repli sur l'alignement du texte. PDF scanné (image) : message
+    clair, préférer l'export Excel/CSV.
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        raise ValueError("Lecture PDF indisponible : lancez "
+                         "« pip install pdfplumber » puis réessayez.")
+
+    brutes: list = []
+    try:
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                if not tables:  # pas de traits → colonnes par alignement texte
+                    table = page.extract_table({"vertical_strategy": "text",
+                                                "horizontal_strategy": "text"})
+                    tables = [table] if table else []
+                for table in tables:
+                    for brute in table:
+                        valeurs = ["" if v is None else str(v).strip()
+                                   for v in (brute or [])]
+                        if any(valeurs):
+                            brutes.append(valeurs)
+    except Exception:
+        raise ValueError(f"PDF illisible : {nom_fichier}")
+
+    if not brutes:
+        raise ValueError(
+            f"Aucun tableau lisible dans {nom_fichier} — s'il s'agit d'un "
+            "PDF scanné (image), préférez un export Excel ou CSV.")
+
+    if any("Codes produit" in " ".join(r) for r in brutes[:40]):
+        return _parser_cadencier_winpharma(brutes)
+
+    en_tete, lignes = None, []
+    for valeurs in brutes:
+        if en_tete is None:
+            en_tete = valeurs
+        elif valeurs != en_tete:  # ignore l'en-tête répété à chaque page
+            lignes.append(valeurs)
+    if en_tete is None or not lignes:
+        raise ValueError(
+            f"Aucun tableau lisible dans {nom_fichier} — s'il s'agit d'un "
+            "PDF scanné (image), préférez un export Excel ou CSV.")
+    largeur = len(en_tete)  # aligne les lignes incomplètes sur l'en-tête
+    lignes = [l[:largeur] + [""] * (largeur - len(l)) for l in lignes]
+    return pd.DataFrame(lignes, columns=en_tete)
+
+
+def _parser_cadencier_winpharma(brutes: list) -> pd.DataFrame:
+    """Cadencier de stock WinPharma (PDF) → DataFrame prêt pour l'analyse.
+
+    Format observé (4 cellules par ligne) :
+      - « Codes produit » : CIP7 et CIP13 empilés (ou EAN seul) ;
+      - « Nom / Formes & presentations » : libellé, parfois sur 2 lignes ;
+      - « Stock » : quantité en rayon ;
+      - achats/ventes : « A … » puis « V … » sur la même cellule, 12 valeurs
+        mensuelles en ordre ANTI-chronologique (mois récent en premier) +
+        total. On ne garde que la ligne V, remise en ordre chronologique.
+    Le bandeau de la pharmacie, les en-têtes répétés par page et la ligne de
+    totaux finale sont éliminés.
+    """
+    mois = None
+    for r in brutes:
+        joint = " ".join(r)
+        if "Codes produit" in joint:
+            trouve = re.search(r"((?:[A-Za-zéû]{3}\s+){11}[A-Za-zéû]{3})\s+Total",
+                               joint)
+            if trouve:
+                mois = trouve.group(1).split()
+            break
+    if not mois:
+        raise ValueError("Cadencier WinPharma : en-tête des mois introuvable.")
+    colonnes_ventes = [f"Ventes {m}" for m in reversed(mois)]  # récent en DERNIER
+
+    produits = []
+    for r in brutes:
+        if len(r) < 4:
+            continue
+        codes_cell, nom, stock_cell, achats_ventes = r[0], r[1], r[2], r[3]
+        if "Codes produit" in codes_cell or "CADENCIER" in " ".join(r).upper():
+            continue
+        codes = re.findall(r"\d{6,}", codes_cell)
+        if not codes:  # bandeau de page, ligne de totaux (« Manque: … »)…
+            continue
+        cip = next((c for c in codes if len(c) == 13), codes[0])
+        ventes_v = re.search(r"(?:^|\n)V\s+([\d\s,.]+)", achats_ventes or "")
+        ventes: list = []
+        if ventes_v:
+            nombres = ventes_v.group(1).split()
+            if len(nombres) > 12:
+                nombres = nombres[:12]  # sans la colonne Total
+            ventes = list(reversed(nombres))  # → ordre chronologique
+        ligne = {"Produit": " ".join((nom or "").split()), "CIP": cip,
+                 "Stock": stock_cell}
+        manquants = len(colonnes_ventes) - len(ventes)
+        ventes = ["0"] * max(0, manquants) + ventes  # mois absents = 0 vente
+        for colonne, valeur in zip(colonnes_ventes, ventes):
+            ligne[colonne] = valeur
+        produits.append(ligne)
+    if not produits:
+        raise ValueError("Cadencier WinPharma : aucune ligne produit lisible.")
+    return pd.DataFrame(produits,
+                        columns=["Produit", "CIP", "Stock"] + colonnes_ventes)
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +622,7 @@ def analyser(cadencier: pd.DataFrame,
              periode: str = "annuelle",
              historique: Optional[pd.DataFrame] = None,
              seuil_vigilance_jours: float = SEUIL_VIGILANCE_JOURS,
+             rotation_min_vigilance: float = ROTATION_MIN_VIGILANCE,
              seuil_marge_jours: float = SEUIL_MARGE_JUSTESSE_JOURS,
              delai_livraison_jours: float = 0,
              rotation_prudente: bool = False) -> ResultatAnalyse:
@@ -517,6 +634,8 @@ def analyser(cadencier: pd.DataFrame,
         ruptures longues aux ventes écrasées à 0) ;
       - seuil_vigilance_jours : produits du cadencier HORS rupture GPNC dont
         la couverture passe sous ce seuil → onglet Vigilance ;
+      - rotation_min_vigilance : plancher de ventes/mois pour la vigilance
+        (écarte le bruit des produits à très faible rotation) ;
       - seuil_marge_jours : produits écartés par la règle stricte avec moins
         de cette marge → onglet Écartés de justesse ;
       - delai_livraison_jours : délai de livraison UNIPHARMA ajouté à la
@@ -791,8 +910,8 @@ def analyser(cadencier: pd.DataFrame,
         if idx in indices_cadencier_traites:
             continue  # déjà couvert par l'analyse des ruptures GPNC
         stock, en_cours, ventes, rotation = _extraire_cadencier(ligne_cad)
-        if rotation <= 0:
-            continue  # produit non vendu : rien à anticiper
+        if rotation < rotation_min_vigilance or rotation <= 0:
+            continue  # rotation trop faible : bruit, rien à anticiper
         stock_jours = calculer_stock_jours(stock + en_cours, rotation)
         if stock_jours >= seuil_vigilance_jours:
             continue
@@ -827,8 +946,10 @@ def analyser(cadencier: pd.DataFrame,
     df3 = pd.DataFrame(lignes3).reindex(columns=COLONNES_ONGLET3)
 
     df_vigilance = pd.DataFrame(lignes_vigilance)
-    if not df_vigilance.empty:  # le plus critique en premier
-        df_vigilance = (df_vigilance.sort_values("_stock_jours")
+    if not df_vigilance.empty:  # le plus critique puis le plus gros vendeur
+        df_vigilance = (df_vigilance
+                        .sort_values(["_stock_jours", "Rotation/mois"],
+                                     ascending=[True, False])
                         .drop(columns=["_stock_jours"]))
     df_vigilance = df_vigilance.reindex(columns=COLONNES_VIGILANCE)
 

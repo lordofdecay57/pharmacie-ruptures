@@ -86,6 +86,13 @@ def _tuile_kpi(label: str, valeur, variante: str = "", sous: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
+@st.cache_data(show_spinner=False)
+def _charger_fichier_cache(data: bytes, nom: str) -> pd.DataFrame:
+    """Cache du parsing : un cadencier PDF de ~200 pages prend ~1 min à
+    lire — sans cache, Streamlit le relirait à CHAQUE clic dans la page."""
+    return moteur.charger_fichier(data, nom)
+
+
 def charger_config() -> dict:
     """Mapping mémorisé lors d'une analyse précédente (ou vide)."""
     if CONFIG_PATH.exists():
@@ -229,12 +236,13 @@ for colonne, (cle, titre, aide) in zip(col_fichiers, libelles_zones):
         st.markdown(f"**{titre}**")
         st.caption(aide)
         fichiers[cle] = st.file_uploader(
-            aide, type=["xlsx", "xls", "csv"], key=f"fichier_{cle}",
+            aide, type=["xlsx", "xls", "csv", "pdf"], key=f"fichier_{cle}",
             label_visibility="collapsed")
         if fichiers[cle] is not None:
             try:
-                dataframes[cle] = moteur.charger_fichier(
-                    fichiers[cle].getvalue(), fichiers[cle].name)
+                with st.spinner("Lecture du fichier…"):
+                    dataframes[cle] = _charger_fichier_cache(
+                        fichiers[cle].getvalue(), fichiers[cle].name)
                 st.success(f"{len(dataframes[cle])} lignes · "
                            f"{len(dataframes[cle].columns)} colonnes")
             except ValueError as e:
@@ -282,6 +290,11 @@ with st.sidebar:
             value=int(moteur.SEUIL_VIGILANCE_JOURS),
             help="Produits HORS rupture GPNC dont la couverture passe sous "
                  "ce seuil → onglet Vigilance (rupture en rayon à venir).")
+        rotation_min_vigilance = st.number_input(
+            "Rotation minimale vigilance (ventes/mois)", 0, 100,
+            value=int(moteur.ROTATION_MIN_VIGILANCE),
+            help="En dessous de ce volume de ventes, un stock bas n'est pas "
+                 "signalé — évite le bruit des produits à rotation très lente.")
         seuil_marge = st.number_input(
             "Marge « écarté de justesse » (jours)", 0, 15,
             value=int(moteur.SEUIL_MARGE_JUSTESSE_JOURS),
@@ -434,6 +447,7 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
             df_cad, df_gpnc, df_uni, mapping, date_analyse, periode,
             historique=None if mode_demo else charger_historique(),
             seuil_vigilance_jours=seuil_vigilance,
+            rotation_min_vigilance=rotation_min_vigilance,
             seuil_marge_jours=seuil_marge,
             delai_livraison_jours=delai_livraison,
             rotation_prudente=rotation_prudente)

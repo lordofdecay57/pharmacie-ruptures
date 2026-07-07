@@ -325,8 +325,9 @@ class TestExportEtChargement:
         assert list(df.columns) == ["A"]
 
     def test_format_inconnu_message_clair(self):
+        # .pdf est désormais géré — .docx reste un format inconnu.
         with pytest.raises(ValueError, match="Format non géré"):
-            charger_fichier(b"", "fichier.pdf")
+            charger_fichier(b"", "fichier.docx")
 
 
 # ---------------------------------------------------------------------------
@@ -725,3 +726,90 @@ class TestCipReels:
         assert detecter_colonne(df.columns, "libelle") == "Libelle"
         assert detecter_colonne(df.columns, "date_reappro") == "Réappro"
         assert parser_date(df["Réappro"].iloc[0]) == date(2026, 6, 3)
+
+
+# ---------------------------------------------------------------------------
+# Lecture des exports PDF (cadencier multi-pages)
+# ---------------------------------------------------------------------------
+
+class TestPdf:
+    def test_cadencier_pdf_multipages(self, tmp_path):
+        pytest.importorskip("pdfplumber")
+        pytest.importorskip("reportlab")
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+
+        chemin = tmp_path / "cadencier.pdf"
+        en_tete = ["Produit", "CIP", "Stock", "Ventes mai", "Ventes juin"]
+        lignes = [[f"PRODUIT {i:03d} CPR B30", f"3{i:06d}", "4", "10", "12"]
+                  for i in range(60)]  # 60 lignes → plusieurs pages
+        tableau = Table([en_tete] + lignes, repeatRows=1)  # en-tête répété
+        tableau.setStyle(TableStyle(
+            [("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
+        SimpleDocTemplate(str(chemin), pagesize=landscape(A4)).build([tableau])
+
+        df = charger_fichier(str(chemin), "cadencier.pdf")
+        assert list(df.columns) == en_tete
+        assert len(df) == 60  # en-têtes répétés éliminés, aucune ligne perdue
+
+    def test_pdf_illisible_message_clair(self):
+        pytest.importorskip("pdfplumber")
+        with pytest.raises(ValueError, match="PDF"):
+            charger_fichier(b"%PDF-1.4 contenu corrompu", "scan.pdf")
+
+
+# ---------------------------------------------------------------------------
+# Cadencier WinPharma (PDF réel : bandeau, A/V compactés, anti-chronologique)
+# ---------------------------------------------------------------------------
+
+class TestCadencierWinpharma:
+    BRUTES = [
+        ["PHARMACIE DE TEST 13/05/2026\nCADENCIER DE STOCK du 01/06/2025 "
+         "au 31/05/2026 Page: 1", "", "", ""],
+        ["Codes produit", "Nom / Formes & presentations", "Stock",
+         "Mai Avr Mar Fev Jan Dec Nov Oct Sep Aou Jul Jun Total"],
+        ["3230077\n3400932300778", "TITANOREINE SUPPO B/ 12\n182 SOLUTION",
+         "3", "A 0 0 0 0 15 0 0 0 18 0 12 12 57\nV 2 4 6 4 5 4 5 6 6 7 7 9 65"],
+        ["Manque: -9\nQte: 3652\nStock: 26368", "", "",
+         "A 9792 21254 23157 18629 18514 23269 18404 21661 19402 24100 1 2 3"],
+    ]
+
+    def test_extraction_produit(self):
+        from moteur_ruptures import _parser_cadencier_winpharma
+        df = _parser_cadencier_winpharma(self.BRUTES)
+        assert len(df) == 1  # bandeau, en-tête et ligne de totaux éliminés
+        assert df["CIP"].iloc[0] == "3400932300778"  # CIP13 préféré au CIP7
+        assert df["Produit"].iloc[0] == "TITANOREINE SUPPO B/ 12 182 SOLUTION"
+        assert df["Stock"].iloc[0] == "3"
+
+    def test_ventes_remises_en_ordre_chronologique(self):
+        from moteur_ruptures import _parser_cadencier_winpharma
+        df = _parser_cadencier_winpharma(self.BRUTES)
+        # Ligne V : Mai=2 (récent) … Jun=9 (ancien) → chronologique Jun→Mai.
+        assert list(df.columns[3:5]) == ["Ventes Jun", "Ventes Jul"]
+        assert df["Ventes Jun"].iloc[0] == "9"
+        assert df["Ventes Mai"].iloc[0] == "2"
+        # La rotation utilise bien la ligne V (65/12 ≈ 5,4), pas la ligne A.
+        ventes = [df[c].iloc[0] for c in df.columns if c.startswith("Ventes")]
+        assert calculer_rotation_mensuelle(ventes, "annuelle") == pytest.approx(65 / 12)
+
+
+# ---------------------------------------------------------------------------
+# Vigilance — plancher de rotation (anti-bruit)
+# ---------------------------------------------------------------------------
+
+class TestVigilanceRotationMin:
+    def test_rotation_lente_ignoree_par_defaut(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        # 2/mois < plancher 5 : stock 0 mais pas de vigilance (bruit).
+        cad.loc[len(cad)] = ["HOMEOPATHIE RARE", "2002", 0, 2, 2, 2]
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert "HOMEOPATHIE RARE" not in resultat.vigilance["Produit"].values
+
+    def test_plancher_reglable(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad.loc[len(cad)] = ["HOMEOPATHIE RARE", "2002", 0, 2, 2, 2]
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            rotation_min_vigilance=1)
+        assert "HOMEOPATHIE RARE" in resultat.vigilance["Produit"].values

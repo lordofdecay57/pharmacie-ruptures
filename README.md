@@ -28,7 +28,9 @@ l'information patient, contacter GPNC).
 
 - **🔭 Vigilance stock** : produits que vous vendez, HORS liste de ruptures
   GPNC, dont la couverture passe sous 7 jours (réglable) — la rupture en
-  rayon arrive, commander chez GPNC avant qu'elle se produise.
+  rayon arrive, commander chez GPNC avant qu'elle se produise. Un plancher
+  de rotation (5 ventes/mois, réglable) écarte le bruit des produits à
+  rotation très lente.
 - **⚠️ Écartés de justesse** : produits écartés par la règle stricte avec
   moins de 3 jours de marge (réglable) — si la date de réappro glisse,
   c'est la rupture sèche. Visibles dans un onglet dédié, sans modifier la
@@ -98,8 +100,12 @@ toucher à votre configuration.
 
 ## Utilisation (chaque jour)
 
-1. **Exportez et déposez les 3 fichiers du jour** (`.xlsx`, `.xls` ou `.csv`)
-   dans les trois zones.
+1. **Exportez et déposez les 3 fichiers du jour** (`.xlsx`, `.xls`, `.csv`
+   ou `.pdf`) dans les trois zones. Le **cadencier PDF WinPharma**
+   (multi-pages, ventes A/V par mois) est reconnu et converti
+   automatiquement — comptez ~1 minute de lecture pour 200 pages, puis le
+   fichier reste en cache. Les PDF scannés (images) ne sont pas lisibles :
+   préférez alors un export Excel/CSV.
 2. **Vérifiez les colonnes** détectées (libellé, CIP, stock, ventes
    mensuelles, date de réappro) — corrigez avec les menus déroulants si
    besoin. Votre choix est **mémorisé** (`config.yaml`) : le lendemain,
@@ -130,7 +136,7 @@ pharmacie-ruptures/
 ├── lancer.command         # double-clic Mac
 ├── README.md
 └── tests/
-    └── test_moteur.py     # 82 tests (dont Titanoréine, Ozempic, Aranesp)
+    └── test_moteur.py     # 94 tests (dont Titanoréine, Ozempic, Aranesp)
 ```
 
 ## Tests
