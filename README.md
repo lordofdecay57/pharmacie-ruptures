@@ -24,6 +24,23 @@ commander (`Cmd`) et l'urgence (🔴 stock épuisé ou ≤ 3 j · 🟡 4-15 j ·
 🟢 > 15 j) ; en rupture aussi chez UNIPHARMA → **Onglet 2** (anticiper
 l'information patient, contacter GPNC).
 
+## Fonctionnalités complémentaires
+
+- **Commande en cours** (colonne facultative du cadencier) : une quantité déjà
+  commandée mais pas reçue est déduite du calcul de couverture et de `Cmd`,
+  pour éviter de recommander ce qui est déjà en route.
+- **Fiabilité de la rotation** : si un mois de ventes est à 0 au milieu de
+  mois actifs, l'outil signale « ⚠️ rupture passée possible » — la rotation
+  est probablement sous-estimée (le produit était en rupture, pas sans
+  demande), à corriger manuellement si besoin.
+- **Péremption / DLUO** (colonne facultative du cadencier) : alerte
+  informative si la péremption est à moins de 90 jours — n'écarte pas le
+  produit, sert juste à vérifier avant de commander davantage.
+- **Historique semaine à semaine** : chaque analyse (hors mode démo) est
+  ajoutée à `historique_commandes.csv` (local, jamais versionné). L'onglet 1
+  affiche « 🔁 N fois » si un produit était déjà signalé lors de précédentes
+  analyses.
+
 ## Installation (une seule fois)
 
 1. **Installer Python** (3.10 ou plus récent) : <https://www.python.org/downloads/>
@@ -80,12 +97,13 @@ pharmacie-ruptures/
 ├── .streamlit/config.toml # thème de l'interface (vert pharmacie)
 ├── moteur_ruptures.py     # moteur métier pur, testable indépendamment
 ├── config.yaml            # mapping de colonnes mémorisé (créé au 1er lancement)
+├── historique_commandes.csv # historique des analyses (créé à la 1re analyse)
 ├── requirements.txt       # dépendances Python
 ├── lancer.bat             # double-clic Windows
 ├── lancer.command         # double-clic Mac
 ├── README.md
 └── tests/
-    └── test_moteur.py     # 45 tests (dont Titanoréine, Ozempic, Aranesp)
+    └── test_moteur.py     # 56 tests (dont Titanoréine, Ozempic, Aranesp)
 ```
 
 ## Tests

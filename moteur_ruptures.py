@@ -44,6 +44,7 @@ except ImportError:  # pragma: no cover - environnement sans rapidfuzz
 
 COUVERTURE_SANS_DATE_JOURS = 30   # objectif de couverture quand pas de réappro
 JOURS_PAR_MOIS = 30               # convention rotation mensuelle → journalière
+SEUIL_ALERTE_PEREMPTION_JOURS = 90  # DLUO à moins de ~3 mois → alerte
 
 URGENT = "🔴 URGENT"
 MODERE = "🟡 MODÉRÉ"
@@ -176,6 +177,9 @@ _MOTS_CLES = {
     "date_reappro": ["reappro", "réappro", "reapprovisionnement", "retour",
                      "dispo le", "date"],
     "conditionnement": ["conditionnement", "colisage", "pcb", "unite de vente"],
+    "commande_en_cours": ["commande en cours", "qte commandee", "cde en cours",
+                          "en commande"],
+    "peremption": ["peremption", "dluo", "date de peremption", "date limite"],
 }
 
 
@@ -322,6 +326,31 @@ def quantite_a_commander(rotation_mensuelle: float,
     return cmd
 
 
+def rotation_possiblement_sous_estimee(ventes: list) -> bool:
+    """Indice de rupture passée : au moins un mois à 0 vente alors que
+    d'autres mois montrent des ventes — la rotation calculée est alors
+    probablement sous-estimée (le produit était en rupture, pas sans
+    demande). Toutes les valeurs à 0 = pas de demande réelle → non signalé.
+    """
+    valeurs = [parser_nombre(v) for v in ventes]
+    if not valeurs or all(v <= 0 for v in valeurs):
+        return False
+    return any(v <= 0 for v in valeurs)
+
+
+def compter_occurrences_historique(produit: str, historique: pd.DataFrame,
+                                   avant_date: date) -> int:
+    """Nombre d'analyses antérieures à ``avant_date`` où ``produit`` était
+    déjà signalé dans l'historique (colonnes 'Date analyse' / 'Produit',
+    persisté par l'interface — voir app.py). Module pur : aucune I/O ici.
+    """
+    if historique is None or historique.empty:
+        return 0
+    sous = historique[historique["Produit"] == produit]
+    dates = pd.to_datetime(sous["Date analyse"], errors="coerce").dt.date
+    return int((dates < avant_date).sum())
+
+
 # ---------------------------------------------------------------------------
 # Analyse complète
 # ---------------------------------------------------------------------------
@@ -337,13 +366,15 @@ class ResultatAnalyse:
     matchs_incertains: list = field(default_factory=list)  # à vérifier à la main
 
 
-COLONNES_ONGLET1 = ["Urgence", "Produit", "Stock actuel", "Rotation/mois",
-                    "Stock (jours)", "Date réappro GPNC", "Jours avant réappro",
+COLONNES_ONGLET1 = ["Urgence", "Produit", "Stock actuel", "Commande en cours",
+                    "Rotation/mois", "Fiabilité rotation", "Stock (jours)",
+                    "Date réappro GPNC", "Jours avant réappro", "Péremption",
                     "Qté à commander (Cmd)", "Commentaire"]
 COLONNES_ONGLET2 = ["Produit", "Stock actuel", "Rotation/mois", "Stock (jours)",
-                    "Date réappro GPNC", "Commentaire"]
-COLONNES_ONGLET3 = ["Produit", "Vendu (O/N)", "Stock actuel", "Rotation/mois",
-                    "Stock (jours)", "Date réappro", "Jours avant réappro",
+                    "Date réappro GPNC", "Péremption", "Commentaire"]
+COLONNES_ONGLET3 = ["Produit", "Vendu (O/N)", "Stock actuel", "Commande en cours",
+                    "Rotation/mois", "Fiabilité rotation", "Stock (jours)",
+                    "Date réappro", "Jours avant réappro", "Péremption",
                     "Dispo UNIPHARMA (O/N)", "Décision", "Onglet", "Motif"]
 
 
@@ -359,7 +390,9 @@ def analyser(cadencier: pd.DataFrame,
       {
         "cadencier":  {"libelle": str, "cip": str|None, "stock": str,
                         "ventes": [str, ...],  # ordre chrono, récent en dernier
-                        "conditionnement": str|None},
+                        "conditionnement": str|None,
+                        "commande_en_cours": str|None,  # qté déjà commandée
+                        "peremption": str|None},        # DLUO la plus proche
         "gpnc":       {"libelle": str, "cip": str|None, "date_reappro": str|None},
         "unipharma":  {"libelle": str, "cip": str|None},
       }
@@ -416,27 +449,59 @@ def analyser(cadencier: pd.DataFrame,
         # --- Étape 1 : périmètre (vendu, rotation > 0) ----------------------
         if corr.index is None:
             lignes3.append({**base3, "Vendu (O/N)": "N", "Stock actuel": "",
-                            "Rotation/mois": "", "Stock (jours)": "",
-                            "Dispo UNIPHARMA (O/N)": "", "Décision": "Écarté",
-                            "Onglet": "—", "Motif": "Absent du cadencier (non vendu)"})
+                            "Commande en cours": "", "Rotation/mois": "",
+                            "Fiabilité rotation": "", "Stock (jours)": "",
+                            "Péremption": "", "Dispo UNIPHARMA (O/N)": "",
+                            "Décision": "Écarté", "Onglet": "—",
+                            "Motif": "Absent du cadencier (non vendu)"})
             continue
 
         ligne_cad = cadencier.loc[corr.index]
         stock = parser_nombre(ligne_cad[m_cad["stock"]])
+
+        # --- Commande en cours : évite de recommander ce qui arrive déjà ----
+        en_cours = (parser_nombre(ligne_cad[m_cad["commande_en_cours"]])
+                   if m_cad.get("commande_en_cours") else 0.0)
+        stock_effectif = stock + en_cours
+        affiche_en_cours = en_cours if m_cad.get("commande_en_cours") else ""
+
+        # --- Péremption (DLUO) : alerte informative, n'écarte pas le produit
+        date_peremption = (parser_date(ligne_cad[m_cad["peremption"]])
+                           if m_cad.get("peremption") else None)
+        affiche_peremption = ""
+        if date_peremption is not None:
+            affiche_peremption = f"{date_peremption:%d/%m/%Y}"
+            jours_avant_peremption = (date_peremption - date_analyse).days
+            if 0 <= jours_avant_peremption <= SEUIL_ALERTE_PEREMPTION_JOURS:
+                alertes.append(
+                    f"{produit_gpnc} : péremption proche ({affiche_peremption}, "
+                    f"dans {jours_avant_peremption} j) — vérifier le stock "
+                    "avant de commander davantage.")
+
         ventes = [ligne_cad[c] for c in m_cad["ventes"] if c in cadencier.columns]
         rotation = calculer_rotation_mensuelle(ventes, periode)
+        rotation_douteuse = rotation_possiblement_sous_estimee(ventes)
+        affiche_fiabilite = ("⚠️ rupture passée possible" if rotation_douteuse
+                             else "OK")
         if rotation <= 0:
             lignes3.append({**base3, "Vendu (O/N)": "N", "Stock actuel": stock,
-                            "Rotation/mois": 0, "Stock (jours)": "",
+                            "Commande en cours": affiche_en_cours,
+                            "Rotation/mois": 0, "Fiabilité rotation": "",
+                            "Stock (jours)": "", "Péremption": affiche_peremption,
                             "Dispo UNIPHARMA (O/N)": "", "Décision": "Écarté",
                             "Onglet": "—", "Motif": "Rotation nulle (produit non vendu)"})
             continue
 
         # --- Étapes 2-3 : stock en jours + règle d'apparition ---------------
-        stock_jours = calculer_stock_jours(stock, rotation)
+        # Le stock EFFECTIF (physique + commandes en cours) sert de base au
+        # calcul : une commande déjà partie ne doit pas être recommandée.
+        stock_jours = calculer_stock_jours(stock_effectif, rotation)
         base3.update({"Vendu (O/N)": "O", "Stock actuel": stock,
+                      "Commande en cours": affiche_en_cours,
                       "Rotation/mois": round(rotation, 1),
-                      "Stock (jours)": round(stock_jours, 1)})
+                      "Fiabilité rotation": affiche_fiabilite,
+                      "Stock (jours)": round(stock_jours, 1),
+                      "Péremption": affiche_peremption})
 
         if not doit_apparaitre(stock_jours, jours_avant):
             motif = (f"Stock ({stock_jours:.0f} j) couvre jusqu'à la réappro "
@@ -456,7 +521,7 @@ def analyser(cadencier: pd.DataFrame,
                 "Score": round(corr_uni.score, 1), "Fichier": "ruptures UNIPHARMA",
             })
         rupture_uni = corr_uni.index is not None
-        urgence = classer_urgence(stock, stock_jours)
+        urgence = classer_urgence(stock_effectif, stock_jours)
 
         if rupture_uni:  # rupture chez les DEUX → pas de solution
             lignes2.append({
@@ -464,6 +529,7 @@ def analyser(cadencier: pd.DataFrame,
                 "Rotation/mois": round(rotation, 1),
                 "Stock (jours)": round(stock_jours, 1),
                 "Date réappro GPNC": base3["Date réappro"],
+                "Péremption": affiche_peremption,
                 "Commentaire": ("Anticiper l'information patient ; contacter "
                                 "GPNC pour confirmer la date de réappro."),
                 "_rotation": rotation, "_stock": stock,
@@ -480,16 +546,22 @@ def analyser(cadencier: pd.DataFrame,
         if m_cad.get("conditionnement"):
             c = parser_nombre(ligne_cad[m_cad["conditionnement"]])
             conditionnement = c if c > 1 else None
-        cmd = quantite_a_commander(rotation, couverture_cible, stock, conditionnement)
+        cmd = quantite_a_commander(rotation, couverture_cible, stock_effectif,
+                                   conditionnement)
 
         commentaire = ("Dépannage jusqu'à la réappro GPNC" if jours_avant is not None
                        else "Pas de date de réappro → objectif 30 j de couverture")
+        if en_cours:
+            commentaire += f" · {en_cours:g} déjà en commande (déduit du calcul)"
         lignes1.append({
             "Urgence": urgence, "Produit": produit_gpnc, "Stock actuel": stock,
+            "Commande en cours": affiche_en_cours,
             "Rotation/mois": round(rotation, 1),
+            "Fiabilité rotation": affiche_fiabilite,
             "Stock (jours)": round(stock_jours, 1),
             "Date réappro GPNC": base3["Date réappro"],
             "Jours avant réappro": jours_avant if jours_avant is not None else "",
+            "Péremption": affiche_peremption,
             "Qté à commander (Cmd)": cmd, "Commentaire": commentaire,
             "_stock_jours": stock_jours,
         })
@@ -517,6 +589,10 @@ def analyser(cadencier: pd.DataFrame,
     nb_urgents = int((df1["Urgence"] == URGENT).sum()) if not df1.empty else 0
     nb_moderes = int((df1["Urgence"] == MODERE).sum()) if not df1.empty else 0
     nb_anticiper = int((df1["Urgence"] == ANTICIPER).sum()) if not df1.empty else 0
+    nb_rotation_douteuse = (int((df1["Fiabilité rotation"]
+                                == "⚠️ rupture passée possible").sum())
+                           if not df1.empty else 0)
+    nb_peremption_proche = len([a for a in alertes if "péremption proche" in a])
     resume = {
         "ruptures_gpnc": len(ruptures_gpnc),
         "analyses": len(df3),
@@ -524,6 +600,8 @@ def analyser(cadencier: pd.DataFrame,
         "a_commander": len(df1),
         "sans_solution": len(df2),
         "urgents": nb_urgents, "moderes": nb_moderes, "anticiper": nb_anticiper,
+        "rotation_douteuse": nb_rotation_douteuse,
+        "peremption_proche": nb_peremption_proche,
     }
     return ResultatAnalyse(df1, df2, df3, resume, alertes, matchs_incertains)
 

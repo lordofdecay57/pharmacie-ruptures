@@ -25,6 +25,9 @@ import yaml
 import moteur_ruptures as moteur
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
+HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
+COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
+                       "Qté à commander (Cmd)"]
 
 st.set_page_config(page_title="Ruptures pharmacie", page_icon="💊",
                    layout="wide", initial_sidebar_state="expanded")
@@ -107,6 +110,40 @@ def _choix(label: str, colonnes: list, defaut, cle: str, optionnel=True):
     return None if valeur == "(aucune)" else valeur
 
 
+def charger_historique() -> pd.DataFrame:
+    """Historique des analyses passées (comparaison semaine à semaine)."""
+    if HISTORIQUE_PATH.exists():
+        try:
+            return pd.read_csv(HISTORIQUE_PATH)
+        except (pd.errors.ParserError, pd.errors.EmptyDataError):
+            return pd.DataFrame(columns=COLONNES_HISTORIQUE)
+    return pd.DataFrame(columns=COLONNES_HISTORIQUE)
+
+
+def sauver_historique_analyse(onglet1: pd.DataFrame, onglet2: pd.DataFrame,
+                              date_analyse: date) -> pd.DataFrame:
+    """Ajoute l'analyse du jour à l'historique local (remplace une éventuelle
+    analyse déjà enregistrée à la même date, pour éviter les doublons en cas
+    de ré-analyse). Renvoie l'historique mis à jour."""
+    jour = date_analyse.strftime("%Y-%m-%d")
+    lignes = []
+    for df, urgence_defaut in ((onglet1, None), (onglet2, "❌ SANS SOLUTION")):
+        if df.empty:
+            continue
+        sous = df[["Produit"]].copy()
+        sous["Date analyse"] = jour
+        sous["Urgence"] = df["Urgence"] if "Urgence" in df.columns else urgence_defaut
+        sous["Qté à commander (Cmd)"] = (df["Qté à commander (Cmd)"]
+                                         if "Qté à commander (Cmd)" in df.columns
+                                         else "")
+        lignes.append(sous[COLONNES_HISTORIQUE])
+    historique = charger_historique()
+    historique = historique[historique["Date analyse"] != jour]
+    historique = pd.concat([historique] + lignes, ignore_index=True)
+    historique.to_csv(HISTORIQUE_PATH, index=False)
+    return historique
+
+
 def _defaut(memo_valeur, colonnes: list, role: str):
     """Défaut d'un selectbox : le mémo s'il correspond encore au fichier,
     sinon la détection automatique (utile si le format du fichier change)."""
@@ -138,9 +175,15 @@ def jeu_demonstration() -> dict:
         "CIP": ["1001", "1002", "1003", "1004", "1005",
                 "1006", "1007", "1008", "1009", "1010"],
         "Stock": [3.6, 5, 0, 2, 4, 0, 30, 2, 50, 1],
-        "Ventes avril": [6, 16, 4, 13, 0, 8, 60, 10, 40, 24],
+        # Ventoline : un mois à 0 vente au milieu de mois actifs → indice de
+        # rupture passée (rotation probablement sous-estimée).
+        "Ventes avril": [6, 16, 4, 13, 0, 8, 60, 0, 40, 24],
         "Ventes mai":   [6, 17, 4, 13, 0, 8, 58, 9, 40, 26],
         "Ventes juin":  [6, 16.5, 4, 13, 0, 8, 62, 11, 40, 25],
+        # Ventoline : 3 déjà en commande (à déduire, évite le doublon).
+        "Commande en cours": [0, 0, 0, 0, 0, 0, 0, 3, 0, 0],
+        # Kardegic : péremption proche (< 90 j) → alerte informative.
+        "DLUO": ["", "", "", "", "", "", "", "", dans(70), ""],
     })
     ruptures_gpnc = pd.DataFrame({
         "Libellé": ["TITANOREINE SUPPO B/12", "OZEMPIC 1MG STYLO",
@@ -285,6 +328,21 @@ with st.expander("📒 Cadencier — colonnes",
             "Colonnes de ventes mensuelles — ordre chronologique, "
             "la plus récente en DERNIER",
             cols, default=defaut_ventes, key="cad_ventes")
+    c4, c5 = st.columns(2)
+    with c4:
+        cad_en_cours = _choix(
+            "Commande en cours (facultatif)", cols,
+            _defaut(memo_cad.get("commande_en_cours"), cols, "commande_en_cours"),
+            "cad_en_cours")
+        st.caption("Qté déjà commandée mais pas reçue — déduite du calcul "
+                   "pour éviter de recommander ce qui arrive déjà.")
+    with c5:
+        cad_peremption = _choix(
+            "Péremption / DLUO (facultatif)", cols,
+            _defaut(memo_cad.get("peremption"), cols, "peremption"),
+            "cad_peremption")
+        st.caption("Alerte si péremption dans moins de 90 jours — "
+                   "n'écarte pas le produit, informatif seulement.")
 
 with st.expander("🔴 Ruptures GPNC — colonnes",
                  expanded=not memo_gpnc and not mode_demo):
@@ -336,7 +394,9 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
     mapping = {
         "cadencier": {"libelle": cad_libelle, "cip": cad_cip,
                       "stock": cad_stock, "ventes": cad_ventes,
-                      "conditionnement": cad_cond},
+                      "conditionnement": cad_cond,
+                      "commande_en_cours": cad_en_cours,
+                      "peremption": cad_peremption},
         "gpnc": {"libelle": gpnc_libelle, "cip": gpnc_cip,
                  "date_reappro": gpnc_date},
         "unipharma": {"libelle": uni_libelle, "cip": uni_cip},
@@ -344,9 +404,13 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
     if not mode_demo:  # le mapping démo ne doit pas écraser le vrai mémo
         sauver_config(mapping)
     try:
-        st.session_state["resultat"] = moteur.analyser(
+        resultat = moteur.analyser(
             df_cad, df_gpnc, df_uni, mapping, date_analyse, periode)
+        st.session_state["resultat"] = resultat
         st.session_state["date_analyse"] = date_analyse
+        if not mode_demo:  # ne pas polluer l'historique avec les données fictives
+            st.session_state["historique"] = sauver_historique_analyse(
+                resultat.onglet1, resultat.onglet2, date_analyse)
         st.rerun()  # rafraîchit la coche « Analyse lancée » de la barre latérale
     except KeyError as e:
         st.error(f"Colonne introuvable : {e} — vérifiez le mapping ci-dessus.")
@@ -374,6 +438,8 @@ st.markdown('<div class="kpi-row">' + "".join([
     _tuile_kpi("🟡 Modérés", r["moderes"], "warning", sous="stock 4 à 15 jours"),
     _tuile_kpi("❌ Sans solution", r["sans_solution"], "serious",
                sous="rupture chez les deux fournisseurs"),
+    _tuile_kpi("⚠️ Rotation à vérifier", r["rotation_douteuse"], "warning",
+               sous="rupture passée possible"),
 ]) + "</div>", unsafe_allow_html=True)
 
 for alerte in resultat.alertes:
@@ -403,8 +469,16 @@ with onglet1:
     if resultat.onglet1.empty:
         st.info("Aucun produit à commander — tous les stocks couvrent la réappro.")
     else:
+        # Comparaison avec l'historique : ce produit était-il déjà signalé
+        # lors de précédentes analyses (hors mode démonstration) ?
+        historique = st.session_state.get("historique", charger_historique())
+        affichage1 = resultat.onglet1.copy()
+        affichage1["Déjà signalé"] = affichage1["Produit"].apply(
+            lambda p: (lambda n: f"🔁 {n} fois" if n else "")(
+                moteur.compter_occurrences_historique(
+                    p, historique, st.session_state["date_analyse"])))
         # ``{:g}`` : pas de décimales inutiles (0 et non 0.000000, 9.1 reste 9.1).
-        st.dataframe(resultat.onglet1.style.apply(_teinter_urgence, axis=1)
+        st.dataframe(affichage1.style.apply(_teinter_urgence, axis=1)
                      .format(lambda v: f"{v:g}" if isinstance(v, float) else v),
                      use_container_width=True, hide_index=True)
 with onglet2:

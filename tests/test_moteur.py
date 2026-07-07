@@ -16,10 +16,12 @@ import pytest
 from moteur_ruptures import (ANTICIPER, MODERE, URGENT, Correspondance,
                              analyser, apparier, calculer_rotation_mensuelle,
                              calculer_stock_jours, charger_fichier,
-                             classer_urgence, doit_apparaitre, exporter_excel,
+                             classer_urgence, compter_occurrences_historique,
+                             doit_apparaitre, exporter_excel,
                              nom_fichier_sortie, normaliser_cip,
                              normaliser_libelle, parser_date, parser_nombre,
-                             quantite_a_commander)
+                             quantite_a_commander,
+                             rotation_possiblement_sous_estimee)
 
 DATE_ANALYSE = date(2026, 5, 13)
 
@@ -189,7 +191,8 @@ class TestMatching:
 def _mapping():
     return {
         "cadencier": {"libelle": "Produit", "cip": "CIP", "stock": "Stock",
-                      "ventes": ["V1", "V2", "V3"], "conditionnement": None},
+                      "ventes": ["V1", "V2", "V3"], "conditionnement": None,
+                      "commande_en_cours": None, "peremption": None},
         "gpnc": {"libelle": "Libellé", "cip": "CIP", "date_reappro": "Réappro"},
         "unipharma": {"libelle": "Désignation", "cip": "CIP"},
     }
@@ -320,3 +323,94 @@ class TestExportEtChargement:
     def test_format_inconnu_message_clair(self):
         with pytest.raises(ValueError, match="Format non géré"):
             charger_fichier(b"", "fichier.pdf")
+
+
+# ---------------------------------------------------------------------------
+# Fiabilité de la rotation (indice de rupture passée)
+# ---------------------------------------------------------------------------
+
+class TestFiabiliteRotation:
+    def test_mois_a_zero_signale(self):
+        # Ventes stables sauf un mois à 0 → rupture passée probable.
+        assert rotation_possiblement_sous_estimee([10, 0, 10]) is True
+
+    def test_toutes_ventes_nulles_non_signale(self):
+        # Rotation nulle réelle (produit non vendu) : pas un indice de rupture.
+        assert rotation_possiblement_sous_estimee([0, 0, 0]) is False
+
+    def test_aucun_zero_non_signale(self):
+        assert rotation_possiblement_sous_estimee([10, 12, 8]) is False
+
+    def test_liste_vide_non_signale(self):
+        assert rotation_possiblement_sous_estimee([]) is False
+
+
+# ---------------------------------------------------------------------------
+# Historique (comparaison semaine à semaine)
+# ---------------------------------------------------------------------------
+
+class TestHistorique:
+    def test_compte_occurrences_anterieures(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-04-29", "2026-05-06", "2026-05-06"],
+            "Produit": ["OZEMPIC 1MG", "OZEMPIC 1MG", "ARANESP 150"],
+        })
+        assert compter_occurrences_historique(
+            "OZEMPIC 1MG", historique, date(2026, 5, 13)) == 2
+
+    def test_ignore_dates_egales_ou_futures(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-13"], "Produit": ["OZEMPIC 1MG"],
+        })
+        assert compter_occurrences_historique(
+            "OZEMPIC 1MG", historique, date(2026, 5, 13)) == 0
+
+    def test_historique_vide(self):
+        assert compter_occurrences_historique(
+            "OZEMPIC 1MG", pd.DataFrame(), date(2026, 5, 13)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Commande en cours (évite de recommander ce qui est déjà en route)
+# ---------------------------------------------------------------------------
+
+class TestCommandeEnCours:
+    def test_reduit_la_quantite_et_le_stock_jours(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad["En cours"] = [0, 5, 0, 0, 0, 0]  # 5 déjà commandées pour Ozempic
+        mapping = _mapping()
+        mapping["cadencier"]["commande_en_cours"] = "En cours"
+        resultat = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle")
+        ligne = resultat.onglet1[resultat.onglet1["Produit"] == "OZEMPIC 1MG"]
+        # Stock effectif 5+5=10 → jours ≈ 18,2 → À ANTICIPER, Cmd = ceil(16,5−10)
+        assert ligne["Urgence"].iloc[0] == ANTICIPER
+        assert ligne["Qté à commander (Cmd)"].iloc[0] == 7
+        assert ligne["Commande en cours"].iloc[0] == 5
+
+    def test_non_fourni_par_defaut(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE, "annuelle")
+        ligne = resultat.onglet1[resultat.onglet1["Produit"] == "OZEMPIC 1MG"]
+        assert ligne["Commande en cours"].iloc[0] == ""
+
+
+# ---------------------------------------------------------------------------
+# Péremption (DLUO proche)
+# ---------------------------------------------------------------------------
+
+class TestPeremption:
+    def test_alerte_peremption_proche(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad["DLUO"] = ["", "", "", "", "", "01/08/2026"]  # TAHOR 10 → proche
+        mapping = _mapping()
+        mapping["cadencier"]["peremption"] = "DLUO"
+        resultat = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle")
+        assert any("péremption proche" in a for a in resultat.alertes)
+
+    def test_pas_d_alerte_si_lointaine(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad["DLUO"] = ["", "", "", "", "", "01/08/2028"]
+        mapping = _mapping()
+        mapping["cadencier"]["peremption"] = "DLUO"
+        resultat = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle")
+        assert not any("péremption proche" in a for a in resultat.alertes)
