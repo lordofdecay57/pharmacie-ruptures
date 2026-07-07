@@ -16,7 +16,8 @@ import pytest
 from moteur_ruptures import (ANTICIPER, MODERE, URGENT, Correspondance,
                              analyser, apparier, calculer_rotation_mensuelle,
                              calculer_stock_jours, charger_fichier,
-                             classer_urgence, compter_occurrences_historique,
+                             classer_urgence, comparer_a_analyse_precedente,
+                             compter_occurrences_historique,
                              doit_apparaitre, exporter_excel,
                              nom_fichier_sortie, normaliser_cip,
                              normaliser_libelle, parser_date, parser_nombre,
@@ -346,7 +347,7 @@ class TestFiabiliteRotation:
 
 
 # ---------------------------------------------------------------------------
-# Historique (comparaison semaine à semaine)
+# Historique (suivi d'une analyse à l'autre)
 # ---------------------------------------------------------------------------
 
 class TestHistorique:
@@ -368,6 +369,40 @@ class TestHistorique:
     def test_historique_vide(self):
         assert compter_occurrences_historique(
             "OZEMPIC 1MG", pd.DataFrame(), date(2026, 5, 13)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Suivi quotidien (nouveaux / résolus par rapport à l'analyse précédente)
+# ---------------------------------------------------------------------------
+
+class TestComparaisonQuotidienne:
+    HISTORIQUE = pd.DataFrame({
+        "Date analyse": ["2026-05-11", "2026-05-12", "2026-05-12"],
+        "Produit": ["VENTOLINE 100", "OZEMPIC 1MG", "ARANESP 150"],
+    })
+
+    def test_nouveaux_et_resolus(self):
+        # Hier (12/05) : Ozempic + Aranesp. Aujourd'hui : Ozempic + Dalacine.
+        prec, nouveaux, resolus = comparer_a_analyse_precedente(
+            ["OZEMPIC 1MG", "DALACINE 300"], self.HISTORIQUE, date(2026, 5, 13))
+        assert prec == date(2026, 5, 12)  # la plus récente antérieure, pas le 11
+        assert nouveaux == ["DALACINE 300"]
+        assert resolus == ["ARANESP 150"]
+
+    def test_premiere_analyse_tout_nouveau(self):
+        prec, nouveaux, resolus = comparer_a_analyse_precedente(
+            ["OZEMPIC 1MG"], pd.DataFrame(), date(2026, 5, 13))
+        assert prec is None
+        assert nouveaux == ["OZEMPIC 1MG"] and resolus == []
+
+    def test_ignore_l_analyse_du_jour_meme(self):
+        # Une ré-analyse le même jour ne doit pas se comparer à elle-même.
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-13"], "Produit": ["OZEMPIC 1MG"],
+        })
+        prec, nouveaux, _ = comparer_a_analyse_precedente(
+            ["OZEMPIC 1MG"], historique, date(2026, 5, 13))
+        assert prec is None and nouveaux == ["OZEMPIC 1MG"]
 
 
 # ---------------------------------------------------------------------------

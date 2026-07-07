@@ -96,7 +96,7 @@ def charger_config() -> dict:
 
 
 def sauver_config(mapping: dict) -> None:
-    """Mémorise le mapping confirmé pour ne pas le refaire chaque semaine."""
+    """Mémorise le mapping confirmé pour ne pas le refaire chaque jour."""
     CONFIG_PATH.write_text(
         yaml.safe_dump(mapping, allow_unicode=True, sort_keys=False),
         encoding="utf-8")
@@ -111,7 +111,7 @@ def _choix(label: str, colonnes: list, defaut, cle: str, optionnel=True):
 
 
 def charger_historique() -> pd.DataFrame:
-    """Historique des analyses passées (comparaison semaine à semaine)."""
+    """Historique des analyses passées (suivi quotidien : nouveaux/résolus)."""
     if HISTORIQUE_PATH.exists():
         try:
             return pd.read_csv(HISTORIQUE_PATH)
@@ -248,7 +248,7 @@ if mode_demo:
 
 with st.sidebar:
     st.markdown("## 💊 Ruptures pharmacie")
-    st.caption("Pilotage hebdomadaire des ruptures GPNC / UNIPHARMA.")
+    st.caption("Suivi quotidien des ruptures GPNC / UNIPHARMA.")
 
     st.markdown("#### Progression")
     for cle, nom, _ in [(c, t.split(" ", 1)[1], a) for c, t, a in libelles_zones]:
@@ -442,6 +442,28 @@ st.markdown('<div class="kpi-row">' + "".join([
                sous="rupture passée possible"),
 ]) + "</div>", unsafe_allow_html=True)
 
+# --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? ----------
+historique = st.session_state.get("historique", charger_historique())
+if not mode_demo:
+    produits_jour = (list(resultat.onglet1["Produit"])
+                     + list(resultat.onglet2["Produit"]))
+    date_prec, nouveaux, resolus = moteur.comparer_a_analyse_precedente(
+        produits_jour, historique, st.session_state["date_analyse"])
+    if date_prec is None:
+        st.caption("📅 Première analyse enregistrée — le comparatif quotidien "
+                   "(nouvelles ruptures / résolues) démarrera dès la prochaine.")
+    else:
+        st.markdown(f"**📅 Depuis l'analyse du {date_prec:%d/%m/%Y}** : "
+                    f"🆕 {len(nouveaux)} nouvelle(s) rupture(s) à traiter · "
+                    f"✅ {len(resolus)} sortie(s) de la liste")
+        c_nouv, c_res = st.columns(2)
+        if nouveaux:
+            with c_nouv, st.expander(f"🆕 Nouvelles ruptures ({len(nouveaux)})"):
+                st.write("\n".join(f"- {p}" for p in nouveaux))
+        if resolus:
+            with c_res, st.expander(f"✅ Résolues / sorties ({len(resolus)})"):
+                st.write("\n".join(f"- {p}" for p in resolus))
+
 for alerte in resultat.alertes:
     st.warning(alerte)
 if resultat.matchs_incertains:
@@ -470,13 +492,13 @@ with onglet1:
         st.info("Aucun produit à commander — tous les stocks couvrent la réappro.")
     else:
         # Comparaison avec l'historique : ce produit était-il déjà signalé
-        # lors de précédentes analyses (hors mode démonstration) ?
-        historique = st.session_state.get("historique", charger_historique())
+        # lors de précédentes analyses ? (sans objet en mode démonstration)
         affichage1 = resultat.onglet1.copy()
-        affichage1["Déjà signalé"] = affichage1["Produit"].apply(
-            lambda p: (lambda n: f"🔁 {n} fois" if n else "")(
-                moteur.compter_occurrences_historique(
-                    p, historique, st.session_state["date_analyse"])))
+        if not mode_demo:
+            affichage1["Déjà signalé"] = affichage1["Produit"].apply(
+                lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
+                    moteur.compter_occurrences_historique(
+                        p, historique, st.session_state["date_analyse"])))
         # ``{:g}`` : pas de décimales inutiles (0 et non 0.000000, 9.1 reste 9.1).
         st.dataframe(affichage1.style.apply(_teinter_urgence, axis=1)
                      .format(lambda v: f"{v:g}" if isinstance(v, float) else v),

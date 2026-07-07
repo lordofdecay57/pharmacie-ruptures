@@ -1,7 +1,7 @@
 # 💊 Gestion des ruptures de stock — pharmacie
 
 Application **locale** (elle tourne sur votre PC, hors-ligne) qui croise chaque
-semaine :
+jour :
 
 1. le **cadencier** de la pharmacie (ventes + stock actuel),
 2. la liste des **ruptures GPNC** (`ruptgpnc_ia`) — fournisseur principal,
@@ -36,10 +36,12 @@ l'information patient, contacter GPNC).
 - **Péremption / DLUO** (colonne facultative du cadencier) : alerte
   informative si la péremption est à moins de 90 jours — n'écarte pas le
   produit, sert juste à vérifier avant de commander davantage.
-- **Historique semaine à semaine** : chaque analyse (hors mode démo) est
-  ajoutée à `historique_commandes.csv` (local, jamais versionné). L'onglet 1
-  affiche « 🔁 N fois » si un produit était déjà signalé lors de précédentes
-  analyses.
+- **Suivi quotidien** : chaque analyse (hors mode démo) est ajoutée à
+  `historique_commandes.csv` (local, jamais versionné). À chaque analyse,
+  l'écran affiche le comparatif avec la précédente — 🆕 nouvelles ruptures à
+  traiter, ✅ ruptures sorties de la liste — et l'onglet 1 marque chaque
+  produit « 🆕 nouveau » ou « 🔁 N fois » (rupture qui traîne). Une
+  ré-analyse le même jour remplace celle du jour (pas de doublon).
 
 ## Installation (une seule fois)
 
@@ -70,12 +72,13 @@ fermez la fenêtre noire (ou Ctrl+C dedans).
 l'analyse tourne sur un jeu fictif (Titanoréine, Ozempic, Aranesp…) sans
 toucher à votre configuration.
 
-## Utilisation (chaque semaine)
+## Utilisation (chaque jour)
 
-1. **Déposez les 3 fichiers** (`.xlsx`, `.xls` ou `.csv`) dans les trois zones.
+1. **Exportez et déposez les 3 fichiers du jour** (`.xlsx`, `.xls` ou `.csv`)
+   dans les trois zones.
 2. **Vérifiez les colonnes** détectées (libellé, CIP, stock, ventes
    mensuelles, date de réappro) — corrigez avec les menus déroulants si
-   besoin. Votre choix est **mémorisé** (`config.yaml`) : la semaine suivante,
+   besoin. Votre choix est **mémorisé** (`config.yaml`) : le lendemain,
    il est pré-rempli.
 3. Choisissez la **date d'analyse** et la **période de rotation** (moyenne
    annuelle par défaut, ou 3 derniers mois) dans la **barre latérale** — qui

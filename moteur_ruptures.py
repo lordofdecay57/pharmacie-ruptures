@@ -351,6 +351,31 @@ def compter_occurrences_historique(produit: str, historique: pd.DataFrame,
     return int((dates < avant_date).sum())
 
 
+def comparer_a_analyse_precedente(produits_jour, historique: pd.DataFrame,
+                                  date_analyse: date):
+    """Suivi quotidien : compare les produits signalés aujourd'hui à la
+    DERNIÈRE analyse antérieure à ``date_analyse``.
+
+    Renvoie ``(date_precedente, nouveaux, resolus)`` :
+      - date_precedente : date de l'analyse de référence (None si aucune —
+        première analyse, tout est « nouveau ») ;
+      - nouveaux : produits du jour absents de l'analyse précédente ;
+      - resolus  : produits de l'analyse précédente absents aujourd'hui.
+    """
+    produits_jour = list(produits_jour)
+    if historique is None or historique.empty:
+        return None, produits_jour, []
+    dates = pd.to_datetime(historique["Date analyse"], errors="coerce").dt.date
+    anterieures = {d for d in dates if pd.notna(d) and d < date_analyse}
+    if not anterieures:
+        return None, produits_jour, []
+    precedente = max(anterieures)
+    produits_precedents = set(historique.loc[dates == precedente, "Produit"])
+    nouveaux = [p for p in produits_jour if p not in produits_precedents]
+    resolus = sorted(produits_precedents - set(produits_jour))
+    return precedente, nouveaux, resolus
+
+
 # ---------------------------------------------------------------------------
 # Analyse complète
 # ---------------------------------------------------------------------------
