@@ -352,19 +352,25 @@ def quantite_a_commander(rotation_mensuelle: float,
 
 
 def calculer_tendance(ventes: list, seuil: float = SEUIL_TENDANCE) -> str:
-    """Tendance de la demande : moyenne des 3 derniers mois vs moyenne globale.
+    """Tendance de la demande, en ordre chronologique (récent en dernier).
 
-    ``ventes`` en ordre chronologique (récent en dernier). Renvoie
-    « ↗ hausse » / « ↘ baisse » / « → stable ». Moins de 4 mois de recul ou
-    demande nulle → « → stable » (pas assez d'information pour trancher).
+    - ≥ 4 mois de recul : moyenne des 3 derniers mois vs moyenne globale ;
+    - 2-3 mois (cadenciers courts, très fréquents) : dernier mois vs moyenne
+      des mois précédents — moins robuste mais la colonne reste vivante ;
+    - < 2 mois ou demande nulle : « → stable » (rien à comparer).
+    Renvoie « ↗ hausse » / « ↘ baisse » / « → stable » (seuil ±20 %).
     """
-    if len(ventes) < 4:
+    if len(ventes) < 2:
         return "→ stable"
-    moyenne_globale = calculer_rotation_mensuelle(ventes, "annuelle")
-    if moyenne_globale <= 0:
+    if len(ventes) >= 4:
+        reference = calculer_rotation_mensuelle(ventes, "annuelle")
+        recente = calculer_rotation_mensuelle(ventes, "3mois")
+    else:
+        reference = calculer_rotation_mensuelle(ventes[:-1], "annuelle")
+        recente = parser_nombre(ventes[-1])
+    if reference <= 0:
         return "→ stable"
-    moyenne_recente = calculer_rotation_mensuelle(ventes, "3mois")
-    ecart = (moyenne_recente - moyenne_globale) / moyenne_globale
+    ecart = (recente - reference) / reference
     if ecart >= seuil:
         return "↗ hausse"
     if ecart <= -seuil:
