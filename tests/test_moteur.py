@@ -886,3 +886,108 @@ class TestCorrectifsAudit:
                             historique=historique)
         ligne = resultat.onglet2[resultat.onglet2["Produit"] == "TAHOR 10"]
         assert "repoussée 1 fois" in ligne["Commentaire"].iloc[0]
+
+
+# ---------------------------------------------------------------------------
+# Pilotage du stock (ABC, variabilité, saisonnalité, dormants, taux de service)
+# ---------------------------------------------------------------------------
+
+class TestClassementAbc:
+    def test_pareto_80_15_5(self):
+        from moteur_ruptures import classer_abc
+        # 80 fait 80 % du total (100) → A ; 15 → B ; 4 et 1 → C.
+        assert classer_abc([80, 15, 4, 1]) == ["A", "B", "C", "C"]
+
+    def test_plus_gros_vendeur_toujours_a(self):
+        from moteur_ruptures import classer_abc
+        # Même s'il dépasse 80 % à lui seul, le n°1 est classé A.
+        assert classer_abc([90, 10]) == ["A", "B"]
+
+    def test_volumes_nuls_en_c(self):
+        from moteur_ruptures import classer_abc
+        assert classer_abc([0, 0]) == ["C", "C"]
+        assert classer_abc([10, 0]) == ["A", "C"]
+
+
+class TestVariabiliteEtSaisonnalite:
+    def test_demande_stable(self):
+        from moteur_ruptures import variabilite_demande
+        assert "stable" in variabilite_demande([10, 10, 11, 9, 10, 10])
+
+    def test_demande_tres_variable(self):
+        from moteur_ruptures import variabilite_demande
+        assert "forte" in variabilite_demande([0, 30, 0, 30, 0, 30])
+
+    def test_pas_assez_de_recul(self):
+        from moteur_ruptures import variabilite_demande
+        assert variabilite_demande([10, 10]) == ""
+
+    def test_pic_saisonnier_nomme(self):
+        from moteur_ruptures import pic_saisonnier
+        mois = [f"Ventes {m}" for m in
+                ["Jul", "Aou", "Sep", "Oct", "Nov", "Dec"]]
+        # Décembre à 30 pour une moyenne < 15 → pic Dec.
+        assert pic_saisonnier([5, 5, 5, 5, 10, 30], mois) == "📈 pic Dec"
+
+    def test_pas_de_pic_sur_demande_reguliere(self):
+        from moteur_ruptures import pic_saisonnier
+        assert pic_saisonnier([10, 10, 10, 10, 10, 12], []) == ""
+
+
+class TestPilotage:
+    def test_dormant_detecte_et_indicateurs(self):
+        from moteur_ruptures import analyser_pilotage
+        cad, _, _ = _jeu_de_donnees()
+        # Produit dormant : 50 boîtes, 1 vente/mois → 1500 j de couverture.
+        cad.loc[len(cad)] = ["VIEILLE CREME", "3001", 50, 1, 1, 1]
+        pilotage = analyser_pilotage(cad, _mapping())
+        assert "VIEILLE CREME" in pilotage.dormants["Produit"].values
+        assert pilotage.indicateurs["dormants"] >= 1
+        assert pilotage.indicateurs["nb_a"] >= 1
+        # Ozempic (16,5/mois) est un produit A du jeu de données.
+        classe_ozempic = pilotage.tableau.loc[
+            pilotage.tableau["Produit"] == "OZEMPIC 1MG", "Classe"].iloc[0]
+        assert classe_ozempic == "A"
+
+    def test_taux_de_service_calcule(self):
+        from moteur_ruptures import taux_de_service
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-11", "2026-05-12"],
+            "Produit": ["OZEMPIC 1MG", "OZEMPIC 1MG"],
+            "Urgence": ["🟡 MODÉRÉ", "🟡 MODÉRÉ"],
+            "Qté à commander (Cmd)": [12, 12],
+            "Date réappro": ["", ""], "Type": ["commande", "commande"],
+        })
+        # 2 produits A suivis sur 2 jours ; Ozempic en rupture les 2 jours
+        # → 2 ruptures / 4 couples → taux de service 50 %.
+        taux, jours = taux_de_service(["OZEMPIC 1MG", "ARANESP 150"],
+                                      historique, date(2026, 5, 13))
+        assert jours == 2
+        assert taux == pytest.approx(0.5)
+
+    def test_taux_sans_historique(self):
+        from moteur_ruptures import taux_de_service
+        taux, jours = taux_de_service(["X"], pd.DataFrame(), date(2026, 5, 13))
+        assert taux is None and jours == 0
+
+    def test_export_pilotage_deux_feuilles(self):
+        from moteur_ruptures import analyser_pilotage, exporter_pilotage_excel
+        cad, _, _ = _jeu_de_donnees()
+        contenu = exporter_pilotage_excel(analyser_pilotage(cad, _mapping()))
+        relu = pd.read_excel(pd.io.common.BytesIO(contenu), sheet_name=None)
+        assert set(relu) == {"Pilotage ABC", "Stock dormant"}
+
+
+class TestSeparationMoisTotal:
+    def test_cas_reel_doliprane(self):
+        # Ligne V réelle du cadencier : dernier mois (1572) collé au total
+        # (18268 = somme des 12 mois) faute de place dans le PDF.
+        from moteur_ruptures import _separer_mois_et_total
+        nombres = ["706", "1739", "1576", "1327", "1433", "1733", "1530",
+                   "1591", "1621", "1772", "1668", "157218268"]
+        assert _separer_mois_et_total(nombres)[-1] == "1572"
+
+    def test_sans_fusion_inchange(self):
+        from moteur_ruptures import _separer_mois_et_total
+        nombres = [str(n) for n in [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]]
+        assert _separer_mois_et_total(nombres) == nombres

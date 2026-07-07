@@ -50,6 +50,25 @@ l'information patient, contacter GPNC).
 
 Les seuils se règlent dans la barre latérale (« 🎛️ Réglages d'anticipation »).
 
+## Pilotage du stock (onglet 📈)
+
+Vue d'ensemble calculée depuis le cadencier — n'affecte aucune quantité
+commandée (pratiques standard des officines les mieux gérées) :
+
+- **Classement ABC** (Pareto) : A = les produits qui font 80 % des ventes —
+  leurs ruptures coûtent le plus, à surveiller en priorité ;
+- **Variabilité de la demande** (écart-type/moyenne) : base d'un stock de
+  sécurité différencié — un produit « forte variabilité » mérite plus de
+  marge qu'un produit stable ;
+- **Saisonnalité** : signale un mois de pic ≥ 2× la moyenne (à partir de
+  6 mois de recul) ;
+- **💤 Stock dormant** : produits à plus de 6 mois de couverture —
+  trésorerie immobilisée, envisager retour ou arrêt de réassort ;
+- **Taux de service produits A** : % de couples produit A × jour SANS
+  rupture signalée sur 30 jours glissants (alimenté par l'historique).
+
+Export dédié : bouton « 📈 Excel pilotage (ABC + dormants) ».
+
 ## Fonctionnalités complémentaires
 
 - **Commande en cours** (colonne facultative du cadencier) : une quantité déjà
@@ -136,7 +155,7 @@ pharmacie-ruptures/
 ├── lancer.command         # double-clic Mac
 ├── README.md
 └── tests/
-    └── test_moteur.py     # 94 tests (dont Titanoréine, Ozempic, Aranesp)
+    └── test_moteur.py     # 112 tests (dont Titanoréine, Ozempic, Aranesp)
 ```
 
 ## Tests

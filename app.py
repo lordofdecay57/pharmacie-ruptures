@@ -465,6 +465,10 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
             rotation_prudente=rotation_prudente)
         st.session_state["resultat"] = resultat
         st.session_state["date_analyse"] = date_analyse
+        st.session_state["pilotage"] = moteur.analyser_pilotage(
+            df_cad, mapping, periode,
+            historique=None if mode_demo else charger_historique(),
+            date_analyse=date_analyse)
         if not mode_demo:  # ne pas polluer l'historique avec les données fictives
             st.session_state["historique"] = sauver_historique_analyse(
                 resultat, date_analyse)
@@ -545,12 +549,16 @@ def _teinter_urgence(ligne):
     return [style] * len(ligne)
 
 
-onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3 = st.tabs([
+pilotage = st.session_state.get("pilotage")  # None sur session pré-mise à jour
+
+(onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3,
+ onglet_pilotage) = st.tabs([
     f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
     f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
     f"🔭 Vigilance stock ({len(df_vigilance)})",
     f"⚠️ Écartés de justesse ({len(df_justesse)})",
     f"📋 Analyse complète ({len(resultat.onglet3)})",
+    "📈 Pilotage stock",
 ])
 with onglet1:
     if resultat.onglet1.empty:
@@ -605,10 +613,59 @@ with onglet3:
         "Aucune rupture GPNC analysée.",
         "Traçabilité : tous les produits en rupture GPNC, avec le détail du "
         "calcul et le motif de la décision.")
+with onglet_pilotage:
+    if pilotage is None:
+        st.info("Relancez l'analyse pour calculer le pilotage du stock.")
+    else:
+        ind = pilotage.indicateurs
+        taux = ind.get("taux_service_a")
+        st.markdown('<div class="kpi-row">' + "".join([
+            _tuile_kpi("Produits A (80 % des ventes)", ind.get("nb_a", 0),
+                       "accent", sous=f'B : {ind.get("nb_b", 0)} · '
+                                      f'C : {ind.get("nb_c", 0)}'),
+            _tuile_kpi("Taux de service produits A",
+                       f"{taux:.1%}" if taux is not None else "—",
+                       "accent" if taux is None or taux >= 0.95 else "critical",
+                       sous=(f'{ind.get("jours_service", 0)} j analysés '
+                             "(30 j glissants)" if taux is not None
+                             else "disponible après quelques analyses")),
+            _tuile_kpi("💤 Stock dormant", ind.get("dormants", 0), "warning",
+                       sous=f'{ind.get("dormants_boites", 0):g} boîtes '
+                            "immobilisées (> 6 mois)"),
+        ]) + "</div>", unsafe_allow_html=True)
 
-st.download_button(
-    "⬇️ Télécharger le fichier Excel",
-    data=moteur.exporter_excel(resultat),
-    file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    type="primary", use_container_width=True)
+        st.markdown("**Classement ABC, variabilité et saisonnalité** — vue "
+                    "d'analyse : ne modifie aucune quantité commandée.")
+        st.dataframe(pilotage.tableau, use_container_width=True,
+                     hide_index=True, height=420)
+        st.caption("A = produits qui font 80 % de vos ventes : à surveiller "
+                   "en priorité (leurs ruptures coûtent le plus). La "
+                   "variabilité (écart-type/moyenne) indique la marge de "
+                   "sécurité à prévoir ; la saisonnalité signale un mois de "
+                   "pic ≥ 2× la moyenne.")
+
+        st.markdown(f"**💤 Stock dormant ({len(pilotage.dormants)})** — plus "
+                    "de 6 mois de couverture : trésorerie immobilisée.")
+        _onglet_simple(
+            pilotage.dormants,
+            "Aucun stock dormant : toutes les couvertures sont raisonnables.",
+            "Envisager retour fournisseur, promotion ou arrêt du réassort.")
+
+col_dl1, col_dl2 = st.columns([2, 1])
+with col_dl1:
+    st.download_button(
+        "⬇️ Télécharger le fichier Excel",
+        data=moteur.exporter_excel(resultat),
+        file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary", use_container_width=True)
+with col_dl2:
+    if pilotage is not None:
+        st.download_button(
+            "📈 Excel pilotage (ABC + dormants)",
+            data=moteur.exporter_pilotage_excel(pilotage),
+            file_name=("pilotage_stock_"
+                       f"{st.session_state['date_analyse']:%Y-%m-%d}.xlsx"),
+            mime=("application/vnd.openxmlformats-officedocument."
+                  "spreadsheetml.sheet"),
+            use_container_width=True)

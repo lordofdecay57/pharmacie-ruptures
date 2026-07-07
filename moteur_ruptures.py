@@ -26,7 +26,7 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import pandas as pd
@@ -249,6 +249,23 @@ def _charger_pdf(data: bytes, nom_fichier: str) -> pd.DataFrame:
     return pd.DataFrame(lignes, columns=en_tete)
 
 
+def _separer_mois_et_total(nombres: list) -> list:
+    """12 valeurs au lieu de 13 : le mois le plus ancien et le Total sont
+    probablement collés. Sépare le dernier jeton en (mois, total) en validant
+    par la somme : Total == somme des 12 mois. Inchangé si aucune coupe ne
+    se vérifie (vraie ligne à 12 valeurs sans total, ou décimales).
+    """
+    fusion = nombres[-1]
+    if not fusion.isdigit() or len(fusion) < 2:
+        return nombres
+    somme_connue = int(round(sum(parser_nombre(v) for v in nombres[:11])))
+    for coupe in range(1, len(fusion)):
+        mois, total = fusion[:coupe], fusion[coupe:]
+        if int(total) == somme_connue + int(mois):
+            return nombres[:11] + [mois]
+    return nombres
+
+
 def _parser_cadencier_winpharma(brutes: list) -> pd.DataFrame:
     """Cadencier de stock WinPharma (PDF) → DataFrame prêt pour l'analyse.
 
@@ -292,6 +309,10 @@ def _parser_cadencier_winpharma(brutes: list) -> pd.DataFrame:
             nombres = ventes_v.group(1).split()
             if len(nombres) > 12:
                 nombres = nombres[:12]  # sans la colonne Total
+            elif len(nombres) == 12:
+                # Gros vendeurs : le 12e mois et le Total sont COLLÉS dans le
+                # PDF (colonne étroite) — ex. « 157218268 » = 1572 + 18268.
+                nombres = _separer_mois_et_total(nombres)
             ventes = list(reversed(nombres))  # → ordre chronologique
         ligne = {"Produit": " ".join((nom or "").split()), "CIP": cip,
                  "Stock": stock_cell}
@@ -590,6 +611,189 @@ def comparer_a_analyse_precedente(produits_jour, historique: pd.DataFrame,
     nouveaux = [p for p in produits_jour if p not in produits_precedents]
     resolus = sorted(produits_precedents - set(produits_jour))
     return precedente, nouveaux, resolus
+
+
+# ---------------------------------------------------------------------------
+# Pilotage du stock (ABC, variabilité, saisonnalité, dormants, taux de
+# service) — pratiques standard des officines les mieux gérées.
+# ---------------------------------------------------------------------------
+
+SEUIL_DORMANT_JOURS = 180         # > 6 mois de couverture → stock dormant
+SEUILS_VARIABILITE = (0.3, 0.7)   # CV : < 0,3 stable · < 0,7 variable · sinon forte
+
+
+def classer_abc(volumes: list) -> list:
+    """Classement ABC (loi de Pareto) sur les volumes de ventes.
+
+    A = les plus gros vendeurs jusqu'à 80 % du volume cumulé, B = 80-95 %,
+    C = le reste (dont les volumes nuls). Renvoie les classes dans l'ordre
+    d'entrée. Le plus gros vendeur est toujours A (cumul évalué AVANT lui).
+    """
+    valeurs = [parser_nombre(v) for v in volumes]
+    total = sum(v for v in valeurs if v > 0)
+    classes = ["C"] * len(valeurs)
+    if total <= 0:
+        return classes
+    ordre = sorted(range(len(valeurs)), key=lambda i: valeurs[i], reverse=True)
+    cumul = 0.0
+    for i in ordre:
+        if valeurs[i] <= 0:
+            continue
+        part_avant = cumul / total
+        classes[i] = ("A" if part_avant < 0.80
+                      else "B" if part_avant < 0.95 else "C")
+        cumul += valeurs[i]
+    return classes
+
+
+def variabilite_demande(ventes: list) -> str:
+    """Variabilité de la demande (coefficient de variation σ/μ).
+
+    Sert de base à un stock de sécurité différencié : un produit
+    « forte variabilité » mérite plus de marge qu'un produit stable à
+    volume égal. Moins de 3 mois de recul ou demande nulle → « » (inconnu).
+    """
+    valeurs = [parser_nombre(v) for v in ventes]
+    if len(valeurs) < 3:
+        return ""
+    moyenne = sum(valeurs) / len(valeurs)
+    if moyenne <= 0:
+        return ""
+    ecart_type = (sum((v - moyenne) ** 2 for v in valeurs) / len(valeurs)) ** 0.5
+    cv = ecart_type / moyenne
+    if cv < SEUILS_VARIABILITE[0]:
+        return f"🟢 stable (CV {cv:.0%})"
+    if cv < SEUILS_VARIABILITE[1]:
+        return f"🟡 variable (CV {cv:.0%})"
+    return f"🔴 forte (CV {cv:.0%})"
+
+
+def pic_saisonnier(ventes: list, noms_mois: list) -> str:
+    """Signale un pic saisonnier probable : un mois ≥ 2× la moyenne.
+
+    Nécessite au moins 6 mois de recul pour distinguer saison et hasard.
+    ``noms_mois`` : libellés alignés sur ``ventes`` (pour nommer le pic).
+    """
+    valeurs = [parser_nombre(v) for v in ventes]
+    if len(valeurs) < 6:
+        return ""
+    moyenne = sum(valeurs) / len(valeurs)
+    if moyenne <= 0:
+        return ""
+    maximum = max(valeurs)
+    if maximum < 2 * moyenne:
+        return ""
+    nom = ""
+    if noms_mois and len(noms_mois) == len(valeurs):
+        nom = str(noms_mois[valeurs.index(maximum)]).replace("Ventes", "").strip()
+    return f"📈 pic {nom}".strip()
+
+
+def taux_de_service(produits_a: list, historique: pd.DataFrame,
+                    date_analyse: date, fenetre_jours: int = 30):
+    """Taux de service des produits A : part des couples produit×jour SANS
+    rupture signalée sur la fenêtre glissante. Renvoie (taux, jours_analyses)
+    — (None, 0) si l'historique ne couvre pas encore la fenêtre.
+    """
+    historique = _lignes_signalees(historique)
+    if historique is None or historique.empty or not produits_a:
+        return None, 0
+    h = historique.copy()
+    h["_date"] = pd.to_datetime(h["Date analyse"], errors="coerce").dt.date
+    debut = date_analyse - timedelta(days=fenetre_jours)
+    h = h[(h["_date"] >= debut) & (h["_date"] < date_analyse)]
+    jours = sorted({d for d in h["_date"] if pd.notna(d)})
+    if not jours:
+        return None, 0
+    ensemble_a = set(produits_a)
+    ruptures = h[h["Produit"].isin(ensemble_a)]
+    produit_jours = len(ruptures[["_date", "Produit"]].drop_duplicates())
+    total = len(jours) * len(ensemble_a)
+    return 1 - produit_jours / total, len(jours)
+
+
+@dataclass
+class PilotageStock:
+    """Vue d'ensemble du stock : classes ABC, variabilité, dormants, KPI."""
+    tableau: pd.DataFrame       # tous les produits vendus ou stockés
+    dormants: pd.DataFrame      # couverture > seuil → trésorerie immobilisée
+    indicateurs: dict = field(default_factory=dict)
+
+
+COLONNES_PILOTAGE = ["Classe", "Produit", "Rotation/mois", "Tendance",
+                     "Variabilité demande", "Saisonnalité", "Stock actuel",
+                     "Stock (jours)"]
+COLONNES_DORMANTS = ["Produit", "Stock actuel", "Rotation/mois",
+                     "Stock (jours)", "Commentaire"]
+
+
+def analyser_pilotage(cadencier: pd.DataFrame, mapping: dict,
+                      periode: str = "annuelle",
+                      historique: Optional[pd.DataFrame] = None,
+                      date_analyse: Optional[date] = None,
+                      seuil_dormant_jours: float = SEUIL_DORMANT_JOURS
+                      ) -> PilotageStock:
+    """Pilotage global du stock à partir du seul cadencier (+ historique).
+
+    Ne modifie AUCUNE décision de commande : vue d'analyse complémentaire
+    (classement ABC, variabilité, saisonnalité, stock dormant, taux de
+    service des produits A sur 30 jours glissants).
+    """
+    m_cad = mapping["cadencier"]
+    colonnes_ventes = [c for c in m_cad["ventes"] if c in cadencier.columns]
+    lignes = []
+    for _, ligne_cad in cadencier.iterrows():
+        stock = parser_nombre(ligne_cad[m_cad["stock"]])
+        en_cours = (parser_nombre(ligne_cad[m_cad["commande_en_cours"]])
+                    if m_cad.get("commande_en_cours") else 0.0)
+        ventes = [ligne_cad[c] for c in colonnes_ventes]
+        rotation = calculer_rotation_mensuelle(ventes, periode)
+        if rotation <= 0 and stock <= 0:
+            continue  # ni vente ni stock : rien à piloter
+        stock_jours = calculer_stock_jours(stock + en_cours, rotation)
+        lignes.append({
+            "Produit": str(ligne_cad[m_cad["libelle"]]).strip(),
+            "Rotation/mois": round(rotation, 1),
+            "Tendance": calculer_tendance(ventes),
+            "Variabilité demande": variabilite_demande(ventes),
+            "Saisonnalité": pic_saisonnier(ventes, colonnes_ventes),
+            "Stock actuel": stock,
+            "Stock (jours)": (round(stock_jours, 1)
+                              if math.isfinite(stock_jours) else "∞"),
+            "_stock_jours": stock_jours,
+        })
+    df = pd.DataFrame(lignes)
+    if df.empty:
+        return PilotageStock(df.reindex(columns=COLONNES_PILOTAGE),
+                             df.reindex(columns=COLONNES_DORMANTS))
+
+    df["Classe"] = classer_abc(list(df["Rotation/mois"]))
+    dormants = df[(df["Stock actuel"] > 0)
+                  & (df["_stock_jours"] > seuil_dormant_jours)].copy()
+    dormants["Commentaire"] = ("Plus de "
+                               f"{seuil_dormant_jours:.0f} j de couverture — "
+                               "trésorerie immobilisée, envisager retour / "
+                               "arrêt de réassort.")
+    dormants = (dormants.sort_values("Stock actuel", ascending=False)
+                .reindex(columns=COLONNES_DORMANTS))
+
+    tableau = (df.sort_values(["Classe", "Rotation/mois"],
+                              ascending=[True, False])
+               .reindex(columns=COLONNES_PILOTAGE))
+
+    produits_a = list(df.loc[df["Classe"] == "A", "Produit"])
+    taux, jours = (taux_de_service(produits_a, historique, date_analyse)
+                   if date_analyse is not None else (None, 0))
+    indicateurs = {
+        "nb_a": int((df["Classe"] == "A").sum()),
+        "nb_b": int((df["Classe"] == "B").sum()),
+        "nb_c": int((df["Classe"] == "C").sum()),
+        "dormants": len(dormants),
+        "dormants_boites": (float(dormants["Stock actuel"].sum())
+                            if not dormants.empty else 0.0),
+        "taux_service_a": taux, "jours_service": jours,
+    }
+    return PilotageStock(tableau, dormants, indicateurs)
 
 
 # ---------------------------------------------------------------------------
@@ -1025,17 +1229,13 @@ def analyser(cadencier: pd.DataFrame,
 _COULEURS_URGENCE = {URGENT: "F8CBAD", MODERE: "FFE699", ANTICIPER: "C6EFCE"}
 
 
-def exporter_excel(resultat: ResultatAnalyse) -> bytes:
-    """Génère le classeur Excel (en-têtes gras figés, largeurs auto, couleurs)."""
+def _exporter_classeur(onglets: list) -> bytes:
+    """Classeur Excel commun : en-têtes gras figés, largeurs auto, lignes
+    teintées selon la colonne « Urgence » quand elle existe."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     buffer = io.BytesIO()
-    onglets = [("À commander UNIPHARMA", resultat.onglet1),
-               ("Rupture GPNC+UNIPHARMA", resultat.onglet2),
-               ("Vigilance stock", resultat.vigilance),
-               ("Écartés de justesse", resultat.ecartes_justesse),
-               ("Analyse complète", resultat.onglet3)]
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         for nom, df in onglets:
             df.to_excel(writer, sheet_name=nom, index=False)
@@ -1050,14 +1250,29 @@ def exporter_excel(resultat: ResultatAnalyse) -> bytes:
                               [len(str(v)) for v in df[col].head(200)] or [10])
                 ws.column_dimensions[get_column_letter(j)].width = min(largeur + 3, 45)
             if "Urgence" in df.columns:  # code couleur des lignes par urgence
-                pos = list(df.columns).index("Urgence")
                 for i, urgence in enumerate(df["Urgence"], start=2):
                     couleur = _COULEURS_URGENCE.get(urgence)
                     if couleur:
                         for cellule in ws[i]:
                             cellule.fill = PatternFill("solid", fgColor=couleur)
-                        _ = pos  # la ligne entière est teintée, pas juste la cellule
     return buffer.getvalue()
+
+
+def exporter_excel(resultat: ResultatAnalyse) -> bytes:
+    """Classeur de décision : les 5 onglets de l'analyse des ruptures."""
+    return _exporter_classeur([
+        ("À commander UNIPHARMA", resultat.onglet1),
+        ("Rupture GPNC+UNIPHARMA", resultat.onglet2),
+        ("Vigilance stock", resultat.vigilance),
+        ("Écartés de justesse", resultat.ecartes_justesse),
+        ("Analyse complète", resultat.onglet3)])
+
+
+def exporter_pilotage_excel(pilotage: PilotageStock) -> bytes:
+    """Classeur de pilotage : classement ABC + stock dormant."""
+    return _exporter_classeur([
+        ("Pilotage ABC", pilotage.tableau),
+        ("Stock dormant", pilotage.dormants)])
 
 
 def nom_fichier_sortie(date_analyse: date) -> str:
