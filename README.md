@@ -24,6 +24,30 @@ commander (`Cmd`) et l'urgence (🔴 stock épuisé ou ≤ 3 j · 🟡 4-15 j ·
 🟢 > 15 j) ; en rupture aussi chez UNIPHARMA → **Onglet 2** (anticiper
 l'information patient, contacter GPNC).
 
+## Anticipation des ruptures à venir
+
+- **🔭 Vigilance stock** : produits que vous vendez, HORS liste de ruptures
+  GPNC, dont la couverture passe sous 7 jours (réglable) — la rupture en
+  rayon arrive, commander chez GPNC avant qu'elle se produise.
+- **⚠️ Écartés de justesse** : produits écartés par la règle stricte avec
+  moins de 3 jours de marge (réglable) — si la date de réappro glisse,
+  c'est la rupture sèche. Visibles dans un onglet dédié, sans modifier la
+  règle de commande.
+- **Délai de livraison UNIPHARMA** (réglable, 1 jour par défaut) : ajouté à
+  la couverture cible du calcul de `Cmd` — les boîtes commandées aujourd'hui
+  n'arrivent pas aujourd'hui.
+- **Tendance de la demande** : ↗ / ↘ / → par produit (3 derniers mois vs
+  moyenne globale) ; option « rotation prudente » qui retient la moyenne la
+  plus élevée pour ne jamais sous-couvrir un produit en croissance.
+- **Dates de réappro repoussées** : l'historique mémorise la date annoncée ;
+  si elle glisse d'une analyse à l'autre, alerte « repoussée N fois » —
+  fournisseur peu fiable sur ce produit, privilégier le dépannage.
+- **Ruptures longues** : un produit aux ventes écrasées à 0 sur toute la
+  période mais déjà signalé dans l'historique passe en « À vérifier » au
+  lieu d'être écarté en silence.
+
+Les seuils se règlent dans la barre latérale (« 🎛️ Réglages d'anticipation »).
+
 ## Fonctionnalités complémentaires
 
 - **Commande en cours** (colonne facultative du cadencier) : une quantité déjà
@@ -106,7 +130,7 @@ pharmacie-ruptures/
 ├── lancer.command         # double-clic Mac
 ├── README.md
 └── tests/
-    └── test_moteur.py     # 56 tests (dont Titanoréine, Ozempic, Aranesp)
+    └── test_moteur.py     # 82 tests (dont Titanoréine, Ozempic, Aranesp)
 ```
 
 ## Tests

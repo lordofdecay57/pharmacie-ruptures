@@ -15,9 +15,11 @@ import pytest
 
 from moteur_ruptures import (ANTICIPER, MODERE, URGENT, Correspondance,
                              analyser, apparier, calculer_rotation_mensuelle,
-                             calculer_stock_jours, charger_fichier,
-                             classer_urgence, comparer_a_analyse_precedente,
+                             calculer_stock_jours, calculer_tendance,
+                             charger_fichier, classer_urgence,
+                             comparer_a_analyse_precedente,
                              compter_occurrences_historique,
+                             compter_reports_reappro,
                              doit_apparaitre, exporter_excel,
                              nom_fichier_sortie, normaliser_cip,
                              normaliser_libelle, parser_date, parser_nombre,
@@ -298,12 +300,13 @@ class TestReapproPassee:
 # ---------------------------------------------------------------------------
 
 class TestExportEtChargement:
-    def test_export_excel_trois_onglets(self):
+    def test_export_excel_cinq_onglets(self):
         cad, gpnc, uni = _jeu_de_donnees()
         resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
         contenu = exporter_excel(resultat)
         relu = pd.read_excel(pd.io.common.BytesIO(contenu), sheet_name=None)
         assert set(relu) == {"À commander UNIPHARMA", "Rupture GPNC+UNIPHARMA",
+                             "Vigilance stock", "Écartés de justesse",
                              "Analyse complète"}
 
     def test_nom_fichier(self):
@@ -449,3 +452,274 @@ class TestPeremption:
         mapping["cadencier"]["peremption"] = "DLUO"
         resultat = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle")
         assert not any("péremption proche" in a for a in resultat.alertes)
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — tendance de la demande
+# ---------------------------------------------------------------------------
+
+class TestTendance:
+    def test_hausse(self):
+        # Moyenne globale 12,5 ; 3 derniers mois 20 → +60 % → hausse.
+        assert calculer_tendance([10, 10, 10, 20, 20, 20]) == "↗ hausse"
+
+    def test_baisse(self):
+        assert calculer_tendance([20, 20, 20, 10, 10, 10]) == "↘ baisse"
+
+    def test_stable(self):
+        assert calculer_tendance([10, 11, 10, 9, 10, 10]) == "→ stable"
+
+    def test_pas_assez_de_recul(self):
+        # Moins de 4 mois : impossible de distinguer tendance et bruit.
+        assert calculer_tendance([5, 20, 20]) == "→ stable"
+
+    def test_demande_nulle(self):
+        assert calculer_tendance([0, 0, 0, 0]) == "→ stable"
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — vigilance stock (ruptures à venir hors ruptures GPNC)
+# ---------------------------------------------------------------------------
+
+class TestVigilance:
+    def test_produit_faible_couverture_detecte(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        # Eliquis : 30/mois, stock 3 → 3 j de couverture, PAS en rupture GPNC.
+        cad.loc[len(cad)] = ["ELIQUIS 5MG", "2001", 3, 30, 30, 30]
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert "ELIQUIS 5MG" in resultat.vigilance["Produit"].values
+        assert resultat.resume["vigilance"] == 1
+
+    def test_produit_bien_couvert_absent(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad.loc[len(cad)] = ["ELIQUIS 5MG", "2001", 60, 30, 30, 30]  # 60 j
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert "ELIQUIS 5MG" not in resultat.vigilance["Produit"].values
+
+    def test_produits_en_rupture_gpnc_non_dupliques(self):
+        # Aranesp est déjà traité via les ruptures GPNC → pas en vigilance.
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert "ARANESP 150" not in resultat.vigilance["Produit"].values
+
+    def test_produit_dormant_ignore(self):
+        # Rotation nulle → rien à anticiper, pas de fausse alerte.
+        cad, gpnc_vide, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc_vide.iloc[0:0], uni, _mapping(),
+                            DATE_ANALYSE)
+        assert "PRODUIT DORMANT" not in resultat.vigilance["Produit"].values
+
+    def test_seuil_parametrable(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad.loc[len(cad)] = ["ELIQUIS 5MG", "2001", 10, 30, 30, 30]  # 10 j
+        strict = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                          seuil_vigilance_jours=7)
+        large = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                         seuil_vigilance_jours=15)
+        assert "ELIQUIS 5MG" not in strict.vigilance["Produit"].values
+        assert "ELIQUIS 5MG" in large.vigilance["Produit"].values
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — écartés de justesse (règle stricte, marge faible)
+# ---------------------------------------------------------------------------
+
+class TestEcartesJustesse:
+    def test_titanoreine_marge_2_jours_listee(self):
+        # Stock 18 j, réappro 16 j → écartée MAIS marge 2 j < 3 → visible.
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert "TITANOREINE SUPPO" in resultat.ecartes_justesse["Produit"].values
+        ligne = resultat.ecartes_justesse[
+            resultat.ecartes_justesse["Produit"] == "TITANOREINE SUPPO"]
+        assert ligne["Marge (jours)"].iloc[0] == pytest.approx(2.0, abs=0.1)
+        # Elle reste ÉCARTÉE des onglets de commande (règle stricte intacte).
+        assert "TITANOREINE SUPPO" not in resultat.onglet1["Produit"].values
+
+    def test_marge_confortable_non_listee(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad.loc[cad["Produit"] == "TITANOREINE SUPPO", "Stock"] = 30 * 0.2  # 30 j
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert ("TITANOREINE SUPPO"
+                not in resultat.ecartes_justesse["Produit"].values)
+
+    def test_seuil_marge_parametrable(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            seuil_marge_jours=1)  # marge 2 j ≥ 1 → non listée
+        assert ("TITANOREINE SUPPO"
+                not in resultat.ecartes_justesse["Produit"].values)
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — délai de livraison UNIPHARMA
+# ---------------------------------------------------------------------------
+
+class TestDelaiLivraison:
+    def test_cmd_couvre_le_delai(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        sans = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        avec = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                        delai_livraison_jours=2)
+        # Ozempic sans date : 30 j → Cmd 12 ; 32 j → ceil(17,6 − 5) = 13.
+        cmd_sans = sans.onglet1.loc[sans.onglet1["Produit"] == "OZEMPIC 1MG",
+                                    "Qté à commander (Cmd)"].iloc[0]
+        cmd_avec = avec.onglet1.loc[avec.onglet1["Produit"] == "OZEMPIC 1MG",
+                                    "Qté à commander (Cmd)"].iloc[0]
+        assert cmd_sans == 12 and cmd_avec == 13
+
+    def test_delai_ne_change_pas_la_regle_d_apparition(self):
+        # Titanoréine reste écartée même avec un délai : la règle stricte
+        # d'apparition n'est pas modifiée par le délai de livraison.
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            delai_livraison_jours=5)
+        assert "TITANOREINE SUPPO" not in resultat.onglet1["Produit"].values
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — rotation prudente (max des deux moyennes)
+# ---------------------------------------------------------------------------
+
+class TestRotationPrudente:
+    def test_produit_en_croissance_mieux_couvert(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        # Ozempic en croissance : annuelle 12,5 < 3 mois 20.
+        cad.loc[cad["Produit"] == "OZEMPIC 1MG", ["V1", "V2", "V3"]] = [5, 12.5, 20]
+        cad.loc[cad["Produit"] == "OZEMPIC 1MG", "Stock"] = 5
+        normal = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE, "annuelle")
+        prudent = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE, "annuelle",
+                           rotation_prudente=True)
+        rot_normal = normal.onglet1.loc[
+            normal.onglet1["Produit"] == "OZEMPIC 1MG", "Rotation/mois"].iloc[0]
+        rot_prudent = prudent.onglet1.loc[
+            prudent.onglet1["Produit"] == "OZEMPIC 1MG", "Rotation/mois"].iloc[0]
+        assert rot_normal == pytest.approx(12.5)
+        assert rot_prudent == pytest.approx(12.5)  # max(12,5 ; (5+12,5+20)/3=12,5)
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — dates de réappro repoussées (fournisseur peu fiable)
+# ---------------------------------------------------------------------------
+
+class TestReportsReappro:
+    def test_glissement_detecte_depuis_l_historique(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-11", "2026-05-12"],
+            "Produit": ["ARANESP 150", "ARANESP 150"],
+            "Date réappro": ["13/05/2026", "15/05/2026"],  # déjà repoussée 1×
+        })
+        assert compter_reports_reappro("ARANESP 150", historique) == 1
+
+    def test_glissement_du_jour_compte(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-12"], "Produit": ["ARANESP 150"],
+            "Date réappro": ["13/05/2026"],
+        })
+        # Aujourd'hui la date annoncée passe au 20/05 → 1 report dès ce jour.
+        assert compter_reports_reappro("ARANESP 150", historique,
+                                       date(2026, 5, 20)) == 1
+
+    def test_date_stable_aucun_report(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-11", "2026-05-12"],
+            "Produit": ["ARANESP 150", "ARANESP 150"],
+            "Date réappro": ["15/05/2026", "15/05/2026"],
+        })
+        assert compter_reports_reappro("ARANESP 150", historique,
+                                       date(2026, 5, 15)) == 0
+
+    def test_ancien_historique_sans_colonne(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-12"], "Produit": ["ARANESP 150"],
+        })
+        assert compter_reports_reappro("ARANESP 150", historique) == 0
+
+    def test_alerte_dans_l_analyse(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-12"], "Produit": ["ARANESP 150"],
+            "Date réappro": ["13/05/2026"], "Urgence": ["🔴 URGENT"],
+            "Qté à commander (Cmd)": [1],
+        })
+        # Le jeu annonce le 15/05 pour Aranesp → repoussée vs le 13/05 d'hier.
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            historique=historique)
+        assert any("repoussée 1 fois" in a for a in resultat.alertes)
+
+
+# ---------------------------------------------------------------------------
+# Anticipation — rupture longue (ventes écrasées à 0 mais déjà signalé)
+# ---------------------------------------------------------------------------
+
+class TestRuptureLongue:
+    def test_deja_signale_passe_en_a_verifier(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        # Dalacine : plus aucune vente sur la période (rupture longue).
+        cad.loc[cad["Produit"] == "DALACINE 300", ["V1", "V2", "V3"]] = [0, 0, 0]
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-06"], "Produit": ["DALACINE 300"],
+            "Urgence": ["🟡 MODÉRÉ"], "Qté à commander (Cmd)": [13],
+            "Date réappro": [""],
+        })
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            historique=historique)
+        ligne = resultat.onglet3[resultat.onglet3["Produit"] == "DALACINE 300"]
+        assert ligne["Décision"].iloc[0] == "À vérifier"
+        assert any("rupture longue" in a for a in resultat.alertes)
+
+    def test_jamais_signale_reste_ecarte(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        ligne = resultat.onglet3[resultat.onglet3["Produit"] == "PRODUIT DORMANT"]
+        assert ligne["Décision"].iloc[0] == "Écarté"
+
+
+# ---------------------------------------------------------------------------
+# Formats réels des exports (CIP13 ↔ CIP7, CIP placeholder « 0 »)
+# ---------------------------------------------------------------------------
+
+class TestCipReels:
+    def test_cip13_matche_cip7(self):
+        # Titanoréine : 3400932300778 (CIP13) ↔ 3230077 (CIP7).
+        from moteur_ruptures import variantes_cip
+        assert "3230077" in variantes_cip("3400932300778")
+
+    def test_apparier_cip13_contre_cadencier_cip7(self):
+        idx_cip = {"3230077": 4}  # cadencier indexé en CIP7
+        corr = apparier("TITANOREINE SUP BT12", "3400932300778",
+                        idx_cip, {}, [])
+        assert corr.index == 4 and corr.methode == "cip"
+
+    def test_indexation_cip13_cherchee_en_cip7(self):
+        from moteur_ruptures import _indexer
+        df = pd.DataFrame({"Libelle": ["TITANOREINE SUP BT12"],
+                           "CIP13": ["3400932300778"]})
+        idx_cip, _, _ = _indexer(df, "Libelle", "CIP13")
+        assert idx_cip.get("3230077") == 0  # les deux formes indexées
+        assert idx_cip.get("3400932300778") == 0
+
+    def test_ean_parapharmacie_non_transforme(self):
+        from moteur_ruptures import variantes_cip
+        assert variantes_cip("7322540796742") == ["7322540796742"]
+
+    def test_cip_zero_traite_comme_absent(self):
+        # Placeholder « 0 » des exports : ne doit jamais servir au matching.
+        assert normaliser_cip("0") == ""
+        assert normaliser_cip("000") == ""
+        corr = apparier("PRODUIT X", normaliser_cip("0"), {"0": 3}, {}, [])
+        assert corr.methode != "cip"
+
+    def test_chargement_format_reel_unipharma(self):
+        # Reproduit l'en-tête et 2 lignes du vrai ruptocdp_ia.csv (CRLF).
+        contenu = ("CIP13;CIP;Libelle;Réappro;Rembt;TGC;Situation\r\n"
+                   "3400933937218;3393721;PYOSTACINE 250MG CP B/16      ;"
+                   "03/06/26;OUI;;1\r\n"
+                   "3400930571187;3057118;LARGACTIL CPR  25MG BT50      ;"
+                   ";OUI;3,0%  ;2\r\n").encode("utf-8")
+        df = charger_fichier(contenu, "ruptocdp_ia.csv")
+        assert len(df) == 2
+        from moteur_ruptures import detecter_colonne
+        assert detecter_colonne(df.columns, "libelle") == "Libelle"
+        assert detecter_colonne(df.columns, "date_reappro") == "Réappro"
+        assert parser_date(df["Réappro"].iloc[0]) == date(2026, 6, 3)

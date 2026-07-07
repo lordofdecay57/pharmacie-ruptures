@@ -27,7 +27,7 @@ import moteur_ruptures as moteur
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
 COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
-                       "Qté à commander (Cmd)"]
+                       "Qté à commander (Cmd)", "Date réappro"]
 
 st.set_page_config(page_title="Ruptures pharmacie", page_icon="💊",
                    layout="wide", initial_sidebar_state="expanded")
@@ -49,8 +49,9 @@ st.markdown("""
   border-radius: 999px; padding: 3px 14px; font-size: .8rem; margin-top: 12px; }
 
 .kpi-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 12px 0; }
-.kpi { flex: 1 1 160px; background: #ffffff; border: 1px solid rgba(11,11,11,.10);
-  border-radius: 12px; padding: 12px 16px 10px; border-top: 3px solid #e1e0d9; }
+.kpi { flex: 1 1 160px; max-width: 320px; background: #ffffff;
+  border: 1px solid rgba(11,11,11,.10); border-radius: 12px;
+  padding: 12px 16px 10px; border-top: 3px solid #e1e0d9; }
 .kpi .label { font-size: .78rem; color: #52514e; }
 .kpi .value { font-size: 1.85rem; font-weight: 700; color: #0b0b0b; line-height: 1.2; }
 .kpi .sub   { font-size: .74rem; color: #898781; }
@@ -136,6 +137,9 @@ def sauver_historique_analyse(onglet1: pd.DataFrame, onglet2: pd.DataFrame,
         sous["Qté à commander (Cmd)"] = (df["Qté à commander (Cmd)"]
                                          if "Qté à commander (Cmd)" in df.columns
                                          else "")
+        # Date de réappro annoncée : mémorisée pour détecter les glissements.
+        sous["Date réappro"] = (df["Date réappro GPNC"]
+                                if "Date réappro GPNC" in df.columns else "")
         lignes.append(sous[COLONNES_HISTORIQUE])
     historique = charger_historique()
     historique = historique[historique["Date analyse"] != jour]
@@ -171,19 +175,21 @@ def jeu_demonstration() -> dict:
                     "ARANESP 150 SOL INJ", "DALACINE 300 GEL",
                     "PRODUIT DORMANT", "TAHOR 10MG CPR",
                     "DOLIPRANE 1000 CPR B/8", "VENTOLINE 100 SPRAY",
-                    "KARDEGIC 75MG SACH", "AMOXICILLINE 1G CPR"],
+                    "KARDEGIC 75MG SACH", "AMOXICILLINE 1G CPR",
+                    "ELIQUIS 5MG CPR B/60"],
         "CIP": ["1001", "1002", "1003", "1004", "1005",
-                "1006", "1007", "1008", "1009", "1010"],
-        "Stock": [3.6, 5, 0, 2, 4, 0, 30, 2, 50, 1],
+                "1006", "1007", "1008", "1009", "1010", "1011"],
+        "Stock": [3.6, 5, 0, 2, 4, 0, 30, 2, 50, 1, 3],
         # Ventoline : un mois à 0 vente au milieu de mois actifs → indice de
-        # rupture passée (rotation probablement sous-estimée).
-        "Ventes avril": [6, 16, 4, 13, 0, 8, 60, 0, 40, 24],
-        "Ventes mai":   [6, 17, 4, 13, 0, 8, 58, 9, 40, 26],
-        "Ventes juin":  [6, 16.5, 4, 13, 0, 8, 62, 11, 40, 25],
+        # rupture passée. Eliquis : HORS rupture GPNC mais 3 j de stock →
+        # onglet Vigilance (rupture en rayon à venir).
+        "Ventes avril": [6, 16, 4, 13, 0, 8, 60, 0, 40, 24, 28],
+        "Ventes mai":   [6, 17, 4, 13, 0, 8, 58, 9, 40, 26, 30],
+        "Ventes juin":  [6, 16.5, 4, 13, 0, 8, 62, 11, 40, 25, 32],
         # Ventoline : 3 déjà en commande (à déduire, évite le doublon).
-        "Commande en cours": [0, 0, 0, 0, 0, 0, 0, 3, 0, 0],
+        "Commande en cours": [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0],
         # Kardegic : péremption proche (< 90 j) → alerte informative.
-        "DLUO": ["", "", "", "", "", "", "", "", dans(70), ""],
+        "DLUO": ["", "", "", "", "", "", "", "", dans(70), "", ""],
     })
     ruptures_gpnc = pd.DataFrame({
         "Libellé": ["TITANOREINE SUPPO B/12", "OZEMPIC 1MG STYLO",
@@ -269,6 +275,26 @@ with st.sidebar:
         ["annuelle", "3mois"],
         format_func=lambda p: ("Annuelle (moyenne 12 mois)" if p == "annuelle"
                                else "3 derniers mois"))
+
+    with st.expander("🎛️ Réglages d'anticipation"):
+        seuil_vigilance = st.number_input(
+            "Seuil de vigilance stock (jours)", 1, 30,
+            value=int(moteur.SEUIL_VIGILANCE_JOURS),
+            help="Produits HORS rupture GPNC dont la couverture passe sous "
+                 "ce seuil → onglet Vigilance (rupture en rayon à venir).")
+        seuil_marge = st.number_input(
+            "Marge « écarté de justesse » (jours)", 0, 15,
+            value=int(moteur.SEUIL_MARGE_JUSTESSE_JOURS),
+            help="Produit écarté par la règle stricte avec moins de cette "
+                 "marge → listé à part : si la réappro glisse, rupture sèche.")
+        delai_livraison = st.number_input(
+            "Délai de livraison UNIPHARMA (jours)", 0, 10, value=1,
+            help="Ajouté à la couverture cible du calcul de Cmd : les boîtes "
+                 "commandées aujourd'hui n'arrivent pas aujourd'hui.")
+        rotation_prudente = st.checkbox(
+            "Rotation prudente (max annuelle / 3 mois)", value=False,
+            help="Retient la plus élevée des deux moyennes par produit — "
+                 "un produit en croissance n'est jamais sous-couvert.")
 
     st.divider()
     if st.button("🔄 Nouvelle analyse", use_container_width=True):
@@ -405,7 +431,12 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
         sauver_config(mapping)
     try:
         resultat = moteur.analyser(
-            df_cad, df_gpnc, df_uni, mapping, date_analyse, periode)
+            df_cad, df_gpnc, df_uni, mapping, date_analyse, periode,
+            historique=None if mode_demo else charger_historique(),
+            seuil_vigilance_jours=seuil_vigilance,
+            seuil_marge_jours=seuil_marge,
+            delai_livraison_jours=delai_livraison,
+            rotation_prudente=rotation_prudente)
         st.session_state["resultat"] = resultat
         st.session_state["date_analyse"] = date_analyse
         if not mode_demo:  # ne pas polluer l'historique avec les données fictives
@@ -440,6 +471,8 @@ st.markdown('<div class="kpi-row">' + "".join([
                sous="rupture chez les deux fournisseurs"),
     _tuile_kpi("⚠️ Rotation à vérifier", r["rotation_douteuse"], "warning",
                sous="rupture passée possible"),
+    _tuile_kpi("🔭 Vigilance stock", r["vigilance"], "warning",
+               sous="rupture en rayon à venir (hors GPNC)"),
 ]) + "</div>", unsafe_allow_html=True)
 
 # --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? ----------
@@ -482,9 +515,11 @@ def _teinter_urgence(ligne):
     return [style] * len(ligne)
 
 
-onglet1, onglet2, onglet3 = st.tabs([
+onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3 = st.tabs([
     f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
     f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
+    f"🔭 Vigilance stock ({len(resultat.vigilance)})",
+    f"⚠️ Écartés de justesse ({len(resultat.ecartes_justesse)})",
     f"📋 Analyse complète ({len(resultat.onglet3)})",
 ])
 with onglet1:
@@ -503,17 +538,43 @@ with onglet1:
         st.dataframe(affichage1.style.apply(_teinter_urgence, axis=1)
                      .format(lambda v: f"{v:g}" if isinstance(v, float) else v),
                      use_container_width=True, hide_index=True)
-with onglet2:
-    if resultat.onglet2.empty:
-        st.info("Aucun produit en rupture chez les deux fournisseurs.")
+def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
+    """Affichage commun des onglets non stylés : tableau ou message vide."""
+    if df.empty:
+        st.info(message_vide)
     else:
-        st.dataframe(resultat.onglet2, use_container_width=True, hide_index=True)
-        st.caption("Pour ces produits : anticiper l'information patient et "
-                   "contacter GPNC pour confirmer les dates de réappro.")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption(legende)
+
+
+with onglet2:
+    _onglet_simple(
+        resultat.onglet2,
+        "Aucun produit en rupture chez les deux fournisseurs.",
+        "Pour ces produits : anticiper l'information patient et contacter "
+        "GPNC pour confirmer les dates de réappro.")
+with onglet_vigilance:
+    _onglet_simple(
+        resultat.vigilance,
+        "Aucune rupture en rayon à anticiper : tous les produits hors "
+        "rupture GPNC ont une couverture suffisante.",
+        "Produits que vous vendez, HORS liste de ruptures GPNC, dont le "
+        "stock s'épuise : commander chez GPNC (circuit normal) avant la "
+        "rupture en rayon.")
+with onglet_justesse:
+    _onglet_simple(
+        resultat.ecartes_justesse,
+        "Aucun produit écarté de justesse : les produits écartés ont tous "
+        "une marge confortable.",
+        "Écartés par la règle stricte (le stock couvre la réappro) mais avec "
+        "très peu de marge : si la date de réappro glisse, c'est la rupture "
+        "sèche. À surveiller.")
 with onglet3:
-    st.dataframe(resultat.onglet3, use_container_width=True, hide_index=True)
-    st.caption("Traçabilité : tous les produits en rupture GPNC, avec le "
-               "détail du calcul et le motif de la décision.")
+    _onglet_simple(
+        resultat.onglet3,
+        "Aucune rupture GPNC analysée.",
+        "Traçabilité : tous les produits en rupture GPNC, avec le détail du "
+        "calcul et le motif de la décision.")
 
 st.download_button(
     "⬇️ Télécharger le fichier Excel",
