@@ -469,9 +469,11 @@ class TestTendance:
     def test_stable(self):
         assert calculer_tendance([10, 11, 10, 9, 10, 10]) == "→ stable"
 
-    def test_pas_assez_de_recul(self):
-        # Moins de 4 mois : impossible de distinguer tendance et bruit.
-        assert calculer_tendance([5, 20, 20]) == "→ stable"
+    def test_cadencier_court_dernier_mois_vs_precedents(self):
+        # 2-3 mois de recul : dernier mois (20) vs moyenne des précédents
+        # (12,5) → +60 % → hausse. Un seul mois : rien à comparer.
+        assert calculer_tendance([5, 20, 20]) == "↗ hausse"
+        assert calculer_tendance([20]) == "→ stable"
 
     def test_demande_nulle(self):
         assert calculer_tendance([0, 0, 0, 0]) == "→ stable"
