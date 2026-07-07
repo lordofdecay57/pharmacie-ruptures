@@ -12,7 +12,9 @@ Parcours (suivi dans la barre latérale) :
      mémorisé dans config.yaml pour les fois suivantes).
   3. Choisir la date d'analyse et la période de rotation (barre latérale),
      lancer l'analyse.
-  4. Consulter les tuiles de synthèse + les 3 onglets, télécharger l'Excel.
+  4. Consulter les tuiles de synthèse + les 5 onglets (commandes, sans
+     solution, vigilance, écartés de justesse, analyse complète),
+     télécharger l'Excel.
 """
 
 from datetime import date, timedelta
@@ -27,7 +29,10 @@ import moteur_ruptures as moteur
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
 COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
-                       "Qté à commander (Cmd)", "Date réappro"]
+                       "Qté à commander (Cmd)", "Date réappro", "Type"]
+# Type « commande » : produit signalé (onglets 1-2) — compte dans le
+# comparatif quotidien. Type « surveillance » : écarté de justesse — sert
+# uniquement au suivi des dates de réappro repoussées.
 
 st.set_page_config(page_title="Ruptures pharmacie", page_icon="💊",
                    layout="wide", initial_sidebar_state="expanded")
@@ -128,14 +133,19 @@ def charger_historique() -> pd.DataFrame:
     return pd.DataFrame(columns=COLONNES_HISTORIQUE)
 
 
-def sauver_historique_analyse(onglet1: pd.DataFrame, onglet2: pd.DataFrame,
-                              date_analyse: date) -> pd.DataFrame:
+def sauver_historique_analyse(resultat, date_analyse: date) -> pd.DataFrame:
     """Ajoute l'analyse du jour à l'historique local (remplace une éventuelle
     analyse déjà enregistrée à la même date, pour éviter les doublons en cas
     de ré-analyse). Renvoie l'historique mis à jour."""
     jour = date_analyse.strftime("%Y-%m-%d")
     lignes = []
-    for df, urgence_defaut in ((onglet1, None), (onglet2, "❌ SANS SOLUTION")):
+    sources = ((resultat.onglet1, None, "commande"),
+               (resultat.onglet2, "❌ SANS SOLUTION", "commande"),
+               # Écartés de justesse : leurs dates annoncées sont mémorisées
+               # pour détecter les réappros repoussées AVANT que le produit
+               # ne bascule en commande.
+               (resultat.ecartes_justesse, "⚠️ SURVEILLANCE", "surveillance"))
+    for df, urgence_defaut, type_ligne in sources:
         if df.empty:
             continue
         sous = df[["Produit"]].copy()
@@ -147,6 +157,7 @@ def sauver_historique_analyse(onglet1: pd.DataFrame, onglet2: pd.DataFrame,
         # Date de réappro annoncée : mémorisée pour détecter les glissements.
         sous["Date réappro"] = (df["Date réappro GPNC"]
                                 if "Date réappro GPNC" in df.columns else "")
+        sous["Type"] = type_ligne
         lignes.append(sous[COLONNES_HISTORIQUE])
     historique = charger_historique()
     historique = historique[historique["Date analyse"] != jour]
@@ -301,9 +312,10 @@ with st.sidebar:
             help="Produit écarté par la règle stricte avec moins de cette "
                  "marge → listé à part : si la réappro glisse, rupture sèche.")
         delai_livraison = st.number_input(
-            "Délai de livraison UNIPHARMA (jours)", 0, 10, value=1,
+            "Délai de livraison UNIPHARMA (jours)", 0, 10, value=0,
             help="Ajouté à la couverture cible du calcul de Cmd : les boîtes "
-                 "commandées aujourd'hui n'arrivent pas aujourd'hui.")
+                 "commandées aujourd'hui n'arrivent pas aujourd'hui. À 0, "
+                 "les quantités restent identiques aux références validées.")
         rotation_prudente = st.checkbox(
             "Rotation prudente (max annuelle / 3 mois)", value=False,
             help="Retient la plus élevée des deux moyennes par produit — "
@@ -455,7 +467,7 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
         st.session_state["date_analyse"] = date_analyse
         if not mode_demo:  # ne pas polluer l'historique avec les données fictives
             st.session_state["historique"] = sauver_historique_analyse(
-                resultat.onglet1, resultat.onglet2, date_analyse)
+                resultat, date_analyse)
         st.rerun()  # rafraîchit la coche « Analyse lancée » de la barre latérale
     except KeyError as e:
         st.error(f"Colonne introuvable : {e} — vérifiez le mapping ci-dessus.")
@@ -471,6 +483,10 @@ if resultat is None:
     st.stop()
 
 r = resultat.resume
+# Accès défensifs : un résultat resté en session pendant une mise à jour du
+# code peut dater d'une version sans ces champs — dégrader, pas planter.
+df_vigilance = getattr(resultat, "vigilance", pd.DataFrame())
+df_justesse = getattr(resultat, "ecartes_justesse", pd.DataFrame())
 st.divider()
 st.subheader("📊 Résultats")
 st.markdown('<div class="kpi-row">' + "".join([
@@ -483,10 +499,10 @@ st.markdown('<div class="kpi-row">' + "".join([
     _tuile_kpi("🟡 Modérés", r["moderes"], "warning", sous="stock 4 à 15 jours"),
     _tuile_kpi("❌ Sans solution", r["sans_solution"], "serious",
                sous="rupture chez les deux fournisseurs"),
-    _tuile_kpi("⚠️ Rotation à vérifier", r["rotation_douteuse"], "warning",
+    _tuile_kpi("⚠️ Rotation à vérifier", r.get("rotation_douteuse", 0), "warning",
                sous="rupture passée possible"),
-    _tuile_kpi("🔭 Vigilance stock", r["vigilance"], "warning",
-               sous="rupture en rayon à venir (hors GPNC)"),
+    _tuile_kpi("🔭 Vigilance stock", r.get("vigilance", len(df_vigilance)),
+               "warning", sous="rupture en rayon à venir (hors GPNC)"),
 ]) + "</div>", unsafe_allow_html=True)
 
 # --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? ----------
@@ -532,8 +548,8 @@ def _teinter_urgence(ligne):
 onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3 = st.tabs([
     f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
     f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
-    f"🔭 Vigilance stock ({len(resultat.vigilance)})",
-    f"⚠️ Écartés de justesse ({len(resultat.ecartes_justesse)})",
+    f"🔭 Vigilance stock ({len(df_vigilance)})",
+    f"⚠️ Écartés de justesse ({len(df_justesse)})",
     f"📋 Analyse complète ({len(resultat.onglet3)})",
 ])
 with onglet1:
@@ -569,7 +585,7 @@ with onglet2:
         "GPNC pour confirmer les dates de réappro.")
 with onglet_vigilance:
     _onglet_simple(
-        resultat.vigilance,
+        df_vigilance,
         "Aucune rupture en rayon à anticiper : tous les produits hors "
         "rupture GPNC ont une couverture suffisante.",
         "Produits que vous vendez, HORS liste de ruptures GPNC, dont le "
@@ -577,7 +593,7 @@ with onglet_vigilance:
         "rupture en rayon.")
 with onglet_justesse:
     _onglet_simple(
-        resultat.ecartes_justesse,
+        df_justesse,
         "Aucun produit écarté de justesse : les produits écartés ont tous "
         "une marge confortable.",
         "Écartés par la règle stricte (le stock couvre la réappro) mais avec "

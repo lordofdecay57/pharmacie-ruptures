@@ -586,19 +586,25 @@ class TestDelaiLivraison:
 
 class TestRotationPrudente:
     def test_produit_en_croissance_mieux_couvert(self):
+        # 12 mois de recul pour que les deux moyennes DIFFÈRENT vraiment :
+        # annuelle (9×10 + 3×20)/12 = 12,5 < 3 mois 20 → prudent retient 20.
         cad, gpnc, uni = _jeu_de_donnees()
-        # Ozempic en croissance : annuelle 12,5 < 3 mois 20.
-        cad.loc[cad["Produit"] == "OZEMPIC 1MG", ["V1", "V2", "V3"]] = [5, 12.5, 20]
-        cad.loc[cad["Produit"] == "OZEMPIC 1MG", "Stock"] = 5
-        normal = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE, "annuelle")
-        prudent = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE, "annuelle",
+        for i in range(4, 13):  # V4..V12 : 12 colonnes de ventes au total
+            cad[f"V{i}"] = 10.0
+        colonnes = [f"V{i}" for i in range(4, 13)] + ["V1", "V2", "V3"]
+        cad.loc[cad["Produit"] == "OZEMPIC 1MG",
+                ["V1", "V2", "V3"]] = [20, 20, 20]
+        mapping = _mapping()
+        mapping["cadencier"]["ventes"] = colonnes  # chrono, récent en dernier
+        normal = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle")
+        prudent = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle",
                            rotation_prudente=True)
         rot_normal = normal.onglet1.loc[
             normal.onglet1["Produit"] == "OZEMPIC 1MG", "Rotation/mois"].iloc[0]
         rot_prudent = prudent.onglet1.loc[
             prudent.onglet1["Produit"] == "OZEMPIC 1MG", "Rotation/mois"].iloc[0]
         assert rot_normal == pytest.approx(12.5)
-        assert rot_prudent == pytest.approx(12.5)  # max(12,5 ; (5+12,5+20)/3=12,5)
+        assert rot_prudent == pytest.approx(20)  # max(annuelle, 3 mois)
 
 
 # ---------------------------------------------------------------------------
@@ -813,3 +819,70 @@ class TestVigilanceRotationMin:
         resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
                             rotation_min_vigilance=1)
         assert "HOMEOPATHIE RARE" in resultat.vigilance["Produit"].values
+
+
+# ---------------------------------------------------------------------------
+# Correctifs issus de l'audit de correction
+# ---------------------------------------------------------------------------
+
+class TestCorrectifsAudit:
+    def test_reanalyse_antidatee_ignore_les_annonces_futures(self):
+        # Une ré-analyse antidatée ne doit pas se comparer à des annonces
+        # enregistrées APRÈS sa propre date (audit A3/C3).
+        cad, gpnc, uni = _jeu_de_donnees()
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-20"], "Produit": ["ARANESP 150"],
+            "Urgence": ["🔴 URGENT"], "Qté à commander (Cmd)": [1],
+            "Date réappro": ["13/05/2026"],
+        })
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            historique=historique)
+        assert not any("repoussée" in a for a in resultat.alertes)
+
+    def test_lignes_surveillance_hors_comparatif_quotidien(self):
+        # Un écarté de justesse mémorisé ne compte ni comme « déjà signalé »
+        # ni comme « résolu » dans le comparatif (audit B4).
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-12", "2026-05-12"],
+            "Produit": ["TITANOREINE SUPPO", "OZEMPIC 1MG"],
+            "Urgence": ["⚠️ SURVEILLANCE", "🟡 MODÉRÉ"],
+            "Qté à commander (Cmd)": ["", 12],
+            "Date réappro": ["29/05/2026", ""],
+            "Type": ["surveillance", "commande"],
+        })
+        assert compter_occurrences_historique(
+            "TITANOREINE SUPPO", historique, date(2026, 5, 13)) == 0
+        _, nouveaux, resolus = comparer_a_analyse_precedente(
+            ["OZEMPIC 1MG"], historique, date(2026, 5, 13))
+        assert nouveaux == [] and resolus == []
+
+    def test_surveillance_alimente_le_suivi_des_reports(self):
+        # MAIS sa date annoncée sert au suivi des réappros repoussées :
+        # Titanoréine annonce le 29/05 dans le jeu, hier disait le 25/05.
+        cad, gpnc, uni = _jeu_de_donnees()
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-12"], "Produit": ["TITANOREINE SUPPO"],
+            "Urgence": ["⚠️ SURVEILLANCE"], "Qté à commander (Cmd)": [""],
+            "Date réappro": ["25/05/2026"], "Type": ["surveillance"],
+        })
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            historique=historique)
+        assert any("TITANOREINE" in a and "repoussée 1 fois" in a
+                   for a in resultat.alertes)
+        ligne = resultat.ecartes_justesse[
+            resultat.ecartes_justesse["Produit"] == "TITANOREINE SUPPO"]
+        assert "repoussée 1 fois" in ligne["Commentaire"].iloc[0]
+
+    def test_report_signale_aussi_sur_onglet2(self):
+        # Rupture chez les deux + date repoussée → commentaire enrichi (B4).
+        cad, gpnc, uni = _jeu_de_donnees()
+        gpnc.loc[gpnc["Libellé"] == "TAHOR 10", "Réappro"] = "10/06/2026"
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-12"], "Produit": ["TAHOR 10"],
+            "Urgence": ["❌ SANS SOLUTION"], "Qté à commander (Cmd)": [""],
+            "Date réappro": ["04/06/2026"], "Type": ["commande"],
+        })
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            historique=historique)
+        ligne = resultat.onglet2[resultat.onglet2["Produit"] == "TAHOR 10"]
+        assert "repoussée 1 fois" in ligne["Commentaire"].iloc[0]

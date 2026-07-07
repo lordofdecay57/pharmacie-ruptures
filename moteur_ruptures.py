@@ -540,12 +540,25 @@ def rotation_possiblement_sous_estimee(ventes: list) -> bool:
     return any(v <= 0 for v in valeurs)
 
 
+def _lignes_signalees(historique: pd.DataFrame) -> pd.DataFrame:
+    """Restreint l'historique aux produits réellement SIGNALÉS (onglets 1-2).
+
+    Les lignes de type « surveillance » (écartés de justesse) n'existent que
+    pour suivre les dates de réappro annoncées : elles ne comptent ni dans
+    « déjà signalé N fois » ni dans le comparatif quotidien.
+    """
+    if historique is None or historique.empty or "Type" not in historique.columns:
+        return historique
+    return historique[historique["Type"].fillna("commande") != "surveillance"]
+
+
 def compter_occurrences_historique(produit: str, historique: pd.DataFrame,
                                    avant_date: date) -> int:
     """Nombre d'analyses antérieures à ``avant_date`` où ``produit`` était
     déjà signalé dans l'historique (colonnes 'Date analyse' / 'Produit',
     persisté par l'interface — voir app.py). Module pur : aucune I/O ici.
     """
+    historique = _lignes_signalees(historique)
     if historique is None or historique.empty:
         return 0
     sous = historique[historique["Produit"] == produit]
@@ -565,6 +578,7 @@ def comparer_a_analyse_precedente(produits_jour, historique: pd.DataFrame,
       - resolus  : produits de l'analyse précédente absents aujourd'hui.
     """
     produits_jour = list(produits_jour)
+    historique = _lignes_signalees(historique)
     if historique is None or historique.empty:
         return None, produits_jour, []
     dates = pd.to_datetime(historique["Date analyse"], errors="coerce").dt.date
@@ -688,12 +702,15 @@ def analyser(cadencier: pd.DataFrame,
         return stock, en_cours, ventes, _rotation(ventes)
 
     # Historique pré-groupé par produit (une seule passe de parsing/tri au
-    # lieu d'un filtre complet du DataFrame par produit signalé).
+    # lieu d'un filtre complet du DataFrame par produit signalé). Seules les
+    # analyses STRICTEMENT antérieures comptent — une ré-analyse antidatée
+    # ne doit pas se comparer à des annonces « du futur ».
     annonces_reappro: dict = {}
     if (historique is not None and not historique.empty
             and "Date réappro" in historique.columns):
         h = historique.copy()
         h["_date"] = pd.to_datetime(h["Date analyse"], errors="coerce")
+        h = h[h["_date"].dt.date < date_analyse]
         for produit, groupe in h.sort_values("_date").groupby("Produit",
                                                               sort=False):
             annonces_reappro[produit] = [parser_date(v)
@@ -735,6 +752,13 @@ def analyser(cadencier: pd.DataFrame,
             "Date réappro": f"{date_reappro:%d/%m/%Y}" if date_reappro else "",
             "Jours avant réappro": jours_avant if jours_avant is not None else "",
         }
+
+        # Fiabilité de la date annoncée : déjà repoussée par le passé ?
+        # Calculée ici pour servir aux onglets 1 ET 2 ET « justesse ».
+        reports = _compter_reports(annonces_reappro.get(produit_gpnc, []),
+                                   date_reappro)
+        avert_reports = (f" · ⚠️ réappro déjà repoussée {reports} fois "
+                         "(date peu fiable)") if reports else ""
 
         # --- Étape 1 : périmètre (vendu, rotation > 0) ----------------------
         if corr.index is None:
@@ -815,6 +839,17 @@ def analyser(cadencier: pd.DataFrame,
             marge = stock_jours - (jours_avant if jours_avant is not None
                                    else COUVERTURE_SANS_DATE_JOURS)
             if marge < seuil_marge_jours:
+                commentaire_justesse = (
+                    "Écarté par la règle stricte mais marge faible — si la "
+                    "réappro glisse, rupture sèche. Surveiller / dépanner "
+                    "au besoin." if jours_avant is not None else
+                    "Sans date de réappro, à peine au-dessus des 30 j de "
+                    "couverture — surveiller la rotation.") + avert_reports
+                if reports:
+                    alertes.append(
+                        f"{produit_gpnc} : écarté de justesse ALORS QUE la "
+                        f"réappro a déjà été repoussée {reports} fois — "
+                        "risque fort de rupture sèche.")
                 lignes_justesse.append({
                     "Produit": produit_gpnc, "Stock actuel": stock,
                     "Rotation/mois": round(rotation, 1),
@@ -823,9 +858,7 @@ def analyser(cadencier: pd.DataFrame,
                     "Jours avant réappro": (jours_avant
                                             if jours_avant is not None else ""),
                     "Marge (jours)": round(marge, 1),
-                    "Commentaire": ("Écarté par la règle stricte mais marge "
-                                    "faible — si la réappro glisse, rupture "
-                                    "sèche. Surveiller / dépanner au besoin."),
+                    "Commentaire": commentaire_justesse,
                 })
                 motif += f" — de justesse ({marge:.1f} j de marge)"
             lignes3.append({**base3, "Dispo UNIPHARMA (O/N)": "",
@@ -852,9 +885,14 @@ def analyser(cadencier: pd.DataFrame,
                 "Date réappro GPNC": base3["Date réappro"],
                 "Péremption": affiche_peremption,
                 "Commentaire": ("Anticiper l'information patient ; contacter "
-                                "GPNC pour confirmer la date de réappro."),
+                                "GPNC pour confirmer la date de réappro."
+                                + avert_reports),
                 "_rotation": rotation, "_stock": stock,
             })
+            if reports:
+                alertes.append(f"{produit_gpnc} : rupture chez les deux ET "
+                               f"réappro déjà repoussée {reports} fois — "
+                               "confirmer la date avec GPNC.")
             lignes3.append({**base3, "Dispo UNIPHARMA (O/N)": "N",
                             "Décision": "Retenu", "Onglet": "Onglet 2",
                             "Motif": "Rupture GPNC + UNIPHARMA (pas de solution)"})
@@ -876,11 +914,8 @@ def analyser(cadencier: pd.DataFrame,
                        else "Pas de date de réappro → objectif 30 j de couverture")
         if en_cours:
             commentaire += f" · {en_cours:g} déjà en commande (déduit du calcul)"
-        reports = _compter_reports(annonces_reappro.get(produit_gpnc, []),
-                                   date_reappro)
+        commentaire += avert_reports
         if reports:
-            commentaire += (f" · ⚠️ réappro déjà repoussée {reports} fois "
-                            "(date peu fiable)")
             alertes.append(f"{produit_gpnc} : la date de réappro GPNC a déjà "
                            f"été repoussée {reports} fois — ne pas compter "
                            "dessus, privilégier le dépannage.")
@@ -923,8 +958,8 @@ def analyser(cadencier: pd.DataFrame,
             "Rotation/mois": round(rotation, 1),
             "Tendance": calculer_tendance(ventes),
             "Stock (jours)": round(stock_jours, 1),
-            "Conseil": ("Hors rupture GPNC — commander chez GPNC avant la "
-                        "rupture en rayon."),
+            "Conseil": ("Hors ruptures GPNC identifiées — commander avant "
+                        "la rupture en rayon."),
             "_stock_jours": stock_jours,
         })
 
@@ -983,7 +1018,8 @@ def analyser(cadencier: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Export Excel (3 onglets, mise en forme)
+# Export Excel (5 onglets : commandes, sans solution, vigilance, justesse,
+# analyse complète — mise en forme)
 # ---------------------------------------------------------------------------
 
 _COULEURS_URGENCE = {URGENT: "F8CBAD", MODERE: "FFE699", ANTICIPER: "C6EFCE"}
