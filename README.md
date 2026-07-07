@@ -50,7 +50,20 @@ l'information patient, contacter GPNC).
 
 Les seuils se règlent dans la barre latérale (« 🎛️ Réglages d'anticipation »).
 
-## Pilotage du stock (onglet 📈)
+## Deux axes de travail
+
+Les résultats sont organisés en **deux grands onglets** qui correspondent à
+deux métiers différents :
+
+- **🚨 Gestion des ruptures — le quotidien** : tuiles de synthèse,
+  comparatif avec l'analyse précédente, et les 5 vues d'action (à commander
+  UNIPHARMA, rupture chez les deux, vigilance, écartés de justesse, analyse
+  complète) + export Excel des ruptures. C'est l'écran de tous les jours.
+- **📦 Gestion du stock en rotation — le point de gestion** : classement
+  ABC, variabilité, saisonnalité, stock dormant, taux de service + export
+  Excel dédié. À consulter ponctuellement (point hebdo/mensuel).
+
+## Gestion du stock en rotation (axe 📦)
 
 Vue d'ensemble calculée depuis le cadencier — n'affecte aucune quantité
 commandée (pratiques standard des officines les mieux gérées) :
@@ -67,7 +80,7 @@ commandée (pratiques standard des officines les mieux gérées) :
 - **Taux de service produits A** : % de couples produit A × jour SANS
   rupture signalée sur 30 jours glissants (alimenté par l'historique).
 
-Export dédié : bouton « 📈 Excel pilotage (ABC + dormants) ».
+Export dédié : bouton « ⬇️ Télécharger l'Excel de gestion (ABC + dormants) ».
 
 ## Fonctionnalités complémentaires
 

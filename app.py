@@ -479,7 +479,9 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
         st.error(f"Erreur pendant l'analyse : {e}")
 
 # ---------------------------------------------------------------------------
-# Étape 4 — résultats (tuiles de synthèse + 3 onglets + export)
+# Étape 4 — résultats, en deux axes de travail :
+#   🚨 Gestion des ruptures (le quotidien : anticiper, commander, suivre)
+#   📦 Gestion du stock en rotation (le point de gestion : ABC, dormants…)
 # ---------------------------------------------------------------------------
 
 resultat = st.session_state.get("resultat")
@@ -491,54 +493,6 @@ r = resultat.resume
 # code peut dater d'une version sans ces champs — dégrader, pas planter.
 df_vigilance = getattr(resultat, "vigilance", pd.DataFrame())
 df_justesse = getattr(resultat, "ecartes_justesse", pd.DataFrame())
-st.divider()
-st.subheader("📊 Résultats")
-st.markdown('<div class="kpi-row">' + "".join([
-    _tuile_kpi("Ruptures GPNC analysées", r["analyses"],
-               sous=f'{r["vendus"]} vendus en pharmacie'),
-    _tuile_kpi("À commander UNIPHARMA", r["a_commander"], "accent",
-               sous=f'🟢 {r["anticiper"]} à anticiper'),
-    _tuile_kpi("🔴 Urgents", r["urgents"], "critical",
-               sous="stock épuisé ou ≤ 3 jours"),
-    _tuile_kpi("🟡 Modérés", r["moderes"], "warning", sous="stock 4 à 15 jours"),
-    _tuile_kpi("❌ Sans solution", r["sans_solution"], "serious",
-               sous="rupture chez les deux fournisseurs"),
-    _tuile_kpi("⚠️ Rotation à vérifier", r.get("rotation_douteuse", 0), "warning",
-               sous="rupture passée possible"),
-    _tuile_kpi("🔭 Vigilance stock", r.get("vigilance", len(df_vigilance)),
-               "warning", sous="rupture en rayon à venir (hors GPNC)"),
-]) + "</div>", unsafe_allow_html=True)
-
-# --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? ----------
-historique = st.session_state.get("historique", charger_historique())
-if not mode_demo:
-    produits_jour = (list(resultat.onglet1["Produit"])
-                     + list(resultat.onglet2["Produit"]))
-    date_prec, nouveaux, resolus = moteur.comparer_a_analyse_precedente(
-        produits_jour, historique, st.session_state["date_analyse"])
-    if date_prec is None:
-        st.caption("📅 Première analyse enregistrée — le comparatif quotidien "
-                   "(nouvelles ruptures / résolues) démarrera dès la prochaine.")
-    else:
-        st.markdown(f"**📅 Depuis l'analyse du {date_prec:%d/%m/%Y}** : "
-                    f"🆕 {len(nouveaux)} nouvelle(s) rupture(s) à traiter · "
-                    f"✅ {len(resolus)} sortie(s) de la liste")
-        c_nouv, c_res = st.columns(2)
-        if nouveaux:
-            with c_nouv, st.expander(f"🆕 Nouvelles ruptures ({len(nouveaux)})"):
-                st.write("\n".join(f"- {p}" for p in nouveaux))
-        if resolus:
-            with c_res, st.expander(f"✅ Résolues / sorties ({len(resolus)})"):
-                st.write("\n".join(f"- {p}" for p in resolus))
-
-for alerte in resultat.alertes:
-    st.warning(alerte)
-if resultat.matchs_incertains:
-    with st.expander(f"⚠️ {len(resultat.matchs_incertains)} correspondances "
-                     "incertaines à vérifier (fuzzy matching)"):
-        st.dataframe(pd.DataFrame(resultat.matchs_incertains),
-                     use_container_width=True)
-
 
 def _teinter_urgence(ligne):
     """Code couleur des lignes de l'onglet 1 selon l'urgence."""
@@ -549,33 +503,6 @@ def _teinter_urgence(ligne):
     return [style] * len(ligne)
 
 
-pilotage = st.session_state.get("pilotage")  # None sur session pré-mise à jour
-
-(onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3,
- onglet_pilotage) = st.tabs([
-    f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
-    f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
-    f"🔭 Vigilance stock ({len(df_vigilance)})",
-    f"⚠️ Écartés de justesse ({len(df_justesse)})",
-    f"📋 Analyse complète ({len(resultat.onglet3)})",
-    "📈 Pilotage stock",
-])
-with onglet1:
-    if resultat.onglet1.empty:
-        st.info("Aucun produit à commander — tous les stocks couvrent la réappro.")
-    else:
-        # Comparaison avec l'historique : ce produit était-il déjà signalé
-        # lors de précédentes analyses ? (sans objet en mode démonstration)
-        affichage1 = resultat.onglet1.copy()
-        if not mode_demo:
-            affichage1["Déjà signalé"] = affichage1["Produit"].apply(
-                lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
-                    moteur.compter_occurrences_historique(
-                        p, historique, st.session_state["date_analyse"])))
-        # ``{:g}`` : pas de décimales inutiles (0 et non 0.000000, 9.1 reste 9.1).
-        st.dataframe(affichage1.style.apply(_teinter_urgence, axis=1)
-                     .format(lambda v: f"{v:g}" if isinstance(v, float) else v),
-                     use_container_width=True, hide_index=True)
 def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
     """Affichage commun des onglets non stylés : tableau ou message vide."""
     if df.empty:
@@ -585,35 +512,137 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
         st.caption(legende)
 
 
-with onglet2:
-    _onglet_simple(
-        resultat.onglet2,
-        "Aucun produit en rupture chez les deux fournisseurs.",
-        "Pour ces produits : anticiper l'information patient et contacter "
-        "GPNC pour confirmer les dates de réappro.")
-with onglet_vigilance:
-    _onglet_simple(
-        df_vigilance,
-        "Aucune rupture en rayon à anticiper : tous les produits hors "
-        "rupture GPNC ont une couverture suffisante.",
-        "Produits que vous vendez, HORS liste de ruptures GPNC, dont le "
-        "stock s'épuise : commander chez GPNC (circuit normal) avant la "
-        "rupture en rayon.")
-with onglet_justesse:
-    _onglet_simple(
-        df_justesse,
-        "Aucun produit écarté de justesse : les produits écartés ont tous "
-        "une marge confortable.",
-        "Écartés par la règle stricte (le stock couvre la réappro) mais avec "
-        "très peu de marge : si la date de réappro glisse, c'est la rupture "
-        "sèche. À surveiller.")
-with onglet3:
-    _onglet_simple(
-        resultat.onglet3,
-        "Aucune rupture GPNC analysée.",
-        "Traçabilité : tous les produits en rupture GPNC, avec le détail du "
-        "calcul et le motif de la décision.")
-with onglet_pilotage:
+historique = st.session_state.get("historique", charger_historique())
+pilotage = st.session_state.get("pilotage")  # None sur session pré-mise à jour
+
+st.divider()
+st.subheader("📊 Résultats")
+
+# Deux axes de travail distincts : le QUOTIDIEN (anticiper et traiter les
+# ruptures du jour) et le point de GESTION (rotation, ABC, dormants).
+axe_ruptures, axe_stock = st.tabs([
+    "🚨 Gestion des ruptures — le quotidien",
+    "📦 Gestion du stock en rotation — le point de gestion",
+])
+
+# ===========================================================================
+# AXE 1 — GESTION DES RUPTURES (anticipation quotidienne)
+# ===========================================================================
+with axe_ruptures:
+    st.markdown('<div class="kpi-row">' + "".join([
+        _tuile_kpi("Ruptures GPNC analysées", r["analyses"],
+                   sous=f'{r["vendus"]} vendus en pharmacie'),
+        _tuile_kpi("À commander UNIPHARMA", r["a_commander"], "accent",
+                   sous=f'🟢 {r["anticiper"]} à anticiper'),
+        _tuile_kpi("🔴 Urgents", r["urgents"], "critical",
+                   sous="stock épuisé ou ≤ 3 jours"),
+        _tuile_kpi("🟡 Modérés", r["moderes"], "warning",
+                   sous="stock 4 à 15 jours"),
+        _tuile_kpi("❌ Sans solution", r["sans_solution"], "serious",
+                   sous="rupture chez les deux fournisseurs"),
+        _tuile_kpi("⚠️ Rotation à vérifier", r.get("rotation_douteuse", 0),
+                   "warning", sous="rupture passée possible"),
+        _tuile_kpi("🔭 Vigilance stock", r.get("vigilance", len(df_vigilance)),
+                   "warning", sous="rupture en rayon à venir (hors GPNC)"),
+    ]) + "</div>", unsafe_allow_html=True)
+
+    # --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? -------
+    if not mode_demo:
+        produits_jour = (list(resultat.onglet1["Produit"])
+                         + list(resultat.onglet2["Produit"]))
+        date_prec, nouveaux, resolus = moteur.comparer_a_analyse_precedente(
+            produits_jour, historique, st.session_state["date_analyse"])
+        if date_prec is None:
+            st.caption("📅 Première analyse enregistrée — le comparatif "
+                       "quotidien (nouvelles ruptures / résolues) démarrera "
+                       "dès la prochaine.")
+        else:
+            st.markdown(f"**📅 Depuis l'analyse du {date_prec:%d/%m/%Y}** : "
+                        f"🆕 {len(nouveaux)} nouvelle(s) rupture(s) à traiter · "
+                        f"✅ {len(resolus)} sortie(s) de la liste")
+            c_nouv, c_res = st.columns(2)
+            if nouveaux:
+                with c_nouv, st.expander(
+                        f"🆕 Nouvelles ruptures ({len(nouveaux)})"):
+                    st.write("\n".join(f"- {p}" for p in nouveaux))
+            if resolus:
+                with c_res, st.expander(
+                        f"✅ Résolues / sorties ({len(resolus)})"):
+                    st.write("\n".join(f"- {p}" for p in resolus))
+
+    for alerte in resultat.alertes:
+        st.warning(alerte)
+    if resultat.matchs_incertains:
+        with st.expander(f"⚠️ {len(resultat.matchs_incertains)} correspondances "
+                         "incertaines à vérifier (fuzzy matching)"):
+            st.dataframe(pd.DataFrame(resultat.matchs_incertains),
+                         use_container_width=True)
+
+    onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3 = st.tabs([
+        f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
+        f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
+        f"🔭 Vigilance stock ({len(df_vigilance)})",
+        f"⚠️ Écartés de justesse ({len(df_justesse)})",
+        f"📋 Analyse complète ({len(resultat.onglet3)})",
+    ])
+    with onglet1:
+        if resultat.onglet1.empty:
+            st.info("Aucun produit à commander — tous les stocks couvrent "
+                    "la réappro.")
+        else:
+            # Comparaison avec l'historique : ce produit était-il déjà
+            # signalé ? (sans objet en mode démonstration)
+            affichage1 = resultat.onglet1.copy()
+            if not mode_demo:
+                affichage1["Déjà signalé"] = affichage1["Produit"].apply(
+                    lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
+                        moteur.compter_occurrences_historique(
+                            p, historique, st.session_state["date_analyse"])))
+            # ``{:g}`` : pas de décimales inutiles (0 et non 0.000000).
+            st.dataframe(affichage1.style.apply(_teinter_urgence, axis=1)
+                         .format(lambda v: f"{v:g}"
+                                 if isinstance(v, float) else v),
+                         use_container_width=True, hide_index=True)
+    with onglet2:
+        _onglet_simple(
+            resultat.onglet2,
+            "Aucun produit en rupture chez les deux fournisseurs.",
+            "Pour ces produits : anticiper l'information patient et contacter "
+            "GPNC pour confirmer les dates de réappro.")
+    with onglet_vigilance:
+        _onglet_simple(
+            df_vigilance,
+            "Aucune rupture en rayon à anticiper : tous les produits hors "
+            "rupture GPNC ont une couverture suffisante.",
+            "Produits que vous vendez, HORS liste de ruptures GPNC, dont le "
+            "stock s'épuise : commander chez GPNC (circuit normal) avant la "
+            "rupture en rayon.")
+    with onglet_justesse:
+        _onglet_simple(
+            df_justesse,
+            "Aucun produit écarté de justesse : les produits écartés ont tous "
+            "une marge confortable.",
+            "Écartés par la règle stricte (le stock couvre la réappro) mais "
+            "avec très peu de marge : si la date de réappro glisse, c'est la "
+            "rupture sèche. À surveiller.")
+    with onglet3:
+        _onglet_simple(
+            resultat.onglet3,
+            "Aucune rupture GPNC analysée.",
+            "Traçabilité : tous les produits en rupture GPNC, avec le détail "
+            "du calcul et le motif de la décision.")
+
+    st.download_button(
+        "⬇️ Télécharger le fichier Excel des ruptures",
+        data=moteur.exporter_excel(resultat),
+        file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary", use_container_width=True)
+
+# ===========================================================================
+# AXE 2 — GESTION DU STOCK EN ROTATION (point de gestion, hors quotidien)
+# ===========================================================================
+with axe_stock:
     if pilotage is None:
         st.info("Relancez l'analyse pour calculer le pilotage du stock.")
     else:
@@ -651,21 +680,11 @@ with onglet_pilotage:
             "Aucun stock dormant : toutes les couvertures sont raisonnables.",
             "Envisager retour fournisseur, promotion ou arrêt du réassort.")
 
-col_dl1, col_dl2 = st.columns([2, 1])
-with col_dl1:
-    st.download_button(
-        "⬇️ Télécharger le fichier Excel",
-        data=moteur.exporter_excel(resultat),
-        file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary", use_container_width=True)
-with col_dl2:
-    if pilotage is not None:
         st.download_button(
-            "📈 Excel pilotage (ABC + dormants)",
+            "⬇️ Télécharger l'Excel de gestion (ABC + dormants)",
             data=moteur.exporter_pilotage_excel(pilotage),
             file_name=("pilotage_stock_"
                        f"{st.session_state['date_analyse']:%Y-%m-%d}.xlsx"),
             mime=("application/vnd.openxmlformats-officedocument."
                   "spreadsheetml.sheet"),
-            use_container_width=True)
+            type="primary", use_container_width=True)
