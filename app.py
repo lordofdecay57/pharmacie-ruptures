@@ -17,6 +17,7 @@ Parcours (suivi dans la barre latérale) :
      télécharger l'Excel.
 """
 
+import dataclasses
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -290,10 +291,17 @@ with st.sidebar:
     date_analyse = st.date_input("📅 Date d'analyse", value=date.today(),
                                  format="DD/MM/YYYY")
     periode = st.radio(
-        "Période de calcul de la rotation",
-        ["annuelle", "3mois"],
-        format_func=lambda p: ("Annuelle (moyenne 12 mois)" if p == "annuelle"
-                               else "3 derniers mois"))
+        "Calcul de la rotation",
+        ["annuelle", "3mois", "lissee"],
+        format_func=lambda p: {
+            "annuelle": "Annuelle (moyenne 12 mois)",
+            "3mois": "3 derniers mois",
+            "lissee": "Lissée (réactive aux tendances)"}[p],
+        help="« Lissée » : lissage exponentiel — suit les hausses ET les "
+             "baisses récentes sans sur-réagir à un mois isolé. Attention : "
+             "un produit en rupture EN COURS (derniers mois à 0) voit sa "
+             "rotation lissée chuter — « Annuelle » reste plus robuste pour "
+             "ces cas, signalés « ⚠️ rupture passée possible ».")
 
     with st.expander("🎛️ Réglages d'anticipation"):
         seuil_vigilance = st.number_input(
@@ -320,6 +328,16 @@ with st.sidebar:
             "Rotation prudente (max annuelle / 3 mois)", value=False,
             help="Retient la plus élevée des deux moyennes par produit — "
                  "un produit en croissance n'est jamais sous-couvert.")
+        corriger_zeros = st.checkbox(
+            "Corriger les mois à 0 des ruptures passées", value=True,
+            help="Un mois à 0 vente ENTRE deux mois actifs = produit en "
+                 "rupture, pas absence de demande. Le corriger évite de "
+                 "sous-commander les produits qui ont déjà manqué.")
+        politique_abc = st.checkbox(
+            "Politique de couverture par classe ABC", value=False,
+            help="Sans date de réappro : cible A 21 j (réassort fréquent, "
+                 "petites quantités) · B 30 j · C 14 j (éviter le surstock) "
+                 "au lieu de 30 j pour tous. Modifie les quantités Cmd.")
 
     st.divider()
     if st.button("🔄 Nouvelle analyse", use_container_width=True):
@@ -462,7 +480,9 @@ if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
             rotation_min_vigilance=rotation_min_vigilance,
             seuil_marge_jours=seuil_marge,
             delai_livraison_jours=delai_livraison,
-            rotation_prudente=rotation_prudente)
+            rotation_prudente=rotation_prudente,
+            corriger_ruptures_passees=corriger_zeros,
+            politique_abc=politique_abc)
         st.session_state["resultat"] = resultat
         st.session_state["date_analyse"] = date_analyse
         st.session_state["pilotage"] = moteur.analyser_pilotage(
@@ -493,15 +513,6 @@ r = resultat.resume
 # code peut dater d'une version sans ces champs — dégrader, pas planter.
 df_vigilance = getattr(resultat, "vigilance", pd.DataFrame())
 df_justesse = getattr(resultat, "ecartes_justesse", pd.DataFrame())
-
-def _teinter_urgence(ligne):
-    """Code couleur des lignes de l'onglet 1 selon l'urgence."""
-    couleurs = {moteur.URGENT: "#f8cbad", moteur.MODERE: "#ffe699",
-                moteur.ANTICIPER: "#c6efce"}
-    fond = couleurs.get(ligne.get("Urgence"))
-    style = f"background-color: {fond}; color: #1a1a1a" if fond else ""
-    return [style] * len(ligne)
-
 
 def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
     """Affichage commun des onglets non stylés : tableau ou message vide."""
@@ -589,6 +600,7 @@ with axe_ruptures:
         if resultat.onglet1.empty:
             st.info("Aucun produit à commander — tous les stocks couvrent "
                     "la réappro.")
+            st.session_state["onglet1_valide"] = resultat.onglet1
         else:
             # Comparaison avec l'historique : ce produit était-il déjà
             # signalé ? (sans objet en mode démonstration)
@@ -598,11 +610,41 @@ with axe_ruptures:
                     lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
                         moteur.compter_occurrences_historique(
                             p, historique, st.session_state["date_analyse"])))
-            # ``{:g}`` : pas de décimales inutiles (0 et non 0.000000).
-            st.dataframe(affichage1.style.apply(_teinter_urgence, axis=1)
-                         .format(lambda v: f"{v:g}"
-                                 if isinstance(v, float) else v),
-                         use_container_width=True, hide_index=True)
+            # Validation de commande DANS l'outil : cocher/décocher, ajuster
+            # la quantité — l'export Excel reflète les ajustements.
+            affichage1.insert(0, "✔", True)
+            edite = st.data_editor(
+                affichage1,
+                column_config={
+                    "✔": st.column_config.CheckboxColumn(
+                        "✔", help="Décochez pour exclure de la commande"),
+                    "Qté à commander (Cmd)": st.column_config.NumberColumn(
+                        "Qté à commander (Cmd)", min_value=0, step=1,
+                        help="Ajustable avant export"),
+                },
+                disabled=[c for c in affichage1.columns
+                          if c not in ("✔", "Qté à commander (Cmd)")],
+                use_container_width=True, hide_index=True,
+                key="editeur_onglet1")
+            st.caption("Trié par **score de priorité** (risque à 7 j × poids "
+                       "A/B/C × fiabilité de la réappro). Cochez/décochez et "
+                       "ajustez les quantités : l'export Excel reprend vos "
+                       "choix.")
+            st.session_state["onglet1_valide"] = (
+                edite[edite["✔"]].drop(columns=["✔"]))
+
+        # Fiche produit : tout l'historique d'un produit avant de valider.
+        if not mode_demo and not historique.empty:
+            with st.expander("🔎 Historique d'un produit (avant validation)"):
+                produit_choisi = st.selectbox(
+                    "Produit", sorted(historique["Produit"].unique()),
+                    key="fiche_produit")
+                fiche = (historique[historique["Produit"] == produit_choisi]
+                         .sort_values("Date analyse", ascending=False))
+                st.dataframe(fiche, use_container_width=True, hide_index=True)
+                st.caption("Signalements passés, quantités commandées et "
+                           "dates de réappro successivement annoncées "
+                           "(type « surveillance » = écarté de justesse).")
     with onglet2:
         _onglet_simple(
             resultat.onglet2,
@@ -632,9 +674,16 @@ with axe_ruptures:
             "Traçabilité : tous les produits en rupture GPNC, avec le détail "
             "du calcul et le motif de la décision.")
 
+    # L'export reflète les validations/ajustements faits dans l'onglet 1.
+    onglet1_valide = st.session_state.get("onglet1_valide", resultat.onglet1)
+    if "Déjà signalé" in getattr(onglet1_valide, "columns", []):
+        onglet1_valide = onglet1_valide.drop(columns=["Déjà signalé"])
+    resultat_export = dataclasses.replace(resultat, onglet1=onglet1_valide)
+    nb_exclus = len(resultat.onglet1) - len(onglet1_valide)
     st.download_button(
-        "⬇️ Télécharger le fichier Excel des ruptures",
-        data=moteur.exporter_excel(resultat),
+        "⬇️ Télécharger le fichier Excel des ruptures"
+        + (f" ({nb_exclus} produit(s) décoché(s))" if nb_exclus else ""),
+        data=moteur.exporter_excel(resultat_export),
         file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary", use_container_width=True)

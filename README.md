@@ -50,6 +50,29 @@ l'information patient, contacter GPNC).
 
 Les seuils se règlent dans la barre latérale (« 🎛️ Réglages d'anticipation »).
 
+## Priorisation quotidienne (le tri du matin)
+
+- **Score de priorité 0-100** sur chaque ligne à commander et en vigilance :
+  50 pts de risque de rupture à 7 jours + 30 pts de poids dans vos ventes
+  (classe A/B/C) + 20 pts de fiabilité de la réappro (déjà repoussée, ou
+  sans date). Les listes sont triées par ce score : un produit A à fort
+  risque passe devant un produit C déjà à sec.
+- **P(rupture 7 j)** : probabilité de rupture sous 7 jours, calculée à
+  partir de la variabilité réelle des ventes du produit (ex. « 85 % »).
+- **Correction des faux zéros** (activée par défaut) : un mois à 0 vente
+  encadré de mois actifs = rupture passée, pas absence de demande — il est
+  interpolé avant le calcul de rotation, ce qui corrige le biais de
+  sous-commande sur les produits qui ont déjà manqué (« 🔧 corrigée »).
+- **Rotation lissée** (option) : lissage exponentiel réactif aux tendances
+  récentes, hausse comme baisse.
+- **Politique ABC** (option) : couverture cible sans date différenciée —
+  A 21 j (réassort fréquent) · B 30 j · C 14 j (éviter le surstock). La
+  règle d'apparition stricte ne change jamais.
+- **Validation de commande dans l'outil** : cochez/décochez les lignes,
+  ajustez les quantités — l'export Excel reprend vos choix. Une **fiche
+  produit** (expander 🔎) montre l'historique complet d'un produit avant
+  de valider.
+
 ## Deux axes de travail
 
 Les résultats sont organisés en **deux grands onglets** qui correspondent à
@@ -168,7 +191,7 @@ pharmacie-ruptures/
 ├── lancer.command         # double-clic Mac
 ├── README.md
 └── tests/
-    └── test_moteur.py     # 112 tests (dont Titanoréine, Ozempic, Aranesp)
+    └── test_moteur.py     # 130 tests (dont Titanoréine, Ozempic, Aranesp)
 ```
 
 ## Tests

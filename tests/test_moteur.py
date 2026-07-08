@@ -991,3 +991,127 @@ class TestSeparationMoisTotal:
         from moteur_ruptures import _separer_mois_et_total
         nombres = [str(n) for n in [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]]
         assert _separer_mois_et_total(nombres) == nombres
+
+
+# ---------------------------------------------------------------------------
+# Plan d'amélioration — chantiers 1, 2, 3, 5, 6
+# ---------------------------------------------------------------------------
+
+class TestCorrectionFauxZeros:
+    def test_zero_interieur_interpole(self):
+        from moteur_ruptures import corriger_faux_zeros
+        corrigees, nb = corriger_faux_zeros([10, 0, 12])
+        assert corrigees == [10, 11, 12] and nb == 1
+
+    def test_serie_de_zeros_interpolee(self):
+        from moteur_ruptures import corriger_faux_zeros
+        corrigees, nb = corriger_faux_zeros([9, 0, 0, 12])
+        assert corrigees == [9, 10, 11, 12] and nb == 2
+
+    def test_zeros_de_bord_conserves(self):
+        # Début (lancement) et fin (rupture EN COURS) : ne pas inventer.
+        from moteur_ruptures import corriger_faux_zeros
+        corrigees, nb = corriger_faux_zeros([0, 10, 10, 0])
+        assert corrigees == [0, 10, 10, 0] and nb == 0
+
+    def test_tout_a_zero_conserve(self):
+        from moteur_ruptures import corriger_faux_zeros
+        corrigees, nb = corriger_faux_zeros([0, 0, 0])
+        assert corrigees == [0, 0, 0] and nb == 0
+
+    def test_analyse_corrige_la_rotation(self):
+        # Dalacine avec un mois de rupture : [13, 0, 13] → rotation 13, pas 8,7.
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad.loc[cad["Produit"] == "DALACINE 300", ["V1", "V2", "V3"]] = [13, 0, 13]
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        ligne = resultat.onglet2[resultat.onglet2["Produit"] == "DALACINE 300"]
+        assert ligne["Rotation/mois"].iloc[0] == pytest.approx(13.0)
+
+    def test_desactivable(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        cad.loc[cad["Produit"] == "DALACINE 300", ["V1", "V2", "V3"]] = [13, 0, 13]
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            corriger_ruptures_passees=False)
+        ligne = resultat.onglet2[resultat.onglet2["Produit"] == "DALACINE 300"]
+        assert ligne["Rotation/mois"].iloc[0] == pytest.approx(8.7, abs=0.1)
+
+
+class TestRotationLissee:
+    def test_lissage_exponentiel(self):
+        # SES α=0,4 sur [10, 10, 20] : 10 → 10 → 0,4×20+0,6×10 = 14.
+        assert calculer_rotation_mensuelle([10, 10, 20], "lissee") == pytest.approx(14)
+
+    def test_reagit_a_la_baisse(self):
+        # Contrairement à « prudente », la baisse est bien suivie.
+        lissee = calculer_rotation_mensuelle([20, 20, 20, 5, 5, 5], "lissee")
+        assert lissee < 10  # bien en dessous de la moyenne plate (12,5)
+
+
+class TestProbabiliteRupture:
+    def test_stock_nul_demande_active(self):
+        from moteur_ruptures import probabilite_rupture
+        assert probabilite_rupture(0, 30, [30, 30, 30], 7) > 0.99
+
+    def test_stock_confortable(self):
+        from moteur_ruptures import probabilite_rupture
+        # 60 j de stock, demande stable → risque à 7 j quasi nul.
+        assert probabilite_rupture(60, 30, [30, 30, 30, 30], 7) < 0.01
+
+    def test_stock_egal_demande_moyenne(self):
+        from moteur_ruptures import probabilite_rupture
+        # Stock = demande moyenne de l'horizon → ~50 % par symétrie.
+        proba = probabilite_rupture(7, 30, [20, 30, 40], 7)
+        assert proba == pytest.approx(0.5, abs=0.05)
+
+    def test_sans_variabilite_deterministe(self):
+        from moteur_ruptures import probabilite_rupture
+        assert probabilite_rupture(5, 30, [30, 30], 7) == 1.0   # 7 j = 7 > 5
+        assert probabilite_rupture(10, 30, [30, 30], 7) == 0.0  # 10 > 7
+
+
+class TestScorePriorite:
+    def test_a_risque_devant_c_a_sec(self):
+        from moteur_ruptures import score_priorite
+        # Produit A à fort risque > produit C déjà à sec : le volume pèse.
+        score_a = score_priorite(0.9, "A")
+        score_c = score_priorite(1.0, "C")
+        assert score_a > score_c
+
+    def test_bornes(self):
+        from moteur_ruptures import score_priorite
+        assert score_priorite(1.0, "A", reports=2) == 100
+        assert score_priorite(0.0, "C") == 6
+
+    def test_onglet1_trie_par_priorite(self):
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        priorites = list(resultat.onglet1["Priorité"])
+        assert priorites == sorted(priorites, reverse=True)
+        assert "Classe" in resultat.onglet1.columns
+        assert "P(rupture 7 j)" in resultat.onglet1.columns
+
+
+class TestPolitiqueAbc:
+    def test_desactivee_reference_intacte(self):
+        # OFF (défaut) : Ozempic garde sa Cmd de référence (12, cible 30 j).
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        ligne = resultat.onglet1[resultat.onglet1["Produit"] == "OZEMPIC 1MG"]
+        assert ligne["Qté à commander (Cmd)"].iloc[0] == 12
+
+    def test_activee_cible_par_classe(self):
+        # ON : Ozempic est classe A → cible 21 j → ceil(16,5/30×21 − 5) = 7.
+        cad, gpnc, uni = _jeu_de_donnees()
+        resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                            politique_abc=True)
+        ligne = resultat.onglet1[resultat.onglet1["Produit"] == "OZEMPIC 1MG"]
+        assert ligne["Classe"].iloc[0] == "A"
+        assert ligne["Qté à commander (Cmd)"].iloc[0] == 7
+
+    def test_regle_apparition_inchangee(self):
+        # La politique ABC ne fait ni apparaître ni disparaître un produit.
+        cad, gpnc, uni = _jeu_de_donnees()
+        avec = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE,
+                        politique_abc=True)
+        sans = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
+        assert set(avec.onglet1["Produit"]) == set(sans.onglet1["Produit"])

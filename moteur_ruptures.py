@@ -58,6 +58,10 @@ _ORDRE_URGENCE = {URGENT: 0, MODERE: 1, ANTICIPER: 2}
 SEUIL_MATCH = 80      # score fuzzy minimal pour accepter une correspondance
 SEUIL_CERTAIN = 92    # en dessous → correspondance « incertaine », à vérifier
 
+ALPHA_LISSAGE = 0.4   # lissage exponentiel de la rotation (mois récent : 40 %)
+COUVERTURE_ABC = {"A": 21, "B": 30, "C": 14}  # cible sans date, si politique ABC
+POIDS_CLASSE = {"A": 1.0, "B": 0.5, "C": 0.2}  # poids volume du score priorité
+
 
 # ---------------------------------------------------------------------------
 # Normalisation / parsing
@@ -427,18 +431,99 @@ def _indexer(df: pd.DataFrame, col_libelle: str, col_cip: Optional[str]):
 # ---------------------------------------------------------------------------
 
 def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> float:
-    """Moyenne mensuelle des ventes.
+    """Rotation mensuelle estimée.
 
     ``ventes`` : valeurs mensuelles en ordre CHRONOLOGIQUE (la plus récente en
-    dernier). ``periode`` : "annuelle" (moyenne de tout) ou "3mois" (moyenne
-    des 3 dernières valeurs).
+    dernier). ``periode`` :
+      - "annuelle" : moyenne de toutes les valeurs ;
+      - "3mois"    : moyenne des 3 dernières ;
+      - "lissee"   : lissage exponentiel (α = 0,4) — réactif aux tendances
+        récentes, à la hausse COMME à la baisse, sans sur-réagir à un mois
+        isolé. Recommandé pour l'analyse quotidienne.
     """
     valeurs = [parser_nombre(v) for v in ventes]
     if not valeurs:
         return 0.0
     if periode == "3mois":
         valeurs = valeurs[-3:]
+    elif periode == "lissee":
+        lisse = valeurs[0]
+        for v in valeurs[1:]:
+            lisse = ALPHA_LISSAGE * v + (1 - ALPHA_LISSAGE) * lisse
+        return lisse
     return sum(valeurs) / len(valeurs)
+
+
+def corriger_faux_zeros(ventes: list):
+    """Corrige les mois à 0 vente ENCADRÉS de mois actifs.
+
+    Un 0 entre deux mois vendeurs signifie « produit en rupture », pas
+    « personne n'en voulait » : le laisser écrase la rotation et fait
+    SOUS-commander précisément les produits qui ont déjà manqué. Les zéros
+    sont remplacés par interpolation linéaire entre les mois actifs qui les
+    encadrent. Les zéros en DÉBUT ou FIN de période sont conservés
+    (lancement, arrêt de commercialisation, rupture en cours).
+
+    Renvoie ``(ventes_corrigees, nb_mois_corriges)``.
+    """
+    valeurs = [parser_nombre(v) for v in ventes]
+    corrigees, nb = list(valeurs), 0
+    i = 0
+    while i < len(valeurs):
+        if valeurs[i] == 0:
+            j = i
+            while j < len(valeurs) and valeurs[j] == 0:
+                j += 1
+            if 0 < i and j < len(valeurs):  # encadré de mois actifs
+                gauche, droite = valeurs[i - 1], valeurs[j]
+                for k in range(j - i):
+                    corrigees[i + k] = (gauche + (droite - gauche)
+                                        * (k + 1) / (j - i + 1))
+                    nb += 1
+            i = j
+        else:
+            i += 1
+    return corrigees, nb
+
+
+def probabilite_rupture(stock_effectif: float, rotation_mensuelle: float,
+                        ventes: list, horizon_jours: float = 7) -> float:
+    """Probabilité d'être en rupture d'ici ``horizon_jours``.
+
+    La demande sur l'horizon est modélisée en Normale(μ_h, σ_h) à partir de
+    la moyenne et de l'écart-type MENSUELS observés (σ_h = σ_mois ×
+    √(horizon/30)). Sans variabilité mesurable (moins de 3 mois, σ = 0),
+    repli déterministe : 1 si la demande moyenne épuise le stock, sinon 0.
+    """
+    if rotation_mensuelle <= 0:
+        return 0.0
+    demande_horizon = rotation_mensuelle / JOURS_PAR_MOIS * horizon_jours
+    valeurs = [parser_nombre(v) for v in ventes]
+    sigma_mois = 0.0
+    if len(valeurs) >= 3:
+        moyenne = sum(valeurs) / len(valeurs)
+        sigma_mois = (sum((v - moyenne) ** 2 for v in valeurs)
+                      / len(valeurs)) ** 0.5
+    sigma_horizon = sigma_mois * math.sqrt(horizon_jours / JOURS_PAR_MOIS)
+    if sigma_horizon <= 0:
+        return 1.0 if demande_horizon >= stock_effectif else 0.0
+    z = (stock_effectif - demande_horizon) / sigma_horizon
+    return 0.5 * (1 - math.erf(z / math.sqrt(2)))
+
+
+def score_priorite(risque_rupture: float, classe: str, reports: int = 0,
+                   sans_date: bool = False) -> int:
+    """Score de priorité de commande 0-100, pour trier la liste du matin.
+
+    - 50 pts : risque de rupture imminent (probabilité à 7 jours, 0-1) ;
+    - 30 pts : poids du produit dans les ventes (classe A/B/C) ;
+    - 20 pts : fiabilité de la réappro (déjà repoussée → 1 ; pas de date
+      annoncée → 0,5 ; date jamais démentie → 0).
+    """
+    risque = min(1.0, max(0.0, risque_rupture))
+    fiabilite = 1.0 if reports else (0.5 if sans_date else 0.0)
+    return int(round(50 * risque + 30 * POIDS_CLASSE.get(classe, 0.2)
+                     + 20 * fiabilite))
 
 
 def calculer_stock_jours(stock_actuel: float, rotation_mensuelle: float) -> float:
@@ -815,12 +900,14 @@ class ResultatAnalyse:
     # ^ écartés par la règle stricte mais avec très peu de marge
 
 
-COLONNES_ONGLET1 = ["Urgence", "Produit", "Stock actuel", "Commande en cours",
-                    "Rotation/mois", "Tendance", "Fiabilité rotation",
-                    "Stock (jours)", "Date réappro GPNC", "Jours avant réappro",
+COLONNES_ONGLET1 = ["Priorité", "Urgence", "Classe", "Produit", "Stock actuel",
+                    "Commande en cours", "Rotation/mois", "Tendance",
+                    "Fiabilité rotation", "Stock (jours)", "P(rupture 7 j)",
+                    "Date réappro GPNC", "Jours avant réappro",
                     "Péremption", "Qté à commander (Cmd)", "Commentaire"]
-COLONNES_VIGILANCE = ["Produit", "Stock actuel", "Commande en cours",
-                      "Rotation/mois", "Tendance", "Stock (jours)", "Conseil"]
+COLONNES_VIGILANCE = ["Priorité", "Classe", "Produit", "Stock actuel",
+                      "Commande en cours", "Rotation/mois", "Tendance",
+                      "Stock (jours)", "P(rupture 7 j)", "Conseil"]
 COLONNES_JUSTESSE = ["Produit", "Stock actuel", "Rotation/mois",
                      "Stock (jours)", "Date réappro GPNC",
                      "Jours avant réappro", "Marge (jours)", "Commentaire"]
@@ -843,7 +930,9 @@ def analyser(cadencier: pd.DataFrame,
              rotation_min_vigilance: float = ROTATION_MIN_VIGILANCE,
              seuil_marge_jours: float = SEUIL_MARGE_JUSTESSE_JOURS,
              delai_livraison_jours: float = 0,
-             rotation_prudente: bool = False) -> ResultatAnalyse:
+             rotation_prudente: bool = False,
+             corriger_ruptures_passees: bool = True,
+             politique_abc: bool = False) -> ResultatAnalyse:
     """Croise les 3 fichiers et produit les onglets de décision.
 
     Paramètres d'anticipation (tous facultatifs, comportement historique
@@ -858,7 +947,15 @@ def analyser(cadencier: pd.DataFrame,
         de cette marge → onglet Écartés de justesse ;
       - delai_livraison_jours : délai de livraison UNIPHARMA ajouté à la
         couverture cible du calcul de Cmd (pas à la règle d'apparition) ;
-      - rotation_prudente : retient max(annuelle, 3 mois) par produit.
+      - rotation_prudente : retient max(annuelle, 3 mois) par produit ;
+      - corriger_ruptures_passees : les mois à 0 vente encadrés de mois
+        actifs (= rupture passée) sont interpolés avant le calcul de
+        rotation — corrige le biais de SOUS-commande sur les produits qui
+        ont déjà manqué (actif par défaut) ;
+      - politique_abc : couverture cible SANS date différenciée par classe
+        (A 21 j · B 30 j · C 14 j) au lieu de 30 j pour tous — la règle
+        d'APPARITION reste la règle stricte, seule la Cmd change (opt-in,
+        car elle modifie les quantités de référence).
 
     ``mapping`` décrit les colonnes de chaque fichier :
       {
@@ -894,16 +991,24 @@ def analyser(cadencier: pd.DataFrame,
                        calculer_rotation_mensuelle(ventes, "3mois"))
         return calculer_rotation_mensuelle(ventes, periode)
 
-    def _extraire_cadencier(ligne_cad):
-        """Valeurs numériques d'une ligne du cadencier — partagé entre la
-        boucle des ruptures GPNC et le balayage Vigilance, pour que les deux
-        calculent la couverture avec exactement les mêmes règles."""
+    # --- Pré-calcul du cadencier : UNE passe pour tout le monde ------------
+    # (boucle GPNC, vigilance, classes ABC) : stock, commande en cours,
+    # ventes corrigées des faux zéros, rotation. Les classes ABC en sortent.
+    colonnes_ventes = [c for c in m_cad["ventes"] if c in cadencier.columns]
+    infos_cadencier: dict = {}
+    for idx, ligne_cad in cadencier.iterrows():
         stock = parser_nombre(ligne_cad[m_cad["stock"]])
         en_cours = (parser_nombre(ligne_cad[m_cad["commande_en_cours"]])
                     if m_cad.get("commande_en_cours") else 0.0)
-        ventes = [ligne_cad[c] for c in m_cad["ventes"]
-                  if c in cadencier.columns]
-        return stock, en_cours, ventes, _rotation(ventes)
+        ventes = [ligne_cad[c] for c in colonnes_ventes]
+        nb_corriges = 0
+        if corriger_ruptures_passees:
+            ventes, nb_corriges = corriger_faux_zeros(ventes)
+        infos_cadencier[idx] = (stock, en_cours, ventes, _rotation(ventes),
+                                nb_corriges)
+    indices = list(infos_cadencier)
+    classes_abc = classer_abc([infos_cadencier[i][3] for i in indices])
+    classe_par_index = dict(zip(indices, classes_abc))
 
     # Historique pré-groupé par produit (une seule passe de parsing/tri au
     # lieu d'un filtre complet du DataFrame par produit signalé). Seules les
@@ -976,7 +1081,9 @@ def analyser(cadencier: pd.DataFrame,
 
         ligne_cad = cadencier.loc[corr.index]
         indices_cadencier_traites.add(corr.index)
-        stock, en_cours, ventes, rotation = _extraire_cadencier(ligne_cad)
+        stock, en_cours, ventes, rotation, nb_corriges = \
+            infos_cadencier[corr.index]
+        classe = classe_par_index.get(corr.index, "C")
 
         # Commande en cours : évite de recommander ce qui arrive déjà.
         stock_effectif = stock + en_cours
@@ -997,8 +1104,12 @@ def analyser(cadencier: pd.DataFrame,
 
         tendance = calculer_tendance(ventes)
         rotation_douteuse = rotation_possiblement_sous_estimee(ventes)
-        affiche_fiabilite = ("⚠️ rupture passée possible" if rotation_douteuse
-                             else "OK")
+        if nb_corriges:  # faux zéros interpolés → rotation redressée
+            affiche_fiabilite = f"🔧 corrigée ({nb_corriges} mois de rupture)"
+        elif rotation_douteuse:  # zéros en bord de période, non corrigeables
+            affiche_fiabilite = "⚠️ rupture passée possible"
+        else:
+            affiche_fiabilite = "OK"
         if rotation <= 0:
             # Rupture LONGUE : ventes écrasées à 0 sur toute la période, mais
             # le produit était déjà signalé → ne pas l'écarter en silence.
@@ -1105,8 +1216,12 @@ def analyser(cadencier: pd.DataFrame,
         # --- Étape 5 : quantité à commander ---------------------------------
         # Le délai de livraison UNIPHARMA s'ajoute à la couverture cible :
         # les boîtes commandées aujourd'hui n'arrivent pas aujourd'hui.
+        # Sans date de réappro : cible 30 j pour tous, ou différenciée par
+        # classe (politique ABC, opt-in) — la règle d'apparition ne bouge pas.
+        cible_sans_date = (COUVERTURE_ABC.get(classe, COUVERTURE_SANS_DATE_JOURS)
+                           if politique_abc else COUVERTURE_SANS_DATE_JOURS)
         couverture_cible = (jours_avant if jours_avant is not None
-                            else COUVERTURE_SANS_DATE_JOURS) + delai_livraison_jours
+                            else cible_sans_date) + delai_livraison_jours
         conditionnement = None
         if m_cad.get("conditionnement"):
             c = parser_nombre(ligne_cad[m_cad["conditionnement"]])
@@ -1115,7 +1230,8 @@ def analyser(cadencier: pd.DataFrame,
                                    conditionnement)
 
         commentaire = ("Dépannage jusqu'à la réappro GPNC" if jours_avant is not None
-                       else "Pas de date de réappro → objectif 30 j de couverture")
+                       else f"Pas de date de réappro → objectif "
+                            f"{cible_sans_date:.0f} j de couverture")
         if en_cours:
             commentaire += f" · {en_cours:g} déjà en commande (déduit du calcul)"
         commentaire += avert_reports
@@ -1123,13 +1239,18 @@ def analyser(cadencier: pd.DataFrame,
             alertes.append(f"{produit_gpnc} : la date de réappro GPNC a déjà "
                            f"été repoussée {reports} fois — ne pas compter "
                            "dessus, privilégier le dépannage.")
+        proba7 = probabilite_rupture(stock_effectif, rotation, ventes, 7)
         lignes1.append({
-            "Urgence": urgence, "Produit": produit_gpnc, "Stock actuel": stock,
+            "Priorité": score_priorite(proba7, classe, reports,
+                                       sans_date=jours_avant is None),
+            "Urgence": urgence, "Classe": classe, "Produit": produit_gpnc,
+            "Stock actuel": stock,
             "Commande en cours": affiche_en_cours,
             "Rotation/mois": round(rotation, 1),
             "Tendance": tendance,
             "Fiabilité rotation": affiche_fiabilite,
             "Stock (jours)": round(stock_jours, 1),
+            "P(rupture 7 j)": f"{proba7:.0%}",
             "Date réappro GPNC": base3["Date réappro"],
             "Jours avant réappro": jours_avant if jours_avant is not None else "",
             "Péremption": affiche_peremption,
@@ -1145,34 +1266,41 @@ def analyser(cadencier: pd.DataFrame,
     # passe sous le seuil : la rupture en rayon arrive, autant commander
     # chez GPNC avant qu'elle se produise.
     lignes_vigilance: list = []
-    for idx, ligne_cad in cadencier.iterrows():
+    for idx in indices:
         if idx in indices_cadencier_traites:
             continue  # déjà couvert par l'analyse des ruptures GPNC
-        stock, en_cours, ventes, rotation = _extraire_cadencier(ligne_cad)
+        stock, en_cours, ventes, rotation, _ = infos_cadencier[idx]
         if rotation < rotation_min_vigilance or rotation <= 0:
             continue  # rotation trop faible : bruit, rien à anticiper
         stock_jours = calculer_stock_jours(stock + en_cours, rotation)
         if stock_jours >= seuil_vigilance_jours:
             continue
+        classe = classe_par_index.get(idx, "C")
+        proba7 = probabilite_rupture(stock + en_cours, rotation, ventes, 7)
         lignes_vigilance.append({
-            "Produit": str(ligne_cad[m_cad["libelle"]]).strip(),
+            "Priorité": score_priorite(proba7, classe),
+            "Classe": classe,
+            "Produit": str(cadencier.loc[idx, m_cad["libelle"]]).strip(),
             "Stock actuel": stock,
             "Commande en cours": (en_cours if m_cad.get("commande_en_cours")
                                   else ""),
             "Rotation/mois": round(rotation, 1),
             "Tendance": calculer_tendance(ventes),
             "Stock (jours)": round(stock_jours, 1),
+            "P(rupture 7 j)": f"{proba7:.0%}",
             "Conseil": ("Hors ruptures GPNC identifiées — commander avant "
                         "la rupture en rayon."),
             "_stock_jours": stock_jours,
         })
 
     # --- Tris et mise en forme des onglets ----------------------------------
+    # Onglet 1 : le score de priorité trie la liste du matin — un produit A
+    # à fort risque passe devant un produit C déjà à sec.
     df1 = pd.DataFrame(lignes1)
     if not df1.empty:
-        df1["_ordre"] = df1["Urgence"].map(_ORDRE_URGENCE)
-        df1 = (df1.sort_values(["_ordre", "_stock_jours"])
-                  .drop(columns=["_ordre", "_stock_jours"]))
+        df1 = (df1.sort_values(["Priorité", "_stock_jours"],
+                               ascending=[False, True])
+                  .drop(columns=["_stock_jours"]))
     df1 = df1.reindex(columns=COLONNES_ONGLET1)
 
     df2 = pd.DataFrame(lignes2)
@@ -1185,10 +1313,10 @@ def analyser(cadencier: pd.DataFrame,
     df3 = pd.DataFrame(lignes3).reindex(columns=COLONNES_ONGLET3)
 
     df_vigilance = pd.DataFrame(lignes_vigilance)
-    if not df_vigilance.empty:  # le plus critique puis le plus gros vendeur
+    if not df_vigilance.empty:  # priorité (risque × volume) puis couverture
         df_vigilance = (df_vigilance
-                        .sort_values(["_stock_jours", "Rotation/mois"],
-                                     ascending=[True, False])
+                        .sort_values(["Priorité", "_stock_jours"],
+                                     ascending=[False, True])
                         .drop(columns=["_stock_jours"]))
     df_vigilance = df_vigilance.reindex(columns=COLONNES_VIGILANCE)
 
