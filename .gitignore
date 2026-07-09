@@ -1,0 +1,4 @@
+config.yaml
+historique_commandes.csv
+__pycache__/
+.pytest_cache/

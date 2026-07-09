@@ -1,2 +1,207 @@
-# pharmacie-ruptures
-Application locale de gestion des ruptures de stock pharmacie (Streamlit)
+# 💊 Gestion des ruptures de stock — pharmacie
+
+Application **locale** (elle tourne sur votre PC, hors-ligne) qui croise chaque
+jour :
+
+1. le **cadencier** de la pharmacie (ventes + stock actuel),
+2. la liste des **ruptures GPNC** (`ruptgpnc_ia`) — fournisseur principal,
+3. la liste des **ruptures UNIPHARMA** (`ruptocdp_ia`) — fournisseur de dépannage,
+
+et produit le fichier Excel de décision `commande_ruptures_AAAA-MM-JJ.xlsx`
+(3 onglets : à commander chez UNIPHARMA · rupture chez les deux · traçabilité).
+
+## La règle métier (stricte, sans buffer)
+
+Un produit en rupture GPNC **que vous vendez** apparaît uniquement si :
+
+- il a une date de réappro : `stock (en jours) < jours jusqu'à la réappro`
+  (strictement — ex. Titanoréine réappro 16 j / stock 18 j → n'apparaît pas) ;
+- il n'a pas de date de réappro : `stock (en jours) < 30` (objectif 30 jours
+  de couverture).
+
+S'il apparaît : disponible chez UNIPHARMA → **Onglet 1** avec la quantité à
+commander (`Cmd`) et l'urgence (🔴 stock épuisé ou ≤ 3 j · 🟡 4-15 j ·
+🟢 > 15 j) ; en rupture aussi chez UNIPHARMA → **Onglet 2** (anticiper
+l'information patient, contacter GPNC).
+
+## Anticipation des ruptures à venir
+
+- **🔭 Vigilance stock** : produits que vous vendez, HORS liste de ruptures
+  GPNC, dont la couverture passe sous 7 jours (réglable) — la rupture en
+  rayon arrive, commander chez GPNC avant qu'elle se produise. Un plancher
+  de rotation (5 ventes/mois, réglable) écarte le bruit des produits à
+  rotation très lente.
+- **⚠️ Écartés de justesse** : produits écartés par la règle stricte avec
+  moins de 3 jours de marge (réglable) — si la date de réappro glisse,
+  c'est la rupture sèche. Visibles dans un onglet dédié, sans modifier la
+  règle de commande.
+- **Délai de livraison UNIPHARMA** (réglable, 1 jour par défaut) : ajouté à
+  la couverture cible du calcul de `Cmd` — les boîtes commandées aujourd'hui
+  n'arrivent pas aujourd'hui.
+- **Tendance de la demande** : ↗ / ↘ / → par produit (3 derniers mois vs
+  moyenne globale) ; option « rotation prudente » qui retient la moyenne la
+  plus élevée pour ne jamais sous-couvrir un produit en croissance.
+- **Dates de réappro repoussées** : l'historique mémorise la date annoncée ;
+  si elle glisse d'une analyse à l'autre, alerte « repoussée N fois » —
+  fournisseur peu fiable sur ce produit, privilégier le dépannage.
+- **Ruptures longues** : un produit aux ventes écrasées à 0 sur toute la
+  période mais déjà signalé dans l'historique passe en « À vérifier » au
+  lieu d'être écarté en silence.
+
+Les seuils se règlent dans la barre latérale (« 🎛️ Réglages d'anticipation »).
+
+## Priorisation quotidienne (le tri du matin)
+
+- **Score de priorité 0-100** sur chaque ligne à commander et en vigilance :
+  50 pts de risque de rupture à 7 jours + 30 pts de poids dans vos ventes
+  (classe A/B/C) + 20 pts de fiabilité de la réappro (déjà repoussée, ou
+  sans date). Les listes sont triées par ce score : un produit A à fort
+  risque passe devant un produit C déjà à sec.
+- **P(rupture 7 j)** : probabilité de rupture sous 7 jours, calculée à
+  partir de la variabilité réelle des ventes du produit (ex. « 85 % »).
+- **Correction des faux zéros** (activée par défaut) : un mois à 0 vente
+  encadré de mois actifs = rupture passée, pas absence de demande — il est
+  interpolé avant le calcul de rotation, ce qui corrige le biais de
+  sous-commande sur les produits qui ont déjà manqué (« 🔧 corrigée »).
+- **Rotation lissée** (option) : lissage exponentiel réactif aux tendances
+  récentes, hausse comme baisse.
+- **Politique ABC** (option) : couverture cible sans date différenciée —
+  A 21 j (réassort fréquent) · B 30 j · C 14 j (éviter le surstock). La
+  règle d'apparition stricte ne change jamais.
+- **Validation de commande dans l'outil** : cochez/décochez les lignes,
+  ajustez les quantités — l'export Excel reprend vos choix. Une **fiche
+  produit** (expander 🔎) montre l'historique complet d'un produit avant
+  de valider.
+
+## Deux axes de travail
+
+Les résultats sont organisés en **deux grands onglets** qui correspondent à
+deux métiers différents :
+
+- **🚨 Gestion des ruptures — le quotidien** : tuiles de synthèse,
+  comparatif avec l'analyse précédente, et les 5 vues d'action (à commander
+  UNIPHARMA, rupture chez les deux, vigilance, écartés de justesse, analyse
+  complète) + export Excel des ruptures. C'est l'écran de tous les jours.
+- **📦 Gestion du stock en rotation — le point de gestion** : classement
+  ABC, variabilité, saisonnalité, stock dormant, taux de service + export
+  Excel dédié. À consulter ponctuellement (point hebdo/mensuel).
+
+## Gestion du stock en rotation (axe 📦)
+
+Vue d'ensemble calculée depuis le cadencier — n'affecte aucune quantité
+commandée (pratiques standard des officines les mieux gérées) :
+
+- **Classement ABC** (Pareto) : A = les produits qui font 80 % des ventes —
+  leurs ruptures coûtent le plus, à surveiller en priorité ;
+- **Variabilité de la demande** (écart-type/moyenne) : base d'un stock de
+  sécurité différencié — un produit « forte variabilité » mérite plus de
+  marge qu'un produit stable ;
+- **Saisonnalité** : signale un mois de pic ≥ 2× la moyenne (à partir de
+  6 mois de recul) ;
+- **💤 Stock dormant** : produits à plus de 6 mois de couverture —
+  trésorerie immobilisée, envisager retour ou arrêt de réassort ;
+- **Taux de service produits A** : % de couples produit A × jour SANS
+  rupture signalée sur 30 jours glissants (alimenté par l'historique).
+
+Export dédié : bouton « ⬇️ Télécharger l'Excel de gestion (ABC + dormants) ».
+
+## Fonctionnalités complémentaires
+
+- **Commande en cours** (colonne facultative du cadencier) : une quantité déjà
+  commandée mais pas reçue est déduite du calcul de couverture et de `Cmd`,
+  pour éviter de recommander ce qui est déjà en route.
+- **Fiabilité de la rotation** : si un mois de ventes est à 0 au milieu de
+  mois actifs, l'outil signale « ⚠️ rupture passée possible » — la rotation
+  est probablement sous-estimée (le produit était en rupture, pas sans
+  demande), à corriger manuellement si besoin.
+- **Péremption / DLUO** (colonne facultative du cadencier) : alerte
+  informative si la péremption est à moins de 90 jours — n'écarte pas le
+  produit, sert juste à vérifier avant de commander davantage.
+- **Suivi quotidien** : chaque analyse (hors mode démo) est ajoutée à
+  `historique_commandes.csv` (local, jamais versionné). À chaque analyse,
+  l'écran affiche le comparatif avec la précédente — 🆕 nouvelles ruptures à
+  traiter, ✅ ruptures sorties de la liste — et l'onglet 1 marque chaque
+  produit « 🆕 nouveau » ou « 🔁 N fois » (rupture qui traîne). Une
+  ré-analyse le même jour remplace celle du jour (pas de doublon).
+
+## Installation (une seule fois)
+
+1. **Installer Python** (3.10 ou plus récent) : <https://www.python.org/downloads/>
+   — sous Windows, cochez bien **« Add Python to PATH »** pendant l'installation.
+2. Récupérer ce dossier `pharmacie-ruptures/` sur le PC (clé USB, téléchargement…).
+3. C'est tout : le script de lancement installe les dépendances tout seul la
+   première fois.
+
+Installation manuelle si besoin :
+
+```
+pip install -r requirements.txt
+```
+
+## Lancement
+
+- **Windows** : double-cliquez sur `lancer.bat`.
+- **Mac** : double-cliquez sur `lancer.command` (la première fois : clic droit
+  → Ouvrir, pour passer l'avertissement de sécurité).
+- **À la main** : `streamlit run app.py`
+
+Le navigateur s'ouvre sur `http://localhost:8501`. Pour arrêter l'app :
+fermez la fenêtre noire (ou Ctrl+C dedans).
+
+💡 **Pour découvrir l'outil sans fichiers** : cliquez sur
+« 🧪 Essayer avec des données de démonstration » sur l'écran d'accueil —
+l'analyse tourne sur un jeu fictif (Titanoréine, Ozempic, Aranesp…) sans
+toucher à votre configuration.
+
+## Utilisation (chaque jour)
+
+1. **Exportez et déposez les 3 fichiers du jour** (`.xlsx`, `.xls`, `.csv`
+   ou `.pdf`) dans les trois zones. Le **cadencier PDF WinPharma**
+   (multi-pages, ventes A/V par mois) est reconnu et converti
+   automatiquement — comptez ~1 minute de lecture pour 200 pages, puis le
+   fichier reste en cache. Les PDF scannés (images) ne sont pas lisibles :
+   préférez alors un export Excel/CSV.
+2. **Vérifiez les colonnes** détectées (libellé, CIP, stock, ventes
+   mensuelles, date de réappro) — corrigez avec les menus déroulants si
+   besoin. Votre choix est **mémorisé** (`config.yaml`) : le lendemain,
+   il est pré-rempli.
+3. Choisissez la **date d'analyse** et la **période de rotation** (moyenne
+   annuelle par défaut, ou 3 derniers mois) dans la **barre latérale** — qui
+   affiche aussi la progression (fichiers déposés, analyse lancée).
+4. Cliquez **« Lancer l'analyse »** : les 3 onglets s'affichent à l'écran avec
+   le code couleur d'urgence et un bandeau de résumé.
+5. Cliquez **« Télécharger le fichier Excel »**.
+
+⚠️ Les correspondances de produits **incertaines** (libellés proches mais pas
+identiques entre les fichiers) sont listées dans un panneau dédié : vérifiez-les
+avant de commander. Le matching utilise le **code CIP en priorité** quand il est
+présent dans les fichiers — c'est le plus fiable.
+
+## Structure du projet
+
+```
+pharmacie-ruptures/
+├── app.py                 # interface (Streamlit) — n'appelle que le moteur
+├── .streamlit/config.toml # thème de l'interface (vert pharmacie)
+├── moteur_ruptures.py     # moteur métier pur, testable indépendamment
+├── config.yaml            # mapping de colonnes mémorisé (créé au 1er lancement)
+├── historique_commandes.csv # historique des analyses (créé à la 1re analyse)
+├── requirements.txt       # dépendances Python
+├── lancer.bat             # double-clic Windows
+├── lancer.command         # double-clic Mac
+├── README.md
+└── tests/
+    └── test_moteur.py     # 130 tests (dont Titanoréine, Ozempic, Aranesp)
+```
+
+## Tests
+
+```
+cd pharmacie-ruptures
+python -m pytest tests/ -q
+```
+
+Les cas de référence validés en conversation sont couverts :
+Titanoréine (réappro 16 j, stock 18 j → écartée), Ozempic 1 mg (stock 5,
+~16,5/mois → ~9 j → 🟡 modéré, Cmd 12), Aranesp 150 (stock 0, réappro 2 j →
+🔴 urgent, Cmd ≥ 1).
