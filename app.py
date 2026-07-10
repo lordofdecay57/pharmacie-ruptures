@@ -324,22 +324,20 @@ with st.sidebar:
             "lissee": "Lissée (réactive aux tendances)"}[p],
         key="periode_rotation")
     with st.expander("🎛️ Paramètres stock min / max"):
-        lead_time = st.number_input(
-            "Délai de réappro fournisseur (jours)", 0, 60,
-            value=int(memo_rotation.get("lead_time",
-                                        stock_rotation.LEAD_TIME_JOURS_DEFAUT)),
-            help="Temps entre la commande et la réception des boîtes.")
-        stock_securite_j = st.number_input(
-            "Stock de sécurité (jours de consommation)", 0, 60,
+        couverture_min = st.number_input(
+            "Stock min (jours de couverture)", 1, 90,
             value=int(memo_rotation.get(
-                "securite", stock_rotation.STOCK_SECURITE_JOURS_DEFAUT)),
-            help="Marge contre les aléas de vente et de livraison.")
-        frequence_reassort = st.number_input(
-            "Fréquence de réassort visée (jours)", 1, 90,
+                "couverture_min", stock_rotation.COUVERTURE_MIN_JOURS_DEFAUT)),
+            help="Point de commande : passer sous ce niveau de couverture "
+                 "déclenche un réassort. Ajusté automatiquement les "
+                 "vendredis (+2 j) et samedis (+1 j) : pas de réception de "
+                 "commandes le week-end.")
+        couverture_max = st.number_input(
+            "Stock max (jours de couverture)", 1, 180,
             value=int(memo_rotation.get(
-                "frequence", stock_rotation.FREQUENCE_REASSORT_JOURS_DEFAUT)),
-            help="Tous les combien de temps voulez-vous repasser commande "
-                 "sur ce produit ? Détermine le stock max.")
+                "couverture_max", stock_rotation.COUVERTURE_MAX_JOURS_DEFAUT)),
+            help="Plafond de réassort : au-delà, trésorerie immobilisée et "
+                 "risque de péremption.")
         seuil_alerte_unites = st.number_input(
             "Seuil d'action immédiate (unités)", 0, 100,
             value=int(memo_rotation.get(
@@ -571,9 +569,9 @@ if st.button("🔍 Lancer l'analyse", type="primary",
              disabled=bool(problemes_stock), use_container_width=True):
     config_a_sauver = {
         "cadencier": mapping_cadencier,
-        "stock_rotation": {"periode": periode_rotation, "lead_time": lead_time,
-                           "securite": stock_securite_j,
-                           "frequence": frequence_reassort,
+        "stock_rotation": {"periode": periode_rotation,
+                           "couverture_min": couverture_min,
+                           "couverture_max": couverture_max,
                            "seuil_alerte": seuil_alerte_unites,
                            "conso_defaut": conso_defaut,
                            "seuil_dormant": seuil_dormant},
@@ -587,15 +585,16 @@ if st.button("🔍 Lancer l'analyse", type="primary",
     # --- Module 1 : Gestion des stocks en rotation (toujours calculable) ---
     try:
         params_stock = stock_rotation.ParametresStockRotation(
-            lead_time_jours=lead_time, stock_securite_jours=stock_securite_j,
-            frequence_reassort_jours=frequence_reassort,
+            couverture_min_jours=couverture_min,
+            couverture_max_jours=couverture_max,
             seuil_alerte_unites=seuil_alerte_unites,
             periode_rotation=periode_rotation,
             corriger_ruptures_passees=corriger_zeros_stock,
             consommation_defaut_mensuelle=conso_defaut,
             seuil_dormant_jours=seuil_dormant)
         st.session_state["resultat_stock"] = stock_rotation.analyser_stock_rotation(
-            df_cad, {"cadencier": mapping_cadencier}, params_stock)
+            df_cad, {"cadencier": mapping_cadencier}, params_stock,
+            date_analyse=date_analyse)
     except Exception as e:  # jamais de plantage brut à l'écran
         st.error(f"Erreur — Gestion des stocks en rotation : {e}")
 
@@ -669,15 +668,22 @@ with module_stock:
                             "immobilisées"),
         ]) + "</div>", unsafe_allow_html=True)
 
+        jours_we = rs.get("jours_weekend", 0)
+        if jours_we:
+            st.info(f"📅 **Ajustement week-end actif** : analyse d'un "
+                    f"{'vendredi' if jours_we == 2 else 'samedi'} — pas de "
+                    "réception de commandes samedi/dimanche, le stock min "
+                    f"du jour couvre **+{jours_we} jour(s)** de consommation.")
         st.markdown("**Stock min / max par produit** — calculé uniquement à "
                     "partir du cadencier (aucun lien avec les fichiers de "
                     "ruptures fournisseurs).")
         st.dataframe(resultat_stock.tableau, use_container_width=True,
                      hide_index=True, height=460)
         st.caption(
-            "Méthode : Stock min = consommation/j × (délai de réappro + "
-            "stock de sécurité) ; Stock max = Stock min + consommation/j × "
-            "fréquence de réassort. **Règle des "
+            f"Méthode : Stock min = consommation/j × {couverture_min:g} j "
+            "(point de commande, +2 j le vendredi / +1 j le samedi car pas "
+            "de réception le week-end) ; Stock max = consommation/j × "
+            f"{couverture_max:g} j (plafond). **Règle des "
             f"{seuil_alerte_unites:g} unités** : sous ce seuil, la cible "
             "passe directement au stock max (commande immédiate), sans "
             "recomplètement progressif jusqu'au seul stock min.")

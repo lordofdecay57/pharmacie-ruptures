@@ -6,15 +6,17 @@ cadencier un **stock min** et un **stock max**, afin d'éviter le
 sous-stockage (rupture) et le sur-stockage (trésorerie immobilisée,
 péremption).
 
-Méthode retenue — point de commande à recomplètement périodique (méthode
-standard de gestion de stock) :
+Méthode retenue — bornes de couverture directes (validées avec le
+pharmacien) :
 
-    Stock min = consommation/jour × (délai de réappro + stock de sécurité)
-    Stock max = Stock min + consommation/jour × fréquence de réassort visée
+    Stock min = consommation/jour × 14 jours   (point de commande)
+    Stock max = consommation/jour × 30 jours   (plafond de réassort)
 
-Le délai de réappro et le stock de sécurité sont exprimés en JOURS de
-consommation (plus intuitif à régler pour un pharmacien que des unités
-absolues, et cohérent avec le fait que les deux se traduisent en jours).
+Les deux bornes sont réglables. Le stock min du jour est AJUSTÉ au
+calendrier de réception : les commandes ne sont PAS reçues le samedi ni le
+dimanche, donc une commande passée le vendredi n'arrive que le lundi
+(+2 jours de couverture nécessaires ce jour-là), le samedi +1 jour — voir
+``jours_supplementaires_weekend``.
 
 Règle métier spécifique de l'officine (priorité sur la logique générale) :
 si le stock actuel passe sous un seuil ABSOLU (10 unités par défaut,
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 
 import pandas as pd
@@ -48,9 +51,8 @@ from commun import (JOURS_PAR_MOIS, calculer_rotation_mensuelle,
 # ---------------------------------------------------------------------------
 
 SEUIL_ALERTE_UNITES_DEFAUT = 10       # règle métier : sous ce seuil → cible = max
-LEAD_TIME_JOURS_DEFAUT = 5            # délai de réappro fournisseur
-STOCK_SECURITE_JOURS_DEFAUT = 7       # marge de sécurité, en jours de conso
-FREQUENCE_REASSORT_JOURS_DEFAUT = 14  # fréquence de commande visée
+COUVERTURE_MIN_JOURS_DEFAUT = 14      # stock min = 14 jours de consommation
+COUVERTURE_MAX_JOURS_DEFAUT = 30      # stock max = 30 jours de consommation
 CONSOMMATION_DEFAUT_MENSUELLE = 0.0   # repli si aucun historique (0 = désactivé)
 SEUIL_DORMANT_JOURS_DEFAUT = 180      # > 6 mois de couverture → stock dormant
 
@@ -59,9 +61,8 @@ SEUIL_DORMANT_JOURS_DEFAUT = 180      # > 6 mois de couverture → stock dormant
 class ParametresStockRotation:
     """Paramètres configurables du calcul min/max — aucun n'est codé en dur
     dans la logique de calcul, tous sont pilotables depuis l'interface."""
-    lead_time_jours: float = LEAD_TIME_JOURS_DEFAUT
-    stock_securite_jours: float = STOCK_SECURITE_JOURS_DEFAUT
-    frequence_reassort_jours: float = FREQUENCE_REASSORT_JOURS_DEFAUT
+    couverture_min_jours: float = COUVERTURE_MIN_JOURS_DEFAUT
+    couverture_max_jours: float = COUVERTURE_MAX_JOURS_DEFAUT
     seuil_alerte_unites: float = SEUIL_ALERTE_UNITES_DEFAUT
     periode_rotation: str = "annuelle"     # "annuelle" | "3mois" | "lissee"
     corriger_ruptures_passees: bool = True
@@ -73,27 +74,47 @@ class ParametresStockRotation:
 # Calculs élémentaires — unitairement testables
 # ---------------------------------------------------------------------------
 
-def calculer_stock_min(consommation_jour: float, lead_time_jours: float,
-                       stock_securite_jours: float) -> float:
-    """Stock min = conso/jour × (délai de réappro + stock de sécurité).
+def jours_supplementaires_weekend(date_commande: Optional[date]) -> int:
+    """Jours de couverture à AJOUTER au stock min du jour, parce que les
+    commandes ne sont pas réceptionnées le samedi ni le dimanche.
 
-    C'est le point de commande classique (reorder point) : le stock minimal
-    qui doit encore couvrir la consommation pendant tout le délai de
-    livraison, plus une marge de sécurité contre les aléas de vente.
+    Convention : une commande passée un jour ouvré est reçue le prochain
+    jour de réception (lundi-vendredi). Le lendemain sert de référence :
+      - vendredi → réception lundi au lieu de samedi : +2 jours ;
+      - samedi   → réception lundi au lieu de dimanche : +1 jour ;
+      - dimanche-jeudi → réception le lendemain : +0.
+    ``None`` (date inconnue, ex. tests unitaires) → 0.
     """
-    return consommation_jour * (lead_time_jours + stock_securite_jours)
+    if date_commande is None:
+        return 0
+    jour_semaine = date_commande.weekday()  # lundi = 0 … dimanche = 6
+    if jour_semaine == 4:   # vendredi
+        return 2
+    if jour_semaine == 5:   # samedi
+        return 1
+    return 0
 
 
-def calculer_stock_max(stock_min: float, consommation_jour: float,
-                       frequence_reassort_jours: float) -> float:
-    """Stock max = stock min + conso/jour × fréquence de réassort visée.
+def calculer_stock_min(consommation_jour: float, couverture_min_jours: float,
+                       jours_supplementaires: float = 0) -> float:
+    """Stock min = conso/jour × (couverture min + jours week-end éventuels).
 
-    La quantité de réassort optimale est ici approximée par la consommation
-    prévue jusqu'à la prochaine commande (modèle de recomplètement
-    périodique) : plus la fréquence de commande visée est faible (on
-    commande rarement), plus le stock max grimpe.
+    C'est le point de commande : passer sous ce niveau déclenche un
+    réassort. ``jours_supplementaires`` encaisse l'absence de réception le
+    week-end (voir ``jours_supplementaires_weekend``) : le vendredi, le
+    stock doit tenir 2 jours de plus qu'un jour de semaine ordinaire.
     """
-    return stock_min + consommation_jour * frequence_reassort_jours
+    return consommation_jour * (couverture_min_jours + jours_supplementaires)
+
+
+def calculer_stock_max(consommation_jour: float,
+                       couverture_max_jours: float) -> float:
+    """Stock max = conso/jour × couverture max (plafond de réassort).
+
+    Au-delà, le stock immobilise de la trésorerie et augmente le risque de
+    péremption sans améliorer le service.
+    """
+    return consommation_jour * couverture_max_jours
 
 
 def determiner_cible_reassort(stock_actuel: float, stock_min: float,
@@ -145,10 +166,15 @@ COLONNES_DORMANTS_ROTATION = ["Code CIP", "Nom du produit", "Stock actuel",
 
 
 def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
-                            params: Optional[ParametresStockRotation] = None
+                            params: Optional[ParametresStockRotation] = None,
+                            date_analyse: Optional[date] = None
                             ) -> ResultatStockRotation:
     """Calcule stock min/max et la quantité de réassort pour chaque produit
     du cadencier. Module AUTONOME : ne lit ni GPNC ni UNIPHARMA.
+
+    ``date_analyse`` sert UNIQUEMENT à l'ajustement week-end du stock min
+    (pas de réception samedi/dimanche : le vendredi, le stock min du jour
+    couvre +2 jours ; le samedi +1). Sans date : aucun ajustement.
 
     ``mapping`` : uniquement la clé "cadencier" du mapping habituel —
     {"libelle": str, "cip": str|None, "stock": str, "ventes": [str, ...]}.
@@ -163,6 +189,8 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
     params = params or ParametresStockRotation()
     m = mapping["cadencier"]
     colonnes_ventes = [c for c in m["ventes"] if c in cadencier.columns]
+    # Pas de réception le week-end : couverture min du JOUR ajustée.
+    jours_weekend = jours_supplementaires_weekend(date_analyse)
 
     lignes = []
     for _, ligne in cadencier.iterrows():
@@ -183,10 +211,11 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             continue  # ni vente ni stock : rien à piloter
 
         conso_jour = rotation / JOURS_PAR_MOIS
-        stock_min = calculer_stock_min(conso_jour, params.lead_time_jours,
-                                       params.stock_securite_jours)
-        stock_max = calculer_stock_max(stock_min, conso_jour,
-                                       params.frequence_reassort_jours)
+        stock_min = calculer_stock_min(conso_jour, params.couverture_min_jours,
+                                       jours_weekend)
+        stock_max = calculer_stock_max(conso_jour, params.couverture_max_jours)
+        # Cohérence : l'ajustement week-end ne doit jamais inverser les bornes.
+        stock_max = max(stock_max, stock_min)
         cible, qte, motif = determiner_cible_reassort(
             stock, stock_min, stock_max, params.seuil_alerte_unites)
         stock_jours = calculer_stock_jours(stock, rotation)
@@ -255,6 +284,7 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         "dormants_boites": (float(dormants["Stock actuel"].sum())
                             if not dormants.empty else 0.0),
         "qte_totale_a_commander": int(df["Qté à commander"].sum()),
+        "jours_weekend": jours_weekend,  # ajustement appliqué au stock min
     }
     return ResultatStockRotation(tableau, dormants, resume)
 

@@ -22,17 +22,28 @@ voir [Architecture](#architecture) plus bas.
 
 ### Méthode de calcul
 
-Point de commande à recomplètement périodique (méthode standard de gestion
-de stock) :
+Politique min/max exprimée directement en **jours de couverture** :
 
 ```
-Stock min = consommation/jour × (délai de réappro + stock de sécurité)
-Stock max = Stock min + consommation/jour × fréquence de réassort visée
+Stock min = consommation/jour × 14 jours (+ ajustement week-end)
+Stock max = consommation/jour × 30 jours
 ```
 
-Le délai de réappro et le stock de sécurité sont exprimés en **jours de
-consommation** (plus simple à régler et cohérent : les deux se traduisent
-naturellement en jours de couverture).
+Les couvertures (14 j / 30 j par défaut) sont réglables dans la barre
+latérale.
+
+#### Ajustement week-end (pas de réception samedi/dimanche)
+
+Les commandes ne sont pas réceptionnées le week-end. Le stock min est donc
+gonflé le jour de l'analyse pour couvrir l'attente supplémentaire :
+
+| Jour de l'analyse | Jours ajoutés au stock min | Pourquoi |
+|---|---|---|
+| Vendredi | +2 j | Commande du vendredi reçue lundi |
+| Samedi | +1 j | Commande du samedi reçue lundi |
+| Dimanche → jeudi | +0 j | Réception le lendemain ouvré |
+
+L'ajustement appliqué est affiché dans l'interface au-dessus des résultats.
 
 ### Règle métier des 10 unités (priorité sur tout le reste)
 
@@ -68,9 +79,8 @@ intervention nécessaire.
 
 | Paramètre | Défaut | Rôle |
 |---|---|---|
-| Délai de réappro fournisseur | 5 j | Temps commande → réception |
-| Stock de sécurité | 7 j de conso | Marge contre les aléas |
-| Fréquence de réassort visée | 14 j | Détermine le stock max |
+| Stock min | 14 j de couverture | Seuil de recomplètement |
+| Stock max | 30 j de couverture | Cible de la commande immédiate |
 | Seuil d'action immédiate | 10 unités | La règle des 10 unités |
 | Consommation par défaut | 0 (désactivé) | Repli si pas d'historique |
 | Seuil de stock dormant | 180 j de couverture | Trésorerie immobilisée |

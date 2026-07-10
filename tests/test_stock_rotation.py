@@ -11,43 +11,89 @@ besoin d'un fichier de ruptures GPNC/UNIPHARMA — seul le cadencier compte,
 ce qui prouve l'isolation vis-à-vis de moteur_ruptures.py.
 """
 
+from datetime import date
+
 import pandas as pd
 import pytest
 
 from stock_rotation import (ParametresStockRotation, analyser_stock_rotation,
                             calculer_stock_max, calculer_stock_min,
                             determiner_cible_reassort,
-                            exporter_stock_rotation_excel)
+                            exporter_stock_rotation_excel,
+                            jours_supplementaires_weekend)
 
 
 # ---------------------------------------------------------------------------
-# Calculs élémentaires : stock min / stock max
+# Calculs élémentaires : stock min / stock max (couvertures 14 j / 30 j)
 # ---------------------------------------------------------------------------
 
 class TestCalculStockMin:
     def test_formule_de_base(self):
-        # Conso 2/j, délai 5 j, sécurité 7 j → min = 2 × 12 = 24.
-        assert calculer_stock_min(2, lead_time_jours=5,
-                                  stock_securite_jours=7) == 24
+        # Conso 2/j, couverture 14 j → min = 28.
+        assert calculer_stock_min(2, couverture_min_jours=14) == 28
 
     def test_consommation_nulle_min_nul(self):
-        assert calculer_stock_min(0, lead_time_jours=5,
-                                  stock_securite_jours=7) == 0
+        assert calculer_stock_min(0, couverture_min_jours=14) == 0
 
-    def test_pas_de_stock_de_securite(self):
-        assert calculer_stock_min(3, lead_time_jours=5,
-                                  stock_securite_jours=0) == 15
+    def test_ajout_jours_weekend(self):
+        # Vendredi : +2 j → min = 2 × 16 = 32 au lieu de 28.
+        assert calculer_stock_min(2, couverture_min_jours=14,
+                                  jours_supplementaires=2) == 32
 
 
 class TestCalculStockMax:
     def test_formule_de_base(self):
-        # Min 24, conso 2/j, réassort tous les 14 j → max = 24 + 28 = 52.
-        assert calculer_stock_max(24, 2, frequence_reassort_jours=14) == 52
+        # Conso 2/j, couverture 30 j → max = 60.
+        assert calculer_stock_max(2, couverture_max_jours=30) == 60
 
-    def test_max_toujours_superieur_ou_egal_au_min(self):
-        stock_min = calculer_stock_min(1.5, 5, 7)
-        stock_max = calculer_stock_max(stock_min, 1.5, 14)
-        assert stock_max >= stock_min
+    def test_max_superieur_au_min_avec_defauts(self):
+        # 30 j > 14 j : le max domine toujours le min à paramètres par défaut.
+        assert (calculer_stock_max(1.5, 30)
+                > calculer_stock_min(1.5, 14))
+
+
+# ---------------------------------------------------------------------------
+# Week-end : pas de réception de commandes samedi / dimanche
+# ---------------------------------------------------------------------------
+
+class TestJoursWeekend:
+    def test_vendredi_plus_deux_jours(self):
+        # Vendredi 15/05/2026 : commande reçue lundi au lieu de samedi.
+        assert jours_supplementaires_weekend(date(2026, 5, 15)) == 2
+
+    def test_samedi_plus_un_jour(self):
+        assert jours_supplementaires_weekend(date(2026, 5, 16)) == 1
+
+    def test_jours_de_semaine_sans_ajustement(self):
+        # Dimanche à jeudi : réception le lendemain, rien à ajouter.
+        for jour in (10, 11, 12, 13, 14, 17):  # dim 10 → jeu 14, puis dim 17
+            assert jours_supplementaires_weekend(date(2026, 5, jour)) == 0
+
+    def test_sans_date_pas_d_ajustement(self):
+        assert jours_supplementaires_weekend(None) == 0
+
+    def test_stock_min_gonfle_le_vendredi(self):
+        # Conso 30/mois = 1/j : min 14 en semaine, 16 le vendredi.
+        cadencier = pd.DataFrame({
+            "Produit": ["PRODUIT REGULIER"], "CIP": ["5001"], "Stock": [15],
+            "Ventes avril": [30], "Ventes mai": [30], "Ventes juin": [30],
+        })
+        mapping = {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                                 "stock": "Stock",
+                                 "ventes": ["Ventes avril", "Ventes mai",
+                                            "Ventes juin"]}}
+        mardi = analyser_stock_rotation(cadencier, mapping,
+                                        date_analyse=date(2026, 5, 12))
+        vendredi = analyser_stock_rotation(cadencier, mapping,
+                                           date_analyse=date(2026, 5, 15))
+        min_mardi = mardi.tableau["Stock min (calculé)"].iloc[0]
+        min_vendredi = vendredi.tableau["Stock min (calculé)"].iloc[0]
+        assert min_mardi == pytest.approx(14.0)
+        assert min_vendredi == pytest.approx(16.0)
+        # Stock 15 : suffisant le mardi (15 ≥ 14), SOUS le min le vendredi.
+        assert mardi.tableau["Alerte"].iloc[0] == "🟢 OK"
+        assert vendredi.tableau["Alerte"].iloc[0] == "🟡 Sous le min"
+        assert vendredi.resume["jours_weekend"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +176,8 @@ def _cadencier():
                     "SANS HISTORIQUE", "ARRETE PEU DE STOCK"],
         "CIP": ["4001", "4002", "4003", "4004", "4005", "4006"],
         # CRITIQUE : 8 unités < seuil 10 → action requise.
-        # SOUS MIN : conso 30/mois → stock min 12 (défauts) ; stock 11 est
-        #   au-dessus du seuil (10) mais sous ce stock min → palier moyen.
+        # SOUS MIN : conso 30/mois = 1/j → stock min 14 (couverture 14 j) ;
+        #   stock 11 est au-dessus du seuil (10) mais sous ce min → palier moyen.
         # STOCK OK : largement au-dessus du stock min.
         # DORMANT : gros stock, faible rotation → couverture > 180 j.
         # SANS HISTORIQUE : aucune vente, stock 0.
@@ -175,7 +221,7 @@ class TestAnalyseStockRotation:
 
     def test_sous_le_min_palier_intermediaire(self):
         # Stock 11, au-dessus du seuil (10) mais sous le stock min calculé
-        # (12 avec les paramètres par défaut) → palier « Sous le min ».
+        # (14 avec la couverture par défaut) → palier « Sous le min ».
         resultat = analyser_stock_rotation(_cadencier(), _mapping_cadencier())
         ligne = resultat.tableau[resultat.tableau["Nom du produit"] == "SOUS MIN"]
         assert ligne["Alerte"].iloc[0] == "🟡 Sous le min"
@@ -216,11 +262,9 @@ class TestAnalyseStockRotation:
 
     def test_parametres_configurables_changent_le_resultat(self):
         params_larges = ParametresStockRotation(
-            lead_time_jours=1, stock_securite_jours=1,
-            frequence_reassort_jours=3)
+            couverture_min_jours=3, couverture_max_jours=7)
         params_serres = ParametresStockRotation(
-            lead_time_jours=20, stock_securite_jours=20,
-            frequence_reassort_jours=60)
+            couverture_min_jours=30, couverture_max_jours=90)
         r_larges = analyser_stock_rotation(_cadencier(), _mapping_cadencier(),
                                            params_larges)
         r_serres = analyser_stock_rotation(_cadencier(), _mapping_cadencier(),
