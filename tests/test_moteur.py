@@ -1,30 +1,31 @@
 # -*- coding: utf-8 -*-
-"""Tests du moteur métier — logique d'apparition STRICTE + cas de référence.
+"""Tests du Module 2 — Gestion des ruptures (moteur_ruptures.py).
 
-Cas connus (validés en conversation avec le pharmacien) :
+Logique d'apparition STRICTE + cas de référence (validés en conversation
+avec le pharmacien) :
   - Titanoréine : réappro 16 j, stock 18 j → écarté (18 ≥ 16).
   - Ozempic 1 mg : stock 5, ~16,5/mois → ~9 j → retenu, MODÉRÉ.
   - Aranesp 150 : stock 0, réappro dans 2 j → retenu, URGENT, Cmd ≥ 1.
+
+Les fonctions purement partagées (parsing, chargement de fichiers,
+statistiques de consommation) sont testées dans test_commun.py. Le Module 1
+(stock min/max) est testé dans test_stock_rotation.py.
 """
 
-import math
 from datetime import date
 
 import pandas as pd
 import pytest
 
 from moteur_ruptures import (ANTICIPER, MODERE, URGENT, Correspondance,
-                             analyser, apparier, calculer_rotation_mensuelle,
-                             calculer_stock_jours, calculer_tendance,
-                             charger_fichier, classer_urgence,
+                             _indexer, analyser, apparier, classer_urgence,
                              comparer_a_analyse_precedente,
                              compter_occurrences_historique,
-                             compter_reports_reappro,
-                             doit_apparaitre, exporter_excel,
-                             nom_fichier_sortie, normaliser_cip,
-                             normaliser_libelle, parser_date, parser_nombre,
-                             quantite_a_commander,
-                             rotation_possiblement_sous_estimee)
+                             compter_reports_reappro, doit_apparaitre,
+                             exporter_excel, nom_fichier_sortie,
+                             normaliser_cip, probabilite_rupture,
+                             quantite_a_commander, rotation_possiblement_sous_estimee,
+                             score_priorite, taux_de_service)
 
 DATE_ANALYSE = date(2026, 5, 13)
 
@@ -53,23 +54,6 @@ class TestRegleApparition:
     def test_stock_zero_apparait_toujours(self):
         assert doit_apparaitre(stock_jours=0, jours_avant_reappro=2) is True
         assert doit_apparaitre(stock_jours=0, jours_avant_reappro=None) is True
-
-
-# ---------------------------------------------------------------------------
-# Étape 2 — stock en jours
-# ---------------------------------------------------------------------------
-
-class TestStockJours:
-    def test_ozempic(self):
-        # Stock 5, 16,5/mois → 5 / (16,5/30) ≈ 9,09 j.
-        assert calculer_stock_jours(5, 16.5) == pytest.approx(9.09, abs=0.01)
-
-    def test_stock_zero(self):
-        assert calculer_stock_jours(0, 8) == 0.0
-
-    def test_rotation_nulle_infini(self):
-        # Division par zéro gérée : rotation nulle → couverture infinie.
-        assert math.isinf(calculer_stock_jours(5, 0))
 
 
 # ---------------------------------------------------------------------------
@@ -115,50 +99,6 @@ class TestQuantite:
 
 
 # ---------------------------------------------------------------------------
-# Rotation annuelle vs 3 mois
-# ---------------------------------------------------------------------------
-
-class TestRotation:
-    VENTES = [10, 10, 10, 10, 10, 10, 10, 10, 10, 20, 20, 20]  # récent en dernier
-
-    def test_annuelle(self):
-        assert calculer_rotation_mensuelle(self.VENTES, "annuelle") == pytest.approx(12.5)
-
-    def test_trois_mois(self):
-        assert calculer_rotation_mensuelle(self.VENTES, "3mois") == pytest.approx(20)
-
-    def test_virgule_francaise(self):
-        assert calculer_rotation_mensuelle(["16,5"], "annuelle") == pytest.approx(16.5)
-
-    def test_vide(self):
-        assert calculer_rotation_mensuelle([], "annuelle") == 0.0
-
-
-# ---------------------------------------------------------------------------
-# Normalisation / parsing
-# ---------------------------------------------------------------------------
-
-class TestParsing:
-    def test_normaliser_libelle(self):
-        assert (normaliser_libelle("  Titanoréine® suppo. B/12 ")
-                == "TITANOREINE SUPPO B 12")
-
-    def test_normaliser_cip_float_excel(self):
-        assert normaliser_cip("3400930123456.0") == "3400930123456"
-
-    def test_parser_nombre(self):
-        assert parser_nombre("16,5") == 16.5
-        assert parser_nombre(None) == 0.0
-        assert parser_nombre("") == 0.0
-
-    def test_parser_date_formats(self):
-        assert parser_date("15/05/2026") == date(2026, 5, 15)
-        assert parser_date("2026-05-15") == date(2026, 5, 15)
-        assert parser_date("") is None
-        assert parser_date("n'importe quoi illisible xyz") is None
-
-
-# ---------------------------------------------------------------------------
 # Matching produit (CIP prioritaire, fuzzy loggé)
 # ---------------------------------------------------------------------------
 
@@ -187,8 +127,30 @@ class TestMatching:
         assert corr.index is None and corr.methode == "aucune"
 
 
+class TestCipReels:
+    """Formats réels des exports : CIP13 ↔ CIP7, placeholder « 0 »."""
+
+    def test_apparier_cip13_contre_cadencier_cip7(self):
+        idx_cip = {"3230077": 4}  # cadencier indexé en CIP7
+        corr = apparier("TITANOREINE SUP BT12", "3400932300778",
+                        idx_cip, {}, [])
+        assert corr.index == 4 and corr.methode == "cip"
+
+    def test_indexation_cip13_cherchee_en_cip7(self):
+        df = pd.DataFrame({"Libelle": ["TITANOREINE SUP BT12"],
+                           "CIP13": ["3400932300778"]})
+        idx_cip, _, _ = _indexer(df, "Libelle", "CIP13")
+        assert idx_cip.get("3230077") == 0  # les deux formes indexées
+        assert idx_cip.get("3400932300778") == 0
+
+    def test_cip_zero_traite_comme_absent(self):
+        # Placeholder « 0 » des exports : ne doit jamais servir au matching.
+        corr = apparier("PRODUIT X", normaliser_cip("0"), {"0": 3}, {}, [])
+        assert corr.methode != "cip"
+
+
 # ---------------------------------------------------------------------------
-# Analyse de bout en bout (les 3 onglets)
+# Analyse de bout en bout (les onglets de décision)
 # ---------------------------------------------------------------------------
 
 def _mapping():
@@ -295,11 +257,7 @@ class TestReapproPassee:
         assert any("dépassée" in a for a in resultat.alertes)
 
 
-# ---------------------------------------------------------------------------
-# Export Excel + chargement de fichiers
-# ---------------------------------------------------------------------------
-
-class TestExportEtChargement:
+class TestExportRuptures:
     def test_export_excel_cinq_onglets(self):
         cad, gpnc, uni = _jeu_de_donnees()
         resultat = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
@@ -311,23 +269,6 @@ class TestExportEtChargement:
 
     def test_nom_fichier(self):
         assert nom_fichier_sortie(DATE_ANALYSE) == "commande_ruptures_2026-05-13.xlsx"
-
-    def test_charger_csv_point_virgule(self):
-        contenu = "Produit;Stock\nOZEMPIC 1MG;5\n".encode("utf-8")
-        df = charger_fichier(contenu, "cadencier.csv")
-        assert list(df.columns) == ["Produit", "Stock"]
-        assert len(df) == 1
-
-    def test_charger_xlsx(self, tmp_path):
-        chemin = tmp_path / "test.xlsx"
-        pd.DataFrame({"A": [1]}).to_excel(chemin, index=False)
-        df = charger_fichier(str(chemin), "test.xlsx")
-        assert list(df.columns) == ["A"]
-
-    def test_format_inconnu_message_clair(self):
-        # .pdf est désormais géré — .docx reste un format inconnu.
-        with pytest.raises(ValueError, match="Format non géré"):
-            charger_fichier(b"", "fichier.docx")
 
 
 # ---------------------------------------------------------------------------
@@ -453,31 +394,6 @@ class TestPeremption:
         mapping["cadencier"]["peremption"] = "DLUO"
         resultat = analyser(cad, gpnc, uni, mapping, DATE_ANALYSE, "annuelle")
         assert not any("péremption proche" in a for a in resultat.alertes)
-
-
-# ---------------------------------------------------------------------------
-# Anticipation — tendance de la demande
-# ---------------------------------------------------------------------------
-
-class TestTendance:
-    def test_hausse(self):
-        # Moyenne globale 12,5 ; 3 derniers mois 20 → +60 % → hausse.
-        assert calculer_tendance([10, 10, 10, 20, 20, 20]) == "↗ hausse"
-
-    def test_baisse(self):
-        assert calculer_tendance([20, 20, 20, 10, 10, 10]) == "↘ baisse"
-
-    def test_stable(self):
-        assert calculer_tendance([10, 11, 10, 9, 10, 10]) == "→ stable"
-
-    def test_cadencier_court_dernier_mois_vs_precedents(self):
-        # 2-3 mois de recul : dernier mois (20) vs moyenne des précédents
-        # (12,5) → +60 % → hausse. Un seul mois : rien à comparer.
-        assert calculer_tendance([5, 20, 20]) == "↗ hausse"
-        assert calculer_tendance([20]) == "→ stable"
-
-    def test_demande_nulle(self):
-        assert calculer_tendance([0, 0, 0, 0]) == "→ stable"
 
 
 # ---------------------------------------------------------------------------
@@ -685,123 +601,6 @@ class TestRuptureLongue:
 
 
 # ---------------------------------------------------------------------------
-# Formats réels des exports (CIP13 ↔ CIP7, CIP placeholder « 0 »)
-# ---------------------------------------------------------------------------
-
-class TestCipReels:
-    def test_cip13_matche_cip7(self):
-        # Titanoréine : 3400932300778 (CIP13) ↔ 3230077 (CIP7).
-        from moteur_ruptures import variantes_cip
-        assert "3230077" in variantes_cip("3400932300778")
-
-    def test_apparier_cip13_contre_cadencier_cip7(self):
-        idx_cip = {"3230077": 4}  # cadencier indexé en CIP7
-        corr = apparier("TITANOREINE SUP BT12", "3400932300778",
-                        idx_cip, {}, [])
-        assert corr.index == 4 and corr.methode == "cip"
-
-    def test_indexation_cip13_cherchee_en_cip7(self):
-        from moteur_ruptures import _indexer
-        df = pd.DataFrame({"Libelle": ["TITANOREINE SUP BT12"],
-                           "CIP13": ["3400932300778"]})
-        idx_cip, _, _ = _indexer(df, "Libelle", "CIP13")
-        assert idx_cip.get("3230077") == 0  # les deux formes indexées
-        assert idx_cip.get("3400932300778") == 0
-
-    def test_ean_parapharmacie_non_transforme(self):
-        from moteur_ruptures import variantes_cip
-        assert variantes_cip("7322540796742") == ["7322540796742"]
-
-    def test_cip_zero_traite_comme_absent(self):
-        # Placeholder « 0 » des exports : ne doit jamais servir au matching.
-        assert normaliser_cip("0") == ""
-        assert normaliser_cip("000") == ""
-        corr = apparier("PRODUIT X", normaliser_cip("0"), {"0": 3}, {}, [])
-        assert corr.methode != "cip"
-
-    def test_chargement_format_reel_unipharma(self):
-        # Reproduit l'en-tête et 2 lignes du vrai ruptocdp_ia.csv (CRLF).
-        contenu = ("CIP13;CIP;Libelle;Réappro;Rembt;TGC;Situation\r\n"
-                   "3400933937218;3393721;PYOSTACINE 250MG CP B/16      ;"
-                   "03/06/26;OUI;;1\r\n"
-                   "3400930571187;3057118;LARGACTIL CPR  25MG BT50      ;"
-                   ";OUI;3,0%  ;2\r\n").encode("utf-8")
-        df = charger_fichier(contenu, "ruptocdp_ia.csv")
-        assert len(df) == 2
-        from moteur_ruptures import detecter_colonne
-        assert detecter_colonne(df.columns, "libelle") == "Libelle"
-        assert detecter_colonne(df.columns, "date_reappro") == "Réappro"
-        assert parser_date(df["Réappro"].iloc[0]) == date(2026, 6, 3)
-
-
-# ---------------------------------------------------------------------------
-# Lecture des exports PDF (cadencier multi-pages)
-# ---------------------------------------------------------------------------
-
-class TestPdf:
-    def test_cadencier_pdf_multipages(self, tmp_path):
-        pytest.importorskip("pdfplumber")
-        pytest.importorskip("reportlab")
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-
-        chemin = tmp_path / "cadencier.pdf"
-        en_tete = ["Produit", "CIP", "Stock", "Ventes mai", "Ventes juin"]
-        lignes = [[f"PRODUIT {i:03d} CPR B30", f"3{i:06d}", "4", "10", "12"]
-                  for i in range(60)]  # 60 lignes → plusieurs pages
-        tableau = Table([en_tete] + lignes, repeatRows=1)  # en-tête répété
-        tableau.setStyle(TableStyle(
-            [("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
-        SimpleDocTemplate(str(chemin), pagesize=landscape(A4)).build([tableau])
-
-        df = charger_fichier(str(chemin), "cadencier.pdf")
-        assert list(df.columns) == en_tete
-        assert len(df) == 60  # en-têtes répétés éliminés, aucune ligne perdue
-
-    def test_pdf_illisible_message_clair(self):
-        pytest.importorskip("pdfplumber")
-        with pytest.raises(ValueError, match="PDF"):
-            charger_fichier(b"%PDF-1.4 contenu corrompu", "scan.pdf")
-
-
-# ---------------------------------------------------------------------------
-# Cadencier WinPharma (PDF réel : bandeau, A/V compactés, anti-chronologique)
-# ---------------------------------------------------------------------------
-
-class TestCadencierWinpharma:
-    BRUTES = [
-        ["PHARMACIE DE TEST 13/05/2026\nCADENCIER DE STOCK du 01/06/2025 "
-         "au 31/05/2026 Page: 1", "", "", ""],
-        ["Codes produit", "Nom / Formes & presentations", "Stock",
-         "Mai Avr Mar Fev Jan Dec Nov Oct Sep Aou Jul Jun Total"],
-        ["3230077\n3400932300778", "TITANOREINE SUPPO B/ 12\n182 SOLUTION",
-         "3", "A 0 0 0 0 15 0 0 0 18 0 12 12 57\nV 2 4 6 4 5 4 5 6 6 7 7 9 65"],
-        ["Manque: -9\nQte: 3652\nStock: 26368", "", "",
-         "A 9792 21254 23157 18629 18514 23269 18404 21661 19402 24100 1 2 3"],
-    ]
-
-    def test_extraction_produit(self):
-        from moteur_ruptures import _parser_cadencier_winpharma
-        df = _parser_cadencier_winpharma(self.BRUTES)
-        assert len(df) == 1  # bandeau, en-tête et ligne de totaux éliminés
-        assert df["CIP"].iloc[0] == "3400932300778"  # CIP13 préféré au CIP7
-        assert df["Produit"].iloc[0] == "TITANOREINE SUPPO B/ 12 182 SOLUTION"
-        assert df["Stock"].iloc[0] == "3"
-
-    def test_ventes_remises_en_ordre_chronologique(self):
-        from moteur_ruptures import _parser_cadencier_winpharma
-        df = _parser_cadencier_winpharma(self.BRUTES)
-        # Ligne V : Mai=2 (récent) … Jun=9 (ancien) → chronologique Jun→Mai.
-        assert list(df.columns[3:5]) == ["Ventes Jun", "Ventes Jul"]
-        assert df["Ventes Jun"].iloc[0] == "9"
-        assert df["Ventes Mai"].iloc[0] == "2"
-        # La rotation utilise bien la ligne V (65/12 ≈ 5,4), pas la ligne A.
-        ventes = [df[c].iloc[0] for c in df.columns if c.startswith("Ventes")]
-        assert calculer_rotation_mensuelle(ventes, "annuelle") == pytest.approx(65 / 12)
-
-
-# ---------------------------------------------------------------------------
 # Vigilance — plancher de rotation (anti-bruit)
 # ---------------------------------------------------------------------------
 
@@ -889,136 +688,11 @@ class TestCorrectifsAudit:
 
 
 # ---------------------------------------------------------------------------
-# Pilotage du stock (ABC, variabilité, saisonnalité, dormants, taux de service)
+# Correction des faux zéros — effet sur l'analyse complète (la fonction pure
+# corriger_faux_zeros est testée dans test_commun.py)
 # ---------------------------------------------------------------------------
 
-class TestClassementAbc:
-    def test_pareto_80_15_5(self):
-        from moteur_ruptures import classer_abc
-        # 80 fait 80 % du total (100) → A ; 15 → B ; 4 et 1 → C.
-        assert classer_abc([80, 15, 4, 1]) == ["A", "B", "C", "C"]
-
-    def test_plus_gros_vendeur_toujours_a(self):
-        from moteur_ruptures import classer_abc
-        # Même s'il dépasse 80 % à lui seul, le n°1 est classé A.
-        assert classer_abc([90, 10]) == ["A", "B"]
-
-    def test_volumes_nuls_en_c(self):
-        from moteur_ruptures import classer_abc
-        assert classer_abc([0, 0]) == ["C", "C"]
-        assert classer_abc([10, 0]) == ["A", "C"]
-
-
-class TestVariabiliteEtSaisonnalite:
-    def test_demande_stable(self):
-        from moteur_ruptures import variabilite_demande
-        assert "stable" in variabilite_demande([10, 10, 11, 9, 10, 10])
-
-    def test_demande_tres_variable(self):
-        from moteur_ruptures import variabilite_demande
-        assert "forte" in variabilite_demande([0, 30, 0, 30, 0, 30])
-
-    def test_pas_assez_de_recul(self):
-        from moteur_ruptures import variabilite_demande
-        assert variabilite_demande([10, 10]) == ""
-
-    def test_pic_saisonnier_nomme(self):
-        from moteur_ruptures import pic_saisonnier
-        mois = [f"Ventes {m}" for m in
-                ["Jul", "Aou", "Sep", "Oct", "Nov", "Dec"]]
-        # Décembre à 30 pour une moyenne < 15 → pic Dec.
-        assert pic_saisonnier([5, 5, 5, 5, 10, 30], mois) == "📈 pic Dec"
-
-    def test_pas_de_pic_sur_demande_reguliere(self):
-        from moteur_ruptures import pic_saisonnier
-        assert pic_saisonnier([10, 10, 10, 10, 10, 12], []) == ""
-
-
-class TestPilotage:
-    def test_dormant_detecte_et_indicateurs(self):
-        from moteur_ruptures import analyser_pilotage
-        cad, _, _ = _jeu_de_donnees()
-        # Produit dormant : 50 boîtes, 1 vente/mois → 1500 j de couverture.
-        cad.loc[len(cad)] = ["VIEILLE CREME", "3001", 50, 1, 1, 1]
-        pilotage = analyser_pilotage(cad, _mapping())
-        assert "VIEILLE CREME" in pilotage.dormants["Produit"].values
-        assert pilotage.indicateurs["dormants"] >= 1
-        assert pilotage.indicateurs["nb_a"] >= 1
-        # Ozempic (16,5/mois) est un produit A du jeu de données.
-        classe_ozempic = pilotage.tableau.loc[
-            pilotage.tableau["Produit"] == "OZEMPIC 1MG", "Classe"].iloc[0]
-        assert classe_ozempic == "A"
-
-    def test_taux_de_service_calcule(self):
-        from moteur_ruptures import taux_de_service
-        historique = pd.DataFrame({
-            "Date analyse": ["2026-05-11", "2026-05-12"],
-            "Produit": ["OZEMPIC 1MG", "OZEMPIC 1MG"],
-            "Urgence": ["🟡 MODÉRÉ", "🟡 MODÉRÉ"],
-            "Qté à commander (Cmd)": [12, 12],
-            "Date réappro": ["", ""], "Type": ["commande", "commande"],
-        })
-        # 2 produits A suivis sur 2 jours ; Ozempic en rupture les 2 jours
-        # → 2 ruptures / 4 couples → taux de service 50 %.
-        taux, jours = taux_de_service(["OZEMPIC 1MG", "ARANESP 150"],
-                                      historique, date(2026, 5, 13))
-        assert jours == 2
-        assert taux == pytest.approx(0.5)
-
-    def test_taux_sans_historique(self):
-        from moteur_ruptures import taux_de_service
-        taux, jours = taux_de_service(["X"], pd.DataFrame(), date(2026, 5, 13))
-        assert taux is None and jours == 0
-
-    def test_export_pilotage_deux_feuilles(self):
-        from moteur_ruptures import analyser_pilotage, exporter_pilotage_excel
-        cad, _, _ = _jeu_de_donnees()
-        contenu = exporter_pilotage_excel(analyser_pilotage(cad, _mapping()))
-        relu = pd.read_excel(pd.io.common.BytesIO(contenu), sheet_name=None)
-        assert set(relu) == {"Pilotage ABC", "Stock dormant"}
-
-
-class TestSeparationMoisTotal:
-    def test_cas_reel_doliprane(self):
-        # Ligne V réelle du cadencier : dernier mois (1572) collé au total
-        # (18268 = somme des 12 mois) faute de place dans le PDF.
-        from moteur_ruptures import _separer_mois_et_total
-        nombres = ["706", "1739", "1576", "1327", "1433", "1733", "1530",
-                   "1591", "1621", "1772", "1668", "157218268"]
-        assert _separer_mois_et_total(nombres)[-1] == "1572"
-
-    def test_sans_fusion_inchange(self):
-        from moteur_ruptures import _separer_mois_et_total
-        nombres = [str(n) for n in [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]]
-        assert _separer_mois_et_total(nombres) == nombres
-
-
-# ---------------------------------------------------------------------------
-# Plan d'amélioration — chantiers 1, 2, 3, 5, 6
-# ---------------------------------------------------------------------------
-
-class TestCorrectionFauxZeros:
-    def test_zero_interieur_interpole(self):
-        from moteur_ruptures import corriger_faux_zeros
-        corrigees, nb = corriger_faux_zeros([10, 0, 12])
-        assert corrigees == [10, 11, 12] and nb == 1
-
-    def test_serie_de_zeros_interpolee(self):
-        from moteur_ruptures import corriger_faux_zeros
-        corrigees, nb = corriger_faux_zeros([9, 0, 0, 12])
-        assert corrigees == [9, 10, 11, 12] and nb == 2
-
-    def test_zeros_de_bord_conserves(self):
-        # Début (lancement) et fin (rupture EN COURS) : ne pas inventer.
-        from moteur_ruptures import corriger_faux_zeros
-        corrigees, nb = corriger_faux_zeros([0, 10, 10, 0])
-        assert corrigees == [0, 10, 10, 0] and nb == 0
-
-    def test_tout_a_zero_conserve(self):
-        from moteur_ruptures import corriger_faux_zeros
-        corrigees, nb = corriger_faux_zeros([0, 0, 0])
-        assert corrigees == [0, 0, 0] and nb == 0
-
+class TestCorrectionFauxZerosAnalyse:
     def test_analyse_corrige_la_rotation(self):
         # Dalacine avec un mois de rupture : [13, 0, 13] → rotation 13, pas 8,7.
         cad, gpnc, uni = _jeu_de_donnees()
@@ -1036,49 +710,36 @@ class TestCorrectionFauxZeros:
         assert ligne["Rotation/mois"].iloc[0] == pytest.approx(8.7, abs=0.1)
 
 
-class TestRotationLissee:
-    def test_lissage_exponentiel(self):
-        # SES α=0,4 sur [10, 10, 20] : 10 → 10 → 0,4×20+0,6×10 = 14.
-        assert calculer_rotation_mensuelle([10, 10, 20], "lissee") == pytest.approx(14)
-
-    def test_reagit_a_la_baisse(self):
-        # Contrairement à « prudente », la baisse est bien suivie.
-        lissee = calculer_rotation_mensuelle([20, 20, 20, 5, 5, 5], "lissee")
-        assert lissee < 10  # bien en dessous de la moyenne plate (12,5)
-
+# ---------------------------------------------------------------------------
+# Probabilité de rupture à horizon (utilisée par le score de priorité)
+# ---------------------------------------------------------------------------
 
 class TestProbabiliteRupture:
     def test_stock_nul_demande_active(self):
-        from moteur_ruptures import probabilite_rupture
         assert probabilite_rupture(0, 30, [30, 30, 30], 7) > 0.99
 
     def test_stock_confortable(self):
-        from moteur_ruptures import probabilite_rupture
         # 60 j de stock, demande stable → risque à 7 j quasi nul.
         assert probabilite_rupture(60, 30, [30, 30, 30, 30], 7) < 0.01
 
     def test_stock_egal_demande_moyenne(self):
-        from moteur_ruptures import probabilite_rupture
         # Stock = demande moyenne de l'horizon → ~50 % par symétrie.
         proba = probabilite_rupture(7, 30, [20, 30, 40], 7)
         assert proba == pytest.approx(0.5, abs=0.05)
 
     def test_sans_variabilite_deterministe(self):
-        from moteur_ruptures import probabilite_rupture
         assert probabilite_rupture(5, 30, [30, 30], 7) == 1.0   # 7 j = 7 > 5
         assert probabilite_rupture(10, 30, [30, 30], 7) == 0.0  # 10 > 7
 
 
 class TestScorePriorite:
     def test_a_risque_devant_c_a_sec(self):
-        from moteur_ruptures import score_priorite
         # Produit A à fort risque > produit C déjà à sec : le volume pèse.
         score_a = score_priorite(0.9, "A")
         score_c = score_priorite(1.0, "C")
         assert score_a > score_c
 
     def test_bornes(self):
-        from moteur_ruptures import score_priorite
         assert score_priorite(1.0, "A", reports=2) == 100
         assert score_priorite(0.0, "C") == 6
 
@@ -1115,3 +776,29 @@ class TestPolitiqueAbc:
                         politique_abc=True)
         sans = analyser(cad, gpnc, uni, _mapping(), DATE_ANALYSE)
         assert set(avec.onglet1["Produit"]) == set(sans.onglet1["Produit"])
+
+
+# ---------------------------------------------------------------------------
+# Taux de service (métrique de RUPTURES — dépend de l'historique de ce
+# module, indépamment du Module 1 « stock en rotation »)
+# ---------------------------------------------------------------------------
+
+class TestTauxDeService:
+    def test_taux_de_service_calcule(self):
+        historique = pd.DataFrame({
+            "Date analyse": ["2026-05-11", "2026-05-12"],
+            "Produit": ["OZEMPIC 1MG", "OZEMPIC 1MG"],
+            "Urgence": ["🟡 MODÉRÉ", "🟡 MODÉRÉ"],
+            "Qté à commander (Cmd)": [12, 12],
+            "Date réappro": ["", ""], "Type": ["commande", "commande"],
+        })
+        # 2 produits A suivis sur 2 jours ; Ozempic en rupture les 2 jours
+        # → 2 ruptures / 4 couples → taux de service 50 %.
+        taux, jours = taux_de_service(["OZEMPIC 1MG", "ARANESP 150"],
+                                      historique, date(2026, 5, 13))
+        assert jours == 2
+        assert taux == pytest.approx(0.5)
+
+    def test_taux_sans_historique(self):
+        taux, jours = taux_de_service(["X"], pd.DataFrame(), date(2026, 5, 13))
+        assert taux is None and jours == 0

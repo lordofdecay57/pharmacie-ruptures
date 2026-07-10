@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Moteur métier de gestion des ruptures de stock (pharmacie).
+"""Module 2 — Gestion des ruptures de stock (pharmacie).
 
 Module Python PUR, sans interface : toute la logique de calcul vit ici et est
 testable indépendamment (voir tests/test_moteur.py). L'interface Streamlit
@@ -17,19 +17,33 @@ Logique métier (STRICTE, sans buffer — corrigée avec l'utilisateur) :
   5. Cmd = arrondi_sup(rotation_journaliere × couverture_cible − stock), min 1,
      arrondi au conditionnement si l'info existe.
   6. Urgence : URGENT (stock 0 ou ≤ 3 j) · MODÉRÉ (≤ 15 j) · À ANTICIPER (> 15 j).
+
+ISOLATION : ce module croise le cadencier avec DEUX listes fournisseurs
+(GPNC, UNIPHARMA) — c'est sa seule raison d'être. La politique de stock
+min/max (Module 1) vit entièrement dans stock_rotation.py, que ce module
+n'importe jamais. Les calculs de consommation partagés (rotation, tendance,
+variabilité, classement ABC, correction des ruptures passées) viennent de
+commun.py : mutualisation des calculs, aucun couplage fonctionnel entre les
+deux modules métier.
 """
 
 from __future__ import annotations
 
-import io
 import math
-import re
-import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
+
+from commun import (JOURS_PAR_MOIS, calculer_rotation_mensuelle,
+                    calculer_stock_jours, calculer_tendance, classer_abc,
+                    corriger_faux_zeros, normaliser_cip, normaliser_libelle,
+                    parser_date, parser_nombre, variantes_cip)
+# Ré-exportés pour compatibilité : app.py et les tests historiques importent
+# ces fonctions génériques directement depuis moteur_ruptures.
+from commun import (charger_fichier, detecter_colonne,  # noqa: F401
+                    detecter_colonnes_ventes, exporter_classeur)
 
 try:  # rapidfuzz est optionnel : sans lui, seul le matching exact/CIP marche.
     from rapidfuzz import fuzz
@@ -39,16 +53,14 @@ except ImportError:  # pragma: no cover - environnement sans rapidfuzz
     _RAPIDFUZZ = False
 
 # ---------------------------------------------------------------------------
-# Constantes métier
+# Constantes métier — spécifiques aux ruptures fournisseurs
 # ---------------------------------------------------------------------------
 
 COUVERTURE_SANS_DATE_JOURS = 30   # objectif de couverture quand pas de réappro
-JOURS_PAR_MOIS = 30               # convention rotation mensuelle → journalière
 SEUIL_ALERTE_PEREMPTION_JOURS = 90  # DLUO à moins de ~3 mois → alerte
 SEUIL_VIGILANCE_JOURS = 7         # couverture < 7 j hors rupture → vigilance
 ROTATION_MIN_VIGILANCE = 5        # < 5 ventes/mois → pas de vigilance (bruit)
 SEUIL_MARGE_JUSTESSE_JOURS = 3    # écarté avec < 3 j de marge → à surveiller
-SEUIL_TENDANCE = 0.20             # ±20 % entre 3 mois et annuelle → ↗ / ↘
 
 URGENT = "🔴 URGENT"
 MODERE = "🟡 MODÉRÉ"
@@ -58,324 +70,13 @@ _ORDRE_URGENCE = {URGENT: 0, MODERE: 1, ANTICIPER: 2}
 SEUIL_MATCH = 80      # score fuzzy minimal pour accepter une correspondance
 SEUIL_CERTAIN = 92    # en dessous → correspondance « incertaine », à vérifier
 
-ALPHA_LISSAGE = 0.4   # lissage exponentiel de la rotation (mois récent : 40 %)
 COUVERTURE_ABC = {"A": 21, "B": 30, "C": 14}  # cible sans date, si politique ABC
 POIDS_CLASSE = {"A": 1.0, "B": 0.5, "C": 0.2}  # poids volume du score priorité
 
 
 # ---------------------------------------------------------------------------
-# Normalisation / parsing
-# ---------------------------------------------------------------------------
-
-def normaliser_libelle(libelle) -> str:
-    """Majuscules, sans accents, ponctuation → espace, espaces réduits."""
-    if libelle is None or (isinstance(libelle, float) and math.isnan(libelle)):
-        return ""
-    s = str(libelle)
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    s = s.upper()
-    s = re.sub(r"[^A-Z0-9]+", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def normaliser_cip(cip) -> str:
-    """Ne garde que les chiffres (gère les CIP lus en float : '3400930.0').
-
-    Un CIP « 0 » (placeholder fréquent dans les exports) est traité comme
-    absent — sinon deux produits distincts à CIP 0 se rapprocheraient à tort.
-    """
-    if cip is None or (isinstance(cip, float) and math.isnan(cip)):
-        return ""
-    s = str(cip).strip()
-    if re.fullmatch(r"\d+\.0+", s):  # float Excel → entier
-        s = s.split(".")[0]
-    s = re.sub(r"\D", "", s)
-    return "" if s.strip("0") == "" else s
-
-
-def variantes_cip(cip: str) -> list:
-    """Formes équivalentes d'un CIP pour le matching inter-fichiers.
-
-    Les exports mélangent CIP13 et CIP7 : le CIP13 médicament français
-    (13 chiffres, préfixe 3400) contient le CIP7 en positions 6-12
-    (ex. 3400932300778 → 3230077, Titanoréine). On rapproche donc les deux
-    formes. Les autres EAN13 (parapharmacie…) restent tels quels.
-    """
-    if not cip:
-        return []
-    formes = [cip]
-    if len(cip) == 13 and cip.startswith("3400"):
-        formes.append(cip[5:12])  # CIP7 embarqué dans le CIP13
-    return formes
-
-
-def parser_nombre(val) -> float:
-    """Nombre robuste : virgule décimale française, espaces, vide → 0."""
-    if val is None:
-        return 0.0
-    if isinstance(val, (int, float)):
-        return 0.0 if (isinstance(val, float) and math.isnan(val)) else float(val)
-    s = str(val).strip().replace(" ", "").replace(" ", "")
-    if not s:
-        return 0.0
-    s = s.replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
-
-
-def parser_date(val) -> Optional[date]:
-    """Date robuste (formats français en priorité). None si illisible/vide."""
-    if val is None or (isinstance(val, float) and math.isnan(val)):
-        return None
-    if isinstance(val, datetime):
-        return val.date()
-    if isinstance(val, date):
-        return val
-    s = str(val).strip()
-    if not s or s.lower() in {"nan", "nat", "-", "?"}:
-        return None
-    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y",
-                "%d/%m", "%d-%m"):
-        try:
-            d = datetime.strptime(s, fmt).date()
-            if fmt in ("%d/%m", "%d-%m"):  # jour/mois sans année → année en cours
-                d = d.replace(year=date.today().year)
-            return d
-        except ValueError:
-            continue
-    try:  # dernier recours : pandas, convention jour d'abord (français)
-        d = pd.to_datetime(s, dayfirst=True, errors="coerce")
-        return None if pd.isna(d) else d.date()
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Chargement des fichiers (.xlsx / .xls / .csv)
-# ---------------------------------------------------------------------------
-
-def charger_fichier(contenu, nom_fichier: str) -> pd.DataFrame:
-    """Charge un fichier Excel/CSV en DataFrame (colonnes en str).
-
-    ``contenu`` : bytes, chemin, ou objet fichier (upload Streamlit).
-    Lève ValueError avec un message clair si le format n'est pas géré.
-    """
-    nom = (nom_fichier or "").lower()
-    if isinstance(contenu, (str,)):  # chemin sur disque
-        with open(contenu, "rb") as f:
-            data = f.read()
-    elif isinstance(contenu, bytes):
-        data = contenu
-    else:  # objet fichier (BytesIO, UploadedFile…)
-        data = contenu.read()
-
-    if nom.endswith(".csv") or nom.endswith(".txt"):
-        for encodage in ("utf-8-sig", "utf-8", "latin-1"):
-            try:
-                texte = data.decode(encodage)
-                sep = ";" if texte.count(";") >= texte.count(",") else ","
-                df = pd.read_csv(io.StringIO(texte), sep=sep)
-                break
-            except (UnicodeDecodeError, pd.errors.ParserError):
-                continue
-        else:
-            raise ValueError(f"CSV illisible : {nom_fichier}")
-    elif nom.endswith(".xlsx") or nom.endswith(".xlsm"):
-        df = pd.read_excel(io.BytesIO(data), engine="openpyxl")
-    elif nom.endswith(".xls"):
-        df = pd.read_excel(io.BytesIO(data))  # xlrd requis pour les vieux .xls
-    elif nom.endswith(".pdf"):
-        df = _charger_pdf(data, nom_fichier)
-    else:
-        raise ValueError(
-            f"Format non géré : {nom_fichier} (attendu .xlsx, .xls, .csv ou .pdf)")
-
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-
-def _charger_pdf(data: bytes, nom_fichier: str) -> pd.DataFrame:
-    """Extrait le tableau d'un PDF multi-pages (export type cadencier).
-
-    Le cadencier WinPharma (en-tête « Codes produit ») est reconnu et passe
-    par un parseur dédié. Sinon : la première ligne non vide sert d'en-tête,
-    l'en-tête répété en haut de chaque page est éliminé. PDF sans traits de
-    tableau : repli sur l'alignement du texte. PDF scanné (image) : message
-    clair, préférer l'export Excel/CSV.
-    """
-    try:
-        import pdfplumber
-    except ImportError:
-        raise ValueError("Lecture PDF indisponible : lancez "
-                         "« pip install pdfplumber » puis réessayez.")
-
-    brutes: list = []
-    try:
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                if not tables:  # pas de traits → colonnes par alignement texte
-                    table = page.extract_table({"vertical_strategy": "text",
-                                                "horizontal_strategy": "text"})
-                    tables = [table] if table else []
-                for table in tables:
-                    for brute in table:
-                        valeurs = ["" if v is None else str(v).strip()
-                                   for v in (brute or [])]
-                        if any(valeurs):
-                            brutes.append(valeurs)
-    except Exception:
-        raise ValueError(f"PDF illisible : {nom_fichier}")
-
-    if not brutes:
-        raise ValueError(
-            f"Aucun tableau lisible dans {nom_fichier} — s'il s'agit d'un "
-            "PDF scanné (image), préférez un export Excel ou CSV.")
-
-    if any("Codes produit" in " ".join(r) for r in brutes[:40]):
-        return _parser_cadencier_winpharma(brutes)
-
-    en_tete, lignes = None, []
-    for valeurs in brutes:
-        if en_tete is None:
-            en_tete = valeurs
-        elif valeurs != en_tete:  # ignore l'en-tête répété à chaque page
-            lignes.append(valeurs)
-    if en_tete is None or not lignes:
-        raise ValueError(
-            f"Aucun tableau lisible dans {nom_fichier} — s'il s'agit d'un "
-            "PDF scanné (image), préférez un export Excel ou CSV.")
-    largeur = len(en_tete)  # aligne les lignes incomplètes sur l'en-tête
-    lignes = [l[:largeur] + [""] * (largeur - len(l)) for l in lignes]
-    return pd.DataFrame(lignes, columns=en_tete)
-
-
-def _separer_mois_et_total(nombres: list) -> list:
-    """12 valeurs au lieu de 13 : le mois le plus ancien et le Total sont
-    probablement collés. Sépare le dernier jeton en (mois, total) en validant
-    par la somme : Total == somme des 12 mois. Inchangé si aucune coupe ne
-    se vérifie (vraie ligne à 12 valeurs sans total, ou décimales).
-    """
-    fusion = nombres[-1]
-    if not fusion.isdigit() or len(fusion) < 2:
-        return nombres
-    somme_connue = int(round(sum(parser_nombre(v) for v in nombres[:11])))
-    for coupe in range(1, len(fusion)):
-        mois, total = fusion[:coupe], fusion[coupe:]
-        if int(total) == somme_connue + int(mois):
-            return nombres[:11] + [mois]
-    return nombres
-
-
-def _parser_cadencier_winpharma(brutes: list) -> pd.DataFrame:
-    """Cadencier de stock WinPharma (PDF) → DataFrame prêt pour l'analyse.
-
-    Format observé (4 cellules par ligne) :
-      - « Codes produit » : CIP7 et CIP13 empilés (ou EAN seul) ;
-      - « Nom / Formes & presentations » : libellé, parfois sur 2 lignes ;
-      - « Stock » : quantité en rayon ;
-      - achats/ventes : « A … » puis « V … » sur la même cellule, 12 valeurs
-        mensuelles en ordre ANTI-chronologique (mois récent en premier) +
-        total. On ne garde que la ligne V, remise en ordre chronologique.
-    Le bandeau de la pharmacie, les en-têtes répétés par page et la ligne de
-    totaux finale sont éliminés.
-    """
-    mois = None
-    for r in brutes:
-        joint = " ".join(r)
-        if "Codes produit" in joint:
-            trouve = re.search(r"((?:[A-Za-zéû]{3}\s+){11}[A-Za-zéû]{3})\s+Total",
-                               joint)
-            if trouve:
-                mois = trouve.group(1).split()
-            break
-    if not mois:
-        raise ValueError("Cadencier WinPharma : en-tête des mois introuvable.")
-    colonnes_ventes = [f"Ventes {m}" for m in reversed(mois)]  # récent en DERNIER
-
-    produits = []
-    for r in brutes:
-        if len(r) < 4:
-            continue
-        codes_cell, nom, stock_cell, achats_ventes = r[0], r[1], r[2], r[3]
-        if "Codes produit" in codes_cell or "CADENCIER" in " ".join(r).upper():
-            continue
-        codes = re.findall(r"\d{6,}", codes_cell)
-        if not codes:  # bandeau de page, ligne de totaux (« Manque: … »)…
-            continue
-        cip = next((c for c in codes if len(c) == 13), codes[0])
-        ventes_v = re.search(r"(?:^|\n)V\s+([\d\s,.]+)", achats_ventes or "")
-        ventes: list = []
-        if ventes_v:
-            nombres = ventes_v.group(1).split()
-            if len(nombres) > 12:
-                nombres = nombres[:12]  # sans la colonne Total
-            elif len(nombres) == 12:
-                # Gros vendeurs : le 12e mois et le Total sont COLLÉS dans le
-                # PDF (colonne étroite) — ex. « 157218268 » = 1572 + 18268.
-                nombres = _separer_mois_et_total(nombres)
-            ventes = list(reversed(nombres))  # → ordre chronologique
-        ligne = {"Produit": " ".join((nom or "").split()), "CIP": cip,
-                 "Stock": stock_cell}
-        manquants = len(colonnes_ventes) - len(ventes)
-        ventes = ["0"] * max(0, manquants) + ventes  # mois absents = 0 vente
-        for colonne, valeur in zip(colonnes_ventes, ventes):
-            ligne[colonne] = valeur
-        produits.append(ligne)
-    if not produits:
-        raise ValueError("Cadencier WinPharma : aucune ligne produit lisible.")
-    return pd.DataFrame(produits,
-                        columns=["Produit", "CIP", "Stock"] + colonnes_ventes)
-
-
-# ---------------------------------------------------------------------------
-# Détection automatique des colonnes (proposition, à confirmer dans l'UI)
-# ---------------------------------------------------------------------------
-
-_MOTS_CLES = {
-    "libelle": ["libell", "produit", "design", "article", "nom", "denomination"],
-    "cip": ["cip", "code produit", "code article", "ean", "acl"],
-    "stock": ["stock", "qte dispo", "quantite dispo", "disponible"],
-    "date_reappro": ["reappro", "réappro", "reapprovisionnement", "retour",
-                     "dispo le", "date"],
-    "conditionnement": ["conditionnement", "colisage", "pcb", "unite de vente"],
-    "commande_en_cours": ["commande en cours", "qte commandee", "cde en cours",
-                          "en commande"],
-    "peremption": ["peremption", "dluo", "date de peremption", "date limite"],
-}
-
-
-def _sans_accents(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s)
-    return "".join(c for c in s if not unicodedata.combining(c)).lower()
-
-
-def detecter_colonne(colonnes, role: str) -> Optional[str]:
-    """Propose la colonne la plus probable pour un rôle donné (ou None)."""
-    for mot in _MOTS_CLES.get(role, []):
-        for col in colonnes:
-            if _sans_accents(mot) in _sans_accents(str(col)):
-                return col
-    return None
-
-
-def detecter_colonnes_ventes(colonnes) -> list:
-    """Propose les colonnes de ventes mensuelles (mois ou mot-clé « vente »)."""
-    mois = ["janv", "fevr", "mars", "avr", "mai", "juin", "juil", "aout",
-            "sept", "oct", "nov", "dec"]
-    trouvees = []
-    for col in colonnes:
-        c = _sans_accents(str(col))
-        if "vente" in c or "sortie" in c or any(m in c for m in mois):
-            trouvees.append(col)
-    return trouvees
-
-
-# ---------------------------------------------------------------------------
 # Matching produit (CIP prioritaire, sinon libellé normalisé + fuzzy)
+# — spécifique aux ruptures : rapproche le cadencier de 2 listes fournisseurs.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -427,64 +128,8 @@ def _indexer(df: pd.DataFrame, col_libelle: str, col_cip: Optional[str]):
 
 
 # ---------------------------------------------------------------------------
-# Calculs élémentaires (étapes 2, 3, 5, 6) — unitairement testables
+# Calculs élémentaires (étapes 2, 3, 5, 6) — spécifiques aux ruptures
 # ---------------------------------------------------------------------------
-
-def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> float:
-    """Rotation mensuelle estimée.
-
-    ``ventes`` : valeurs mensuelles en ordre CHRONOLOGIQUE (la plus récente en
-    dernier). ``periode`` :
-      - "annuelle" : moyenne de toutes les valeurs ;
-      - "3mois"    : moyenne des 3 dernières ;
-      - "lissee"   : lissage exponentiel (α = 0,4) — réactif aux tendances
-        récentes, à la hausse COMME à la baisse, sans sur-réagir à un mois
-        isolé. Recommandé pour l'analyse quotidienne.
-    """
-    valeurs = [parser_nombre(v) for v in ventes]
-    if not valeurs:
-        return 0.0
-    if periode == "3mois":
-        valeurs = valeurs[-3:]
-    elif periode == "lissee":
-        lisse = valeurs[0]
-        for v in valeurs[1:]:
-            lisse = ALPHA_LISSAGE * v + (1 - ALPHA_LISSAGE) * lisse
-        return lisse
-    return sum(valeurs) / len(valeurs)
-
-
-def corriger_faux_zeros(ventes: list):
-    """Corrige les mois à 0 vente ENCADRÉS de mois actifs.
-
-    Un 0 entre deux mois vendeurs signifie « produit en rupture », pas
-    « personne n'en voulait » : le laisser écrase la rotation et fait
-    SOUS-commander précisément les produits qui ont déjà manqué. Les zéros
-    sont remplacés par interpolation linéaire entre les mois actifs qui les
-    encadrent. Les zéros en DÉBUT ou FIN de période sont conservés
-    (lancement, arrêt de commercialisation, rupture en cours).
-
-    Renvoie ``(ventes_corrigees, nb_mois_corriges)``.
-    """
-    valeurs = [parser_nombre(v) for v in ventes]
-    corrigees, nb = list(valeurs), 0
-    i = 0
-    while i < len(valeurs):
-        if valeurs[i] == 0:
-            j = i
-            while j < len(valeurs) and valeurs[j] == 0:
-                j += 1
-            if 0 < i and j < len(valeurs):  # encadré de mois actifs
-                gauche, droite = valeurs[i - 1], valeurs[j]
-                for k in range(j - i):
-                    corrigees[i + k] = (gauche + (droite - gauche)
-                                        * (k + 1) / (j - i + 1))
-                    nb += 1
-            i = j
-        else:
-            i += 1
-    return corrigees, nb
-
 
 def probabilite_rupture(stock_effectif: float, rotation_mensuelle: float,
                         ventes: list, horizon_jours: float = 7) -> float:
@@ -526,16 +171,6 @@ def score_priorite(risque_rupture: float, classe: str, reports: int = 0,
                      + 20 * fiabilite))
 
 
-def calculer_stock_jours(stock_actuel: float, rotation_mensuelle: float) -> float:
-    """Couverture actuelle en jours. Stock 0 → 0 ; rotation nulle → +inf."""
-    if stock_actuel <= 0:
-        return 0.0
-    rotation_journaliere = rotation_mensuelle / JOURS_PAR_MOIS
-    if rotation_journaliere <= 0:
-        return math.inf
-    return stock_actuel / rotation_journaliere
-
-
 def doit_apparaitre(stock_jours: float,
                     jours_avant_reappro: Optional[float]) -> bool:
     """Étape 3 — règle d'apparition STRICTE, sans buffer.
@@ -571,33 +206,6 @@ def quantite_a_commander(rotation_mensuelle: float,
     if conditionnement and conditionnement > 1:
         cmd = int(math.ceil(cmd / conditionnement) * conditionnement)
     return cmd
-
-
-def calculer_tendance(ventes: list, seuil: float = SEUIL_TENDANCE) -> str:
-    """Tendance de la demande, en ordre chronologique (récent en dernier).
-
-    - ≥ 4 mois de recul : moyenne des 3 derniers mois vs moyenne globale ;
-    - 2-3 mois (cadenciers courts, très fréquents) : dernier mois vs moyenne
-      des mois précédents — moins robuste mais la colonne reste vivante ;
-    - < 2 mois ou demande nulle : « → stable » (rien à comparer).
-    Renvoie « ↗ hausse » / « ↘ baisse » / « → stable » (seuil ±20 %).
-    """
-    if len(ventes) < 2:
-        return "→ stable"
-    if len(ventes) >= 4:
-        reference = calculer_rotation_mensuelle(ventes, "annuelle")
-        recente = calculer_rotation_mensuelle(ventes, "3mois")
-    else:
-        reference = calculer_rotation_mensuelle(ventes[:-1], "annuelle")
-        recente = parser_nombre(ventes[-1])
-    if reference <= 0:
-        return "→ stable"
-    ecart = (recente - reference) / reference
-    if ecart >= seuil:
-        return "↗ hausse"
-    if ecart <= -seuil:
-        return "↘ baisse"
-    return "→ stable"
 
 
 def compter_reports_reappro(produit: str, historique,
@@ -698,87 +306,15 @@ def comparer_a_analyse_precedente(produits_jour, historique: pd.DataFrame,
     return precedente, nouveaux, resolus
 
 
-# ---------------------------------------------------------------------------
-# Pilotage du stock (ABC, variabilité, saisonnalité, dormants, taux de
-# service) — pratiques standard des officines les mieux gérées.
-# ---------------------------------------------------------------------------
-
-SEUIL_DORMANT_JOURS = 180         # > 6 mois de couverture → stock dormant
-SEUILS_VARIABILITE = (0.3, 0.7)   # CV : < 0,3 stable · < 0,7 variable · sinon forte
-
-
-def classer_abc(volumes: list) -> list:
-    """Classement ABC (loi de Pareto) sur les volumes de ventes.
-
-    A = les plus gros vendeurs jusqu'à 80 % du volume cumulé, B = 80-95 %,
-    C = le reste (dont les volumes nuls). Renvoie les classes dans l'ordre
-    d'entrée. Le plus gros vendeur est toujours A (cumul évalué AVANT lui).
-    """
-    valeurs = [parser_nombre(v) for v in volumes]
-    total = sum(v for v in valeurs if v > 0)
-    classes = ["C"] * len(valeurs)
-    if total <= 0:
-        return classes
-    ordre = sorted(range(len(valeurs)), key=lambda i: valeurs[i], reverse=True)
-    cumul = 0.0
-    for i in ordre:
-        if valeurs[i] <= 0:
-            continue
-        part_avant = cumul / total
-        classes[i] = ("A" if part_avant < 0.80
-                      else "B" if part_avant < 0.95 else "C")
-        cumul += valeurs[i]
-    return classes
-
-
-def variabilite_demande(ventes: list) -> str:
-    """Variabilité de la demande (coefficient de variation σ/μ).
-
-    Sert de base à un stock de sécurité différencié : un produit
-    « forte variabilité » mérite plus de marge qu'un produit stable à
-    volume égal. Moins de 3 mois de recul ou demande nulle → « » (inconnu).
-    """
-    valeurs = [parser_nombre(v) for v in ventes]
-    if len(valeurs) < 3:
-        return ""
-    moyenne = sum(valeurs) / len(valeurs)
-    if moyenne <= 0:
-        return ""
-    ecart_type = (sum((v - moyenne) ** 2 for v in valeurs) / len(valeurs)) ** 0.5
-    cv = ecart_type / moyenne
-    if cv < SEUILS_VARIABILITE[0]:
-        return f"🟢 stable (CV {cv:.0%})"
-    if cv < SEUILS_VARIABILITE[1]:
-        return f"🟡 variable (CV {cv:.0%})"
-    return f"🔴 forte (CV {cv:.0%})"
-
-
-def pic_saisonnier(ventes: list, noms_mois: list) -> str:
-    """Signale un pic saisonnier probable : un mois ≥ 2× la moyenne.
-
-    Nécessite au moins 6 mois de recul pour distinguer saison et hasard.
-    ``noms_mois`` : libellés alignés sur ``ventes`` (pour nommer le pic).
-    """
-    valeurs = [parser_nombre(v) for v in ventes]
-    if len(valeurs) < 6:
-        return ""
-    moyenne = sum(valeurs) / len(valeurs)
-    if moyenne <= 0:
-        return ""
-    maximum = max(valeurs)
-    if maximum < 2 * moyenne:
-        return ""
-    nom = ""
-    if noms_mois and len(noms_mois) == len(valeurs):
-        nom = str(noms_mois[valeurs.index(maximum)]).replace("Ventes", "").strip()
-    return f"📈 pic {nom}".strip()
-
-
 def taux_de_service(produits_a: list, historique: pd.DataFrame,
                     date_analyse: date, fenetre_jours: int = 30):
     """Taux de service des produits A : part des couples produit×jour SANS
     rupture signalée sur la fenêtre glissante. Renvoie (taux, jours_analyses)
     — (None, 0) si l'historique ne couvre pas encore la fenêtre.
+
+    Métrique de RUPTURES (dépend de l'historique des signalements de ce
+    module), pas de gestion de stock — ``produits_a`` peut être calculée
+    avec ``commun.classer_abc`` sans dépendre de stock_rotation.py.
     """
     historique = _lignes_signalees(historique)
     if historique is None or historique.empty or not produits_a:
@@ -795,90 +331,6 @@ def taux_de_service(produits_a: list, historique: pd.DataFrame,
     produit_jours = len(ruptures[["_date", "Produit"]].drop_duplicates())
     total = len(jours) * len(ensemble_a)
     return 1 - produit_jours / total, len(jours)
-
-
-@dataclass
-class PilotageStock:
-    """Vue d'ensemble du stock : classes ABC, variabilité, dormants, KPI."""
-    tableau: pd.DataFrame       # tous les produits vendus ou stockés
-    dormants: pd.DataFrame      # couverture > seuil → trésorerie immobilisée
-    indicateurs: dict = field(default_factory=dict)
-
-
-COLONNES_PILOTAGE = ["Classe", "Produit", "Rotation/mois", "Tendance",
-                     "Variabilité demande", "Saisonnalité", "Stock actuel",
-                     "Stock (jours)"]
-COLONNES_DORMANTS = ["Produit", "Stock actuel", "Rotation/mois",
-                     "Stock (jours)", "Commentaire"]
-
-
-def analyser_pilotage(cadencier: pd.DataFrame, mapping: dict,
-                      periode: str = "annuelle",
-                      historique: Optional[pd.DataFrame] = None,
-                      date_analyse: Optional[date] = None,
-                      seuil_dormant_jours: float = SEUIL_DORMANT_JOURS
-                      ) -> PilotageStock:
-    """Pilotage global du stock à partir du seul cadencier (+ historique).
-
-    Ne modifie AUCUNE décision de commande : vue d'analyse complémentaire
-    (classement ABC, variabilité, saisonnalité, stock dormant, taux de
-    service des produits A sur 30 jours glissants).
-    """
-    m_cad = mapping["cadencier"]
-    colonnes_ventes = [c for c in m_cad["ventes"] if c in cadencier.columns]
-    lignes = []
-    for _, ligne_cad in cadencier.iterrows():
-        stock = parser_nombre(ligne_cad[m_cad["stock"]])
-        en_cours = (parser_nombre(ligne_cad[m_cad["commande_en_cours"]])
-                    if m_cad.get("commande_en_cours") else 0.0)
-        ventes = [ligne_cad[c] for c in colonnes_ventes]
-        rotation = calculer_rotation_mensuelle(ventes, periode)
-        if rotation <= 0 and stock <= 0:
-            continue  # ni vente ni stock : rien à piloter
-        stock_jours = calculer_stock_jours(stock + en_cours, rotation)
-        lignes.append({
-            "Produit": str(ligne_cad[m_cad["libelle"]]).strip(),
-            "Rotation/mois": round(rotation, 1),
-            "Tendance": calculer_tendance(ventes),
-            "Variabilité demande": variabilite_demande(ventes),
-            "Saisonnalité": pic_saisonnier(ventes, colonnes_ventes),
-            "Stock actuel": stock,
-            "Stock (jours)": (round(stock_jours, 1)
-                              if math.isfinite(stock_jours) else "∞"),
-            "_stock_jours": stock_jours,
-        })
-    df = pd.DataFrame(lignes)
-    if df.empty:
-        return PilotageStock(df.reindex(columns=COLONNES_PILOTAGE),
-                             df.reindex(columns=COLONNES_DORMANTS))
-
-    df["Classe"] = classer_abc(list(df["Rotation/mois"]))
-    dormants = df[(df["Stock actuel"] > 0)
-                  & (df["_stock_jours"] > seuil_dormant_jours)].copy()
-    dormants["Commentaire"] = ("Plus de "
-                               f"{seuil_dormant_jours:.0f} j de couverture — "
-                               "trésorerie immobilisée, envisager retour / "
-                               "arrêt de réassort.")
-    dormants = (dormants.sort_values("Stock actuel", ascending=False)
-                .reindex(columns=COLONNES_DORMANTS))
-
-    tableau = (df.sort_values(["Classe", "Rotation/mois"],
-                              ascending=[True, False])
-               .reindex(columns=COLONNES_PILOTAGE))
-
-    produits_a = list(df.loc[df["Classe"] == "A", "Produit"])
-    taux, jours = (taux_de_service(produits_a, historique, date_analyse)
-                   if date_analyse is not None else (None, 0))
-    indicateurs = {
-        "nb_a": int((df["Classe"] == "A").sum()),
-        "nb_b": int((df["Classe"] == "B").sum()),
-        "nb_c": int((df["Classe"] == "C").sum()),
-        "dormants": len(dormants),
-        "dormants_boites": (float(dormants["Stock actuel"].sum())
-                            if not dormants.empty else 0.0),
-        "taux_service_a": taux, "jours_service": jours,
-    }
-    return PilotageStock(tableau, dormants, indicateurs)
 
 
 # ---------------------------------------------------------------------------
@@ -1357,50 +809,15 @@ def analyser(cadencier: pd.DataFrame,
 _COULEURS_URGENCE = {URGENT: "F8CBAD", MODERE: "FFE699", ANTICIPER: "C6EFCE"}
 
 
-def _exporter_classeur(onglets: list) -> bytes:
-    """Classeur Excel commun : en-têtes gras figés, largeurs auto, lignes
-    teintées selon la colonne « Urgence » quand elle existe."""
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        for nom, df in onglets:
-            df.to_excel(writer, sheet_name=nom, index=False)
-            ws = writer.sheets[nom]
-            ws.freeze_panes = "A2"
-            for cellule in ws[1]:  # en-tête gras sur fond gris clair
-                cellule.font = Font(bold=True)
-                cellule.fill = PatternFill("solid", fgColor="D9D9D9")
-                cellule.alignment = Alignment(vertical="center")
-            for j, col in enumerate(df.columns, start=1):  # largeurs auto
-                largeur = max([len(str(col))] +
-                              [len(str(v)) for v in df[col].head(200)] or [10])
-                ws.column_dimensions[get_column_letter(j)].width = min(largeur + 3, 45)
-            if "Urgence" in df.columns:  # code couleur des lignes par urgence
-                for i, urgence in enumerate(df["Urgence"], start=2):
-                    couleur = _COULEURS_URGENCE.get(urgence)
-                    if couleur:
-                        for cellule in ws[i]:
-                            cellule.fill = PatternFill("solid", fgColor=couleur)
-    return buffer.getvalue()
-
-
 def exporter_excel(resultat: ResultatAnalyse) -> bytes:
     """Classeur de décision : les 5 onglets de l'analyse des ruptures."""
-    return _exporter_classeur([
-        ("À commander UNIPHARMA", resultat.onglet1),
-        ("Rupture GPNC+UNIPHARMA", resultat.onglet2),
-        ("Vigilance stock", resultat.vigilance),
-        ("Écartés de justesse", resultat.ecartes_justesse),
-        ("Analyse complète", resultat.onglet3)])
-
-
-def exporter_pilotage_excel(pilotage: PilotageStock) -> bytes:
-    """Classeur de pilotage : classement ABC + stock dormant."""
-    return _exporter_classeur([
-        ("Pilotage ABC", pilotage.tableau),
-        ("Stock dormant", pilotage.dormants)])
+    return exporter_classeur(
+        [("À commander UNIPHARMA", resultat.onglet1),
+         ("Rupture GPNC+UNIPHARMA", resultat.onglet2),
+         ("Vigilance stock", resultat.vigilance),
+         ("Écartés de justesse", resultat.ecartes_justesse),
+         ("Analyse complète", resultat.onglet3)],
+        couleurs_par_colonne={"Urgence": _COULEURS_URGENCE})
 
 
 def nom_fichier_sortie(date_analyse: date) -> str:

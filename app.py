@@ -1,20 +1,24 @@
 # -*- coding: utf-8 -*-
-"""Interface Streamlit — Gestion des ruptures de stock (pharmacie).
+"""Interface Streamlit — pilotage pharmacie d'officine.
 
-Couche interface UNIQUEMENT : toute la logique métier vit dans
-moteur_ruptures.py. Lancement : ``streamlit run app.py`` (ou double-clic sur
-lancer.bat / lancer.command).
+Couche interface UNIQUEMENT : toute la logique métier vit dans les modules
+de calcul (commun.py, moteur_ruptures.py, stock_rotation.py). Lancement :
+``streamlit run app.py`` (ou double-clic sur lancer.bat / lancer.command).
+
+Deux modules fonctionnels INDÉPENDANTS, chacun son onglet principal :
+  📦 Gestion des stocks en rotation (stock_rotation.py) — stock min / max
+     par produit à partir du seul cadencier, règle des 10 unités.
+  🚨 Gestion des ruptures (moteur_ruptures.py) — croise le cadencier avec
+     les listes de ruptures GPNC / UNIPHARMA, urgence en 3 paliers.
 
 Parcours (suivi dans la barre latérale) :
   1. Déposer les 3 fichiers (cadencier, ruptures GPNC, ruptures UNIPHARMA)
      — ou cliquer « Essayer avec des données de démonstration ».
   2. Confirmer / corriger le mapping des colonnes (proposé automatiquement,
      mémorisé dans config.yaml pour les fois suivantes).
-  3. Choisir la date d'analyse et la période de rotation (barre latérale),
-     lancer l'analyse.
-  4. Consulter les tuiles de synthèse + les 5 onglets (commandes, sans
-     solution, vigilance, écartés de justesse, analyse complète),
-     télécharger l'Excel.
+  3. Régler les paramètres de chaque module (barre latérale), lancer
+     l'analyse.
+  4. Consulter les deux onglets principaux, télécharger les Excel dédiés.
 """
 
 import dataclasses
@@ -25,7 +29,9 @@ import pandas as pd
 import streamlit as st
 import yaml
 
+import commun
 import moteur_ruptures as moteur
+import stock_rotation
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -33,14 +39,16 @@ COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
                        "Qté à commander (Cmd)", "Date réappro", "Type"]
 # Type « commande » : produit signalé (onglets 1-2) — compte dans le
 # comparatif quotidien. Type « surveillance » : écarté de justesse — sert
-# uniquement au suivi des dates de réappro repoussées.
+# uniquement au suivi des dates de réappro repoussées. Historique du Module
+# « Gestion des ruptures » exclusivement — le Module « Stock en rotation »
+# ne lit ni n'écrit ce fichier (isolation fonctionnelle des deux modules).
 
-st.set_page_config(page_title="Ruptures pharmacie", page_icon="💊",
+st.set_page_config(page_title="Pharmacie — stock & ruptures", page_icon="💊",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------------------------
-# Habillage (bandeau, tuiles KPI) — l'urgence est TOUJOURS icône + libellé,
-# la couleur n'est qu'un renfort (accessibilité daltonisme / impression N&B).
+# Habillage (bandeau, tuiles KPI) — l'urgence/alerte est TOUJOURS icône +
+# libellé, la couleur n'est qu'un renfort (accessibilité, impression N&B).
 # ---------------------------------------------------------------------------
 
 st.markdown("""
@@ -70,10 +78,10 @@ st.markdown("""
 
 st.markdown("""
 <div class="hero">
-  <h1>💊 Gestion des ruptures de stock</h1>
-  <p>Croise le cadencier avec les ruptures GPNC (fournisseur principal) et
-  UNIPHARMA (dépannage) → fichier Excel de commande. Règle stricte : un
-  produit dont le stock tient jusqu'à la réappro n'apparaît pas.</p>
+  <h1>💊 Pilotage pharmacie — stock &amp; ruptures</h1>
+  <p>Deux modules indépendants à partir des mêmes fichiers : le <b>stock en
+  rotation</b> (stock min/max par produit) et les <b>ruptures fournisseurs</b>
+  (GPNC/UNIPHARMA → fichier Excel de commande).</p>
   <span class="badge">🔒 Application 100 % locale — vos données ne quittent pas ce poste</span>
 </div>
 """, unsafe_allow_html=True)
@@ -87,20 +95,28 @@ def _tuile_kpi(label: str, valeur, variante: str = "", sous: str = "") -> str:
             f'<div class="value">{valeur}</div>{sous_html}</div>')
 
 
-# ---------------------------------------------------------------------------
-# Config (mémorisation du mapping des colonnes)
-# ---------------------------------------------------------------------------
+def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
+    """Affichage commun des tableaux simples : tableau ou message vide."""
+    if df.empty:
+        st.info(message_vide)
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption(legende)
 
+
+# ---------------------------------------------------------------------------
+# Config (mémorisation du mapping des colonnes + des réglages des 2 modules)
+# ---------------------------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
 def _charger_fichier_cache(data: bytes, nom: str) -> pd.DataFrame:
     """Cache du parsing : un cadencier PDF de ~200 pages prend ~1 min à
     lire — sans cache, Streamlit le relirait à CHAQUE clic dans la page."""
-    return moteur.charger_fichier(data, nom)
+    return commun.charger_fichier(data, nom)
 
 
 def charger_config() -> dict:
-    """Mapping mémorisé lors d'une analyse précédente (ou vide)."""
+    """Mapping + réglages mémorisés lors d'une analyse précédente (ou vide)."""
     if CONFIG_PATH.exists():
         try:
             return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
@@ -124,8 +140,17 @@ def _choix(label: str, colonnes: list, defaut, cle: str, optionnel=True):
     return None if valeur == "(aucune)" else valeur
 
 
+def _defaut(memo_valeur, colonnes: list, role: str):
+    """Défaut d'un selectbox : le mémo s'il correspond encore au fichier,
+    sinon la détection automatique (utile si le format du fichier change)."""
+    if memo_valeur and memo_valeur in colonnes:
+        return memo_valeur
+    return commun.detecter_colonne(colonnes, role)
+
+
 def charger_historique() -> pd.DataFrame:
-    """Historique des analyses passées (suivi quotidien : nouveaux/résolus)."""
+    """Historique des analyses de RUPTURES passées (suivi quotidien du
+    Module « Gestion des ruptures » — sans lien avec le Module stock)."""
     if HISTORIQUE_PATH.exists():
         try:
             return pd.read_csv(HISTORIQUE_PATH)
@@ -167,24 +192,16 @@ def sauver_historique_analyse(resultat, date_analyse: date) -> pd.DataFrame:
     return historique
 
 
-def _defaut(memo_valeur, colonnes: list, role: str):
-    """Défaut d'un selectbox : le mémo s'il correspond encore au fichier,
-    sinon la détection automatique (utile si le format du fichier change)."""
-    if memo_valeur and memo_valeur in colonnes:
-        return memo_valeur
-    return moteur.detecter_colonne(colonnes, role)
-
-
 # ---------------------------------------------------------------------------
 # Données de démonstration (dates relatives à aujourd'hui → toujours valides)
 # ---------------------------------------------------------------------------
-
 
 def jeu_demonstration() -> dict:
     """Jeu fictif pour découvrir l'outil sans fichiers réels.
 
     Reprend les cas de référence (Titanoréine écartée, Ozempic modéré,
-    Aranesp urgent) + rupture double, produit dormant, produit non vendu.
+    Aranesp urgent) + rupture double, produit dormant, produit non vendu,
+    et un produit à stock critique (< 10 unités, règle du Module stock).
     """
     def dans(jours: int) -> str:
         return (date.today() + timedelta(days=jours)).strftime("%d/%m/%Y")
@@ -268,13 +285,16 @@ if mode_demo:
             "référence : Titanoréine, Ozempic, Aranesp…). Déposez vos vrais "
             "fichiers ci-dessus pour repasser en mode normal.")
 
+st.caption("💡 Seul le **cadencier** est nécessaire pour la Gestion des "
+           "stocks en rotation. Les ruptures GPNC/UNIPHARMA ne sont "
+           "requises que pour la Gestion des ruptures.")
+
 # ---------------------------------------------------------------------------
-# Barre latérale — progression, paramètres, remise à zéro
+# Barre latérale — progression + réglages des DEUX modules (séparés)
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.markdown("## 💊 Ruptures pharmacie")
-    st.caption("Suivi quotidien des ruptures GPNC / UNIPHARMA.")
+    st.markdown("## 💊 Pharmacie — stock & ruptures")
 
     st.markdown("#### Progression")
     for cle, nom, _ in [(c, t.split(" ", 1)[1], a) for c, t, a in libelles_zones]:
@@ -287,16 +307,76 @@ with st.sidebar:
     st.markdown("✅ Analyse lancée" if analyse_faite else "⬜ Analyse lancée")
 
     st.divider()
-    st.markdown("#### ⚙️ Paramètres")
     date_analyse = st.date_input("📅 Date d'analyse", value=date.today(),
                                  format="DD/MM/YYYY")
-    periode = st.radio(
-        "Calcul de la rotation",
-        ["annuelle", "3mois", "lissee"],
+
+    # --- Réglages Module 1 : Gestion des stocks en rotation -----------------
+    st.markdown("#### 📦 Réglages — Stock en rotation")
+    memo_rotation = (config if isinstance(config, dict) else {}).get(
+        "stock_rotation", {})
+    periode_rotation = st.radio(
+        "Calcul de la consommation", ["annuelle", "3mois", "lissee"],
+        index=["annuelle", "3mois", "lissee"].index(
+            memo_rotation.get("periode", "annuelle")),
         format_func=lambda p: {
             "annuelle": "Annuelle (moyenne 12 mois)",
             "3mois": "3 derniers mois",
             "lissee": "Lissée (réactive aux tendances)"}[p],
+        key="periode_rotation")
+    with st.expander("🎛️ Paramètres stock min / max"):
+        lead_time = st.number_input(
+            "Délai de réappro fournisseur (jours)", 0, 60,
+            value=int(memo_rotation.get("lead_time",
+                                        stock_rotation.LEAD_TIME_JOURS_DEFAUT)),
+            help="Temps entre la commande et la réception des boîtes.")
+        stock_securite_j = st.number_input(
+            "Stock de sécurité (jours de consommation)", 0, 60,
+            value=int(memo_rotation.get(
+                "securite", stock_rotation.STOCK_SECURITE_JOURS_DEFAUT)),
+            help="Marge contre les aléas de vente et de livraison.")
+        frequence_reassort = st.number_input(
+            "Fréquence de réassort visée (jours)", 1, 90,
+            value=int(memo_rotation.get(
+                "frequence", stock_rotation.FREQUENCE_REASSORT_JOURS_DEFAUT)),
+            help="Tous les combien de temps voulez-vous repasser commande "
+                 "sur ce produit ? Détermine le stock max.")
+        seuil_alerte_unites = st.number_input(
+            "Seuil d'action immédiate (unités)", 0, 100,
+            value=int(memo_rotation.get(
+                "seuil_alerte", stock_rotation.SEUIL_ALERTE_UNITES_DEFAUT)),
+            help="Règle métier : sous ce seuil ABSOLU, la cible de commande "
+                 "passe directement au stock max (pas de recomplètement "
+                 "progressif jusqu'au seul stock min).")
+        corriger_zeros_stock = st.checkbox(
+            "Corriger les mois à 0 des ruptures passées", value=True,
+            key="corriger_zeros_stock",
+            help="Un mois à 0 vente ENTRE deux mois actifs = produit en "
+                 "rupture, pas absence de demande.")
+        conso_defaut = st.number_input(
+            "Consommation par défaut si pas d'historique (unités/mois)", 0, 500,
+            value=int(memo_rotation.get("conso_defaut", 0)),
+            help="Produit sans aucune vente enregistrée (nouveau, ou "
+                 "cadencier trop court) : consommation de repli utilisée le "
+                 "temps que l'historique s'accumule. 0 = désactivé (le "
+                 "produit n'est pas piloté tant qu'il n'a pas d'historique).")
+        seuil_dormant = st.number_input(
+            "Seuil de stock dormant (jours de couverture)", 30, 720,
+            value=int(memo_rotation.get(
+                "seuil_dormant", stock_rotation.SEUIL_DORMANT_JOURS_DEFAUT)),
+            help="Au-delà, le stock est considéré dormant (trésorerie "
+                 "immobilisée).")
+
+    st.divider()
+
+    # --- Réglages Module 2 : Gestion des ruptures ---------------------------
+    st.markdown("#### 🚨 Réglages — Gestion des ruptures")
+    periode = st.radio(
+        "Calcul de la rotation", ["annuelle", "3mois", "lissee"],
+        format_func=lambda p: {
+            "annuelle": "Annuelle (moyenne 12 mois)",
+            "3mois": "3 derniers mois",
+            "lissee": "Lissée (réactive aux tendances)"}[p],
+        key="periode_ruptures",
         help="« Lissée » : lissage exponentiel — suit les hausses ET les "
              "baisses récentes sans sur-réagir à un mois isolé. Attention : "
              "un produit en rupture EN COURS (derniers mois à 0) voit sa "
@@ -330,6 +410,7 @@ with st.sidebar:
                  "un produit en croissance n'est jamais sous-couvert.")
         corriger_zeros = st.checkbox(
             "Corriger les mois à 0 des ruptures passées", value=True,
+            key="corriger_zeros_ruptures",
             help="Un mois à 0 vente ENTRE deux mois actifs = produit en "
                  "rupture, pas absence de demande. Le corriger évite de "
                  "sous-commander les produits qui ont déjà manqué.")
@@ -341,14 +422,14 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Nouvelle analyse", use_container_width=True):
-        for cle in ("resultat", "date_analyse", "mode_demo"):
+        for cle in ("resultat", "resultat_stock", "date_analyse", "mode_demo"):
             st.session_state.pop(cle, None)
         st.rerun()
     st.caption("🔒 100 % local : vos fichiers ne quittent pas ce poste. "
-               "Le mapping des colonnes est mémorisé dans config.yaml.")
+               "Le mapping et les réglages sont mémorisés dans config.yaml.")
 
-if len(dataframes) < 3:
-    st.info("Déposez les **3 fichiers** ci-dessus pour continuer — ou "
+if "cadencier" not in dataframes:
+    st.info("Déposez au moins le **cadencier** pour continuer — ou "
             "découvrez l'outil avec des données fictives :")
     if st.button("🧪 Essayer avec des données de démonstration"):
         st.session_state["mode_demo"] = True
@@ -364,8 +445,11 @@ st.subheader("🧭 Vérification des colonnes")
 st.caption("Les colonnes sont détectées automatiquement — confirmez ou "
            "corrigez, le choix est mémorisé pour les prochaines analyses.")
 
-df_cad, df_gpnc, df_uni = (dataframes["cadencier"], dataframes["gpnc"],
-                           dataframes["unipharma"])
+df_cad = dataframes["cadencier"]
+df_gpnc = dataframes.get("gpnc")
+df_uni = dataframes.get("unipharma")
+ruptures_disponibles = df_gpnc is not None and df_uni is not None
+
 memo = config if isinstance(config, dict) else {}
 memo_cad = memo.get("cadencier", {})
 memo_gpnc = memo.get("gpnc", {})
@@ -392,7 +476,7 @@ with st.expander("📒 Cadencier — colonnes",
     with c3:
         memo_ventes = [c for c in (memo_cad.get("ventes") or []) if c in cols]
         defaut_ventes = memo_ventes or [
-            c for c in moteur.detecter_colonnes_ventes(cols) if c in cols]
+            c for c in commun.detecter_colonnes_ventes(cols) if c in cols]
         cad_ventes = st.multiselect(
             "Colonnes de ventes mensuelles — ordre chronologique, "
             "la plus récente en DERNIER",
@@ -413,327 +497,370 @@ with st.expander("📒 Cadencier — colonnes",
         st.caption("Alerte si péremption dans moins de 90 jours — "
                    "n'écarte pas le produit, informatif seulement.")
 
-with st.expander("🔴 Ruptures GPNC — colonnes",
-                 expanded=not memo_gpnc and not mode_demo):
-    st.dataframe(df_gpnc.head(5), use_container_width=True)
-    cols = list(df_gpnc.columns)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        gpnc_libelle = _choix("Libellé produit", cols,
-                              _defaut(memo_gpnc.get("libelle"), cols, "libelle"),
-                              "gpnc_libelle", optionnel=False)
-    with c2:
-        gpnc_cip = _choix("Code CIP (recommandé)", cols,
-                          _defaut(memo_gpnc.get("cip"), cols, "cip"), "gpnc_cip")
-    with c3:
-        gpnc_date = _choix("Date de réappro", cols,
-                           _defaut(memo_gpnc.get("date_reappro"), cols,
-                                   "date_reappro"), "gpnc_date")
+mapping_cadencier = {"libelle": cad_libelle, "cip": cad_cip,
+                     "stock": cad_stock, "ventes": cad_ventes,
+                     "conditionnement": cad_cond,
+                     "commande_en_cours": cad_en_cours,
+                     "peremption": cad_peremption}
 
-with st.expander("🟠 Ruptures UNIPHARMA — colonnes",
-                 expanded=not memo_uni and not mode_demo):
-    st.dataframe(df_uni.head(5), use_container_width=True)
-    cols = list(df_uni.columns)
-    c1, c2 = st.columns(2)
-    with c1:
-        uni_libelle = _choix("Libellé produit", cols,
-                             _defaut(memo_uni.get("libelle"), cols, "libelle"),
-                             "uni_libelle", optionnel=False)
-    with c2:
-        uni_cip = _choix("Code CIP (recommandé)", cols,
-                         _defaut(memo_uni.get("cip"), cols, "cip"), "uni_cip")
-
-# Contrôles bloquants AVANT de proposer l'analyse (messages clairs).
-problemes = []
+problemes_stock = []
 if not cad_ventes:
-    problemes.append("Cadencier : sélectionnez au moins une colonne de ventes.")
-if not gpnc_date:
-    st.warning("Ruptures GPNC : aucune colonne de date de réappro choisie — "
-               "tous les produits seront traités avec l'objectif 30 jours.")
-for p in problemes:
+    problemes_stock.append(
+        "Cadencier : sélectionnez au moins une colonne de ventes pour "
+        "calculer la consommation.")
+
+mapping_gpnc = mapping_uni = None
+problemes_ruptures = list(problemes_stock)
+if ruptures_disponibles:
+    with st.expander("🔴 Ruptures GPNC — colonnes",
+                     expanded=not memo_gpnc and not mode_demo):
+        st.dataframe(df_gpnc.head(5), use_container_width=True)
+        cols = list(df_gpnc.columns)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            gpnc_libelle = _choix("Libellé produit", cols,
+                                  _defaut(memo_gpnc.get("libelle"), cols,
+                                          "libelle"),
+                                  "gpnc_libelle", optionnel=False)
+        with c2:
+            gpnc_cip = _choix("Code CIP (recommandé)", cols,
+                              _defaut(memo_gpnc.get("cip"), cols, "cip"),
+                              "gpnc_cip")
+        with c3:
+            gpnc_date = _choix("Date de réappro", cols,
+                               _defaut(memo_gpnc.get("date_reappro"), cols,
+                                       "date_reappro"), "gpnc_date")
+
+    with st.expander("🟠 Ruptures UNIPHARMA — colonnes",
+                     expanded=not memo_uni and not mode_demo):
+        st.dataframe(df_uni.head(5), use_container_width=True)
+        cols = list(df_uni.columns)
+        c1, c2 = st.columns(2)
+        with c1:
+            uni_libelle = _choix("Libellé produit", cols,
+                                 _defaut(memo_uni.get("libelle"), cols,
+                                         "libelle"),
+                                 "uni_libelle", optionnel=False)
+        with c2:
+            uni_cip = _choix("Code CIP (recommandé)", cols,
+                             _defaut(memo_uni.get("cip"), cols, "cip"),
+                             "uni_cip")
+
+    mapping_gpnc = {"libelle": gpnc_libelle, "cip": gpnc_cip,
+                    "date_reappro": gpnc_date}
+    mapping_uni = {"libelle": uni_libelle, "cip": uni_cip}
+    if not gpnc_date:
+        st.warning("Ruptures GPNC : aucune colonne de date de réappro "
+                   "choisie — tous les produits seront traités avec "
+                   "l'objectif 30 jours.")
+else:
+    st.info("Déposez aussi les fichiers **Ruptures GPNC** et **Ruptures "
+            "UNIPHARMA** pour activer le module « Gestion des ruptures ». "
+            "La Gestion des stocks en rotation fonctionne dès maintenant "
+            "avec le seul cadencier.")
+
+for p in problemes_stock:
     st.error(p)
 
 # ---------------------------------------------------------------------------
-# Étape 3 — lancement de l'analyse
+# Étape 3 — lancement des analyses (2 modules INDÉPENDANTS)
 # ---------------------------------------------------------------------------
 
 st.divider()
-if st.button("🔍 Lancer l'analyse", type="primary", disabled=bool(problemes),
-             use_container_width=True):
-    mapping = {
-        "cadencier": {"libelle": cad_libelle, "cip": cad_cip,
-                      "stock": cad_stock, "ventes": cad_ventes,
-                      "conditionnement": cad_cond,
-                      "commande_en_cours": cad_en_cours,
-                      "peremption": cad_peremption},
-        "gpnc": {"libelle": gpnc_libelle, "cip": gpnc_cip,
-                 "date_reappro": gpnc_date},
-        "unipharma": {"libelle": uni_libelle, "cip": uni_cip},
+if st.button("🔍 Lancer l'analyse", type="primary",
+             disabled=bool(problemes_stock), use_container_width=True):
+    config_a_sauver = {
+        "cadencier": mapping_cadencier,
+        "stock_rotation": {"periode": periode_rotation, "lead_time": lead_time,
+                           "securite": stock_securite_j,
+                           "frequence": frequence_reassort,
+                           "seuil_alerte": seuil_alerte_unites,
+                           "conso_defaut": conso_defaut,
+                           "seuil_dormant": seuil_dormant},
     }
+    if mapping_gpnc:
+        config_a_sauver["gpnc"] = mapping_gpnc
+        config_a_sauver["unipharma"] = mapping_uni
     if not mode_demo:  # le mapping démo ne doit pas écraser le vrai mémo
-        sauver_config(mapping)
+        sauver_config(config_a_sauver)
+
+    # --- Module 1 : Gestion des stocks en rotation (toujours calculable) ---
     try:
-        resultat = moteur.analyser(
-            df_cad, df_gpnc, df_uni, mapping, date_analyse, periode,
-            historique=None if mode_demo else charger_historique(),
-            seuil_vigilance_jours=seuil_vigilance,
-            rotation_min_vigilance=rotation_min_vigilance,
-            seuil_marge_jours=seuil_marge,
-            delai_livraison_jours=delai_livraison,
-            rotation_prudente=rotation_prudente,
-            corriger_ruptures_passees=corriger_zeros,
-            politique_abc=politique_abc)
-        st.session_state["resultat"] = resultat
-        st.session_state["date_analyse"] = date_analyse
-        st.session_state["pilotage"] = moteur.analyser_pilotage(
-            df_cad, mapping, periode,
-            historique=None if mode_demo else charger_historique(),
-            date_analyse=date_analyse)
-        if not mode_demo:  # ne pas polluer l'historique avec les données fictives
-            st.session_state["historique"] = sauver_historique_analyse(
-                resultat, date_analyse)
-        st.rerun()  # rafraîchit la coche « Analyse lancée » de la barre latérale
-    except KeyError as e:
-        st.error(f"Colonne introuvable : {e} — vérifiez le mapping ci-dessus.")
+        params_stock = stock_rotation.ParametresStockRotation(
+            lead_time_jours=lead_time, stock_securite_jours=stock_securite_j,
+            frequence_reassort_jours=frequence_reassort,
+            seuil_alerte_unites=seuil_alerte_unites,
+            periode_rotation=periode_rotation,
+            corriger_ruptures_passees=corriger_zeros_stock,
+            consommation_defaut_mensuelle=conso_defaut,
+            seuil_dormant_jours=seuil_dormant)
+        st.session_state["resultat_stock"] = stock_rotation.analyser_stock_rotation(
+            df_cad, {"cadencier": mapping_cadencier}, params_stock)
     except Exception as e:  # jamais de plantage brut à l'écran
-        st.error(f"Erreur pendant l'analyse : {e}")
+        st.error(f"Erreur — Gestion des stocks en rotation : {e}")
+
+    # --- Module 2 : Gestion des ruptures (si les 2 fichiers fournisseurs) --
+    if mapping_gpnc:
+        try:
+            mapping = {"cadencier": mapping_cadencier, "gpnc": mapping_gpnc,
+                      "unipharma": mapping_uni}
+            resultat = moteur.analyser(
+                df_cad, df_gpnc, df_uni, mapping, date_analyse, periode,
+                historique=None if mode_demo else charger_historique(),
+                seuil_vigilance_jours=seuil_vigilance,
+                rotation_min_vigilance=rotation_min_vigilance,
+                seuil_marge_jours=seuil_marge,
+                delai_livraison_jours=delai_livraison,
+                rotation_prudente=rotation_prudente,
+                corriger_ruptures_passees=corriger_zeros,
+                politique_abc=politique_abc)
+            st.session_state["resultat"] = resultat
+            if not mode_demo:  # ne pas polluer l'historique avec la démo
+                st.session_state["historique"] = sauver_historique_analyse(
+                    resultat, date_analyse)
+        except KeyError as e:
+            st.error(f"Colonne introuvable : {e} — vérifiez le mapping.")
+        except Exception as e:
+            st.error(f"Erreur — Gestion des ruptures : {e}")
+    st.session_state["date_analyse"] = date_analyse
+    st.rerun()  # rafraîchit la coche « Analyse lancée » de la barre latérale
 
 # ---------------------------------------------------------------------------
-# Étape 4 — résultats, en deux axes de travail :
-#   🚨 Gestion des ruptures (le quotidien : anticiper, commander, suivre)
-#   📦 Gestion du stock en rotation (le point de gestion : ABC, dormants…)
+# Étape 4 — résultats, un onglet principal par module fonctionnel
 # ---------------------------------------------------------------------------
 
+resultat_stock = st.session_state.get("resultat_stock")
 resultat = st.session_state.get("resultat")
-if resultat is None:
+if resultat_stock is None and resultat is None:
     st.stop()
 
-r = resultat.resume
-# Accès défensifs : un résultat resté en session pendant une mise à jour du
-# code peut dater d'une version sans ces champs — dégrader, pas planter.
-df_vigilance = getattr(resultat, "vigilance", pd.DataFrame())
-df_justesse = getattr(resultat, "ecartes_justesse", pd.DataFrame())
-
-def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
-    """Affichage commun des onglets non stylés : tableau ou message vide."""
-    if df.empty:
-        st.info(message_vide)
-    else:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.caption(legende)
-
-
 historique = st.session_state.get("historique", charger_historique())
-pilotage = st.session_state.get("pilotage")  # None sur session pré-mise à jour
 
 st.divider()
 st.subheader("📊 Résultats")
 
-# Deux axes de travail distincts : le QUOTIDIEN (anticiper et traiter les
-# ruptures du jour) et le point de GESTION (rotation, ABC, dormants).
-axe_ruptures, axe_stock = st.tabs([
-    "🚨 Gestion des ruptures — le quotidien",
-    "📦 Gestion du stock en rotation — le point de gestion",
+module_stock, module_ruptures = st.tabs([
+    "📦 Gestion des stocks en rotation",
+    "🚨 Gestion des ruptures",
 ])
 
 # ===========================================================================
-# AXE 1 — GESTION DES RUPTURES (anticipation quotidienne)
+# MODULE 1 — GESTION DES STOCKS EN ROTATION (stock_rotation.py)
 # ===========================================================================
-with axe_ruptures:
-    st.markdown('<div class="kpi-row">' + "".join([
-        _tuile_kpi("Ruptures GPNC analysées", r["analyses"],
-                   sous=f'{r["vendus"]} vendus en pharmacie'),
-        _tuile_kpi("À commander UNIPHARMA", r["a_commander"], "accent",
-                   sous=f'🟢 {r["anticiper"]} à anticiper'),
-        _tuile_kpi("🔴 Urgents", r["urgents"], "critical",
-                   sous="stock épuisé ou ≤ 3 jours"),
-        _tuile_kpi("🟡 Modérés", r["moderes"], "warning",
-                   sous="stock 4 à 15 jours"),
-        _tuile_kpi("❌ Sans solution", r["sans_solution"], "serious",
-                   sous="rupture chez les deux fournisseurs"),
-        _tuile_kpi("⚠️ Rotation à vérifier", r.get("rotation_douteuse", 0),
-                   "warning", sous="rupture passée possible"),
-        _tuile_kpi("🔭 Vigilance stock", r.get("vigilance", len(df_vigilance)),
-                   "warning", sous="rupture en rayon à venir (hors GPNC)"),
-    ]) + "</div>", unsafe_allow_html=True)
-
-    # --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? -------
-    if not mode_demo:
-        produits_jour = (list(resultat.onglet1["Produit"])
-                         + list(resultat.onglet2["Produit"]))
-        date_prec, nouveaux, resolus = moteur.comparer_a_analyse_precedente(
-            produits_jour, historique, st.session_state["date_analyse"])
-        if date_prec is None:
-            st.caption("📅 Première analyse enregistrée — le comparatif "
-                       "quotidien (nouvelles ruptures / résolues) démarrera "
-                       "dès la prochaine.")
-        else:
-            st.markdown(f"**📅 Depuis l'analyse du {date_prec:%d/%m/%Y}** : "
-                        f"🆕 {len(nouveaux)} nouvelle(s) rupture(s) à traiter · "
-                        f"✅ {len(resolus)} sortie(s) de la liste")
-            c_nouv, c_res = st.columns(2)
-            if nouveaux:
-                with c_nouv, st.expander(
-                        f"🆕 Nouvelles ruptures ({len(nouveaux)})"):
-                    st.write("\n".join(f"- {p}" for p in nouveaux))
-            if resolus:
-                with c_res, st.expander(
-                        f"✅ Résolues / sorties ({len(resolus)})"):
-                    st.write("\n".join(f"- {p}" for p in resolus))
-
-    for alerte in resultat.alertes:
-        st.warning(alerte)
-    if resultat.matchs_incertains:
-        with st.expander(f"⚠️ {len(resultat.matchs_incertains)} correspondances "
-                         "incertaines à vérifier (fuzzy matching)"):
-            st.dataframe(pd.DataFrame(resultat.matchs_incertains),
-                         use_container_width=True)
-
-    onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3 = st.tabs([
-        f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
-        f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
-        f"🔭 Vigilance stock ({len(df_vigilance)})",
-        f"⚠️ Écartés de justesse ({len(df_justesse)})",
-        f"📋 Analyse complète ({len(resultat.onglet3)})",
-    ])
-    with onglet1:
-        if resultat.onglet1.empty:
-            st.info("Aucun produit à commander — tous les stocks couvrent "
-                    "la réappro.")
-            st.session_state["onglet1_valide"] = resultat.onglet1
-        else:
-            # Comparaison avec l'historique : ce produit était-il déjà
-            # signalé ? (sans objet en mode démonstration)
-            affichage1 = resultat.onglet1.copy()
-            if not mode_demo:
-                affichage1["Déjà signalé"] = affichage1["Produit"].apply(
-                    lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
-                        moteur.compter_occurrences_historique(
-                            p, historique, st.session_state["date_analyse"])))
-            # Validation de commande DANS l'outil : cocher/décocher, ajuster
-            # la quantité — l'export Excel reflète les ajustements.
-            affichage1.insert(0, "✔", True)
-            edite = st.data_editor(
-                affichage1,
-                column_config={
-                    "✔": st.column_config.CheckboxColumn(
-                        "✔", help="Décochez pour exclure de la commande"),
-                    "Qté à commander (Cmd)": st.column_config.NumberColumn(
-                        "Qté à commander (Cmd)", min_value=0, step=1,
-                        help="Ajustable avant export"),
-                },
-                disabled=[c for c in affichage1.columns
-                          if c not in ("✔", "Qté à commander (Cmd)")],
-                use_container_width=True, hide_index=True,
-                key="editeur_onglet1")
-            st.caption("Trié par **score de priorité** (risque à 7 j × poids "
-                       "A/B/C × fiabilité de la réappro). Cochez/décochez et "
-                       "ajustez les quantités : l'export Excel reprend vos "
-                       "choix.")
-            st.session_state["onglet1_valide"] = (
-                edite[edite["✔"]].drop(columns=["✔"]))
-
-        # Fiche produit : tout l'historique d'un produit avant de valider.
-        if not mode_demo and not historique.empty:
-            with st.expander("🔎 Historique d'un produit (avant validation)"):
-                produit_choisi = st.selectbox(
-                    "Produit", sorted(historique["Produit"].unique()),
-                    key="fiche_produit")
-                fiche = (historique[historique["Produit"] == produit_choisi]
-                         .sort_values("Date analyse", ascending=False))
-                st.dataframe(fiche, use_container_width=True, hide_index=True)
-                st.caption("Signalements passés, quantités commandées et "
-                           "dates de réappro successivement annoncées "
-                           "(type « surveillance » = écarté de justesse).")
-    with onglet2:
-        _onglet_simple(
-            resultat.onglet2,
-            "Aucun produit en rupture chez les deux fournisseurs.",
-            "Pour ces produits : anticiper l'information patient et contacter "
-            "GPNC pour confirmer les dates de réappro.")
-    with onglet_vigilance:
-        _onglet_simple(
-            df_vigilance,
-            "Aucune rupture en rayon à anticiper : tous les produits hors "
-            "rupture GPNC ont une couverture suffisante.",
-            "Produits que vous vendez, HORS liste de ruptures GPNC, dont le "
-            "stock s'épuise : commander chez GPNC (circuit normal) avant la "
-            "rupture en rayon.")
-    with onglet_justesse:
-        _onglet_simple(
-            df_justesse,
-            "Aucun produit écarté de justesse : les produits écartés ont tous "
-            "une marge confortable.",
-            "Écartés par la règle stricte (le stock couvre la réappro) mais "
-            "avec très peu de marge : si la date de réappro glisse, c'est la "
-            "rupture sèche. À surveiller.")
-    with onglet3:
-        _onglet_simple(
-            resultat.onglet3,
-            "Aucune rupture GPNC analysée.",
-            "Traçabilité : tous les produits en rupture GPNC, avec le détail "
-            "du calcul et le motif de la décision.")
-
-    # L'export reflète les validations/ajustements faits dans l'onglet 1.
-    onglet1_valide = st.session_state.get("onglet1_valide", resultat.onglet1)
-    if "Déjà signalé" in getattr(onglet1_valide, "columns", []):
-        onglet1_valide = onglet1_valide.drop(columns=["Déjà signalé"])
-    resultat_export = dataclasses.replace(resultat, onglet1=onglet1_valide)
-    nb_exclus = len(resultat.onglet1) - len(onglet1_valide)
-    st.download_button(
-        "⬇️ Télécharger le fichier Excel des ruptures"
-        + (f" ({nb_exclus} produit(s) décoché(s))" if nb_exclus else ""),
-        data=moteur.exporter_excel(resultat_export),
-        file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary", use_container_width=True)
-
-# ===========================================================================
-# AXE 2 — GESTION DU STOCK EN ROTATION (point de gestion, hors quotidien)
-# ===========================================================================
-with axe_stock:
-    if pilotage is None:
-        st.info("Relancez l'analyse pour calculer le pilotage du stock.")
+with module_stock:
+    if resultat_stock is None:
+        st.info("Relancez l'analyse pour calculer le stock min / max.")
     else:
-        ind = pilotage.indicateurs
-        taux = ind.get("taux_service_a")
+        rs = resultat_stock.resume
         st.markdown('<div class="kpi-row">' + "".join([
-            _tuile_kpi("Produits A (80 % des ventes)", ind.get("nb_a", 0),
-                       "accent", sous=f'B : {ind.get("nb_b", 0)} · '
-                                      f'C : {ind.get("nb_c", 0)}'),
-            _tuile_kpi("Taux de service produits A",
-                       f"{taux:.1%}" if taux is not None else "—",
-                       "accent" if taux is None or taux >= 0.95 else "critical",
-                       sous=(f'{ind.get("jours_service", 0)} j analysés '
-                             "(30 j glissants)" if taux is not None
-                             else "disponible après quelques analyses")),
-            _tuile_kpi("💤 Stock dormant", ind.get("dormants", 0), "warning",
-                       sous=f'{ind.get("dormants_boites", 0):g} boîtes '
-                            "immobilisées (> 6 mois)"),
+            _tuile_kpi("Produits pilotés", rs.get("total_produits", 0),
+                       sous=f'A : {rs.get("nb_a", 0)} · B : {rs.get("nb_b", 0)} '
+                            f'· C : {rs.get("nb_c", 0)}'),
+            _tuile_kpi("🔴 Action requise (< seuil)",
+                       rs.get("action_requise", 0), "critical",
+                       sous=f"stock sous {seuil_alerte_unites:g} unités"),
+            _tuile_kpi("🟡 Sous le stock min", rs.get("sous_le_min", 0),
+                       "warning", sous="réassort progressif conseillé"),
+            _tuile_kpi("Qté totale à commander",
+                       rs.get("qte_totale_a_commander", 0), "accent",
+                       sous="toutes lignes confondues"),
+            _tuile_kpi("💤 Stock dormant", rs.get("dormants", 0), "warning",
+                       sous=f'{rs.get("dormants_boites", 0):g} unités '
+                            "immobilisées"),
         ]) + "</div>", unsafe_allow_html=True)
 
-        st.markdown("**Classement ABC, variabilité et saisonnalité** — vue "
-                    "d'analyse : ne modifie aucune quantité commandée.")
-        st.dataframe(pilotage.tableau, use_container_width=True,
-                     hide_index=True, height=420)
-        st.caption("A = produits qui font 80 % de vos ventes : à surveiller "
-                   "en priorité (leurs ruptures coûtent le plus). La "
-                   "variabilité (écart-type/moyenne) indique la marge de "
-                   "sécurité à prévoir ; la saisonnalité signale un mois de "
-                   "pic ≥ 2× la moyenne.")
+        st.markdown("**Stock min / max par produit** — calculé uniquement à "
+                    "partir du cadencier (aucun lien avec les fichiers de "
+                    "ruptures fournisseurs).")
+        st.dataframe(resultat_stock.tableau, use_container_width=True,
+                     hide_index=True, height=460)
+        st.caption(
+            "Méthode : Stock min = consommation/j × (délai de réappro + "
+            "stock de sécurité) ; Stock max = Stock min + consommation/j × "
+            "fréquence de réassort. **Règle des "
+            f"{seuil_alerte_unites:g} unités** : sous ce seuil, la cible "
+            "passe directement au stock max (commande immédiate), sans "
+            "recomplètement progressif jusqu'au seul stock min.")
 
-        st.markdown(f"**💤 Stock dormant ({len(pilotage.dormants)})** — plus "
-                    "de 6 mois de couverture : trésorerie immobilisée.")
+        st.markdown(f"**💤 Stock dormant ({len(resultat_stock.dormants)})**")
         _onglet_simple(
-            pilotage.dormants,
+            resultat_stock.dormants,
             "Aucun stock dormant : toutes les couvertures sont raisonnables.",
-            "Envisager retour fournisseur, promotion ou arrêt du réassort.")
+            "Couverture très supérieure au stock max — trésorerie "
+            "immobilisée. Envisager retour fournisseur ou arrêt de réassort.")
 
         st.download_button(
-            "⬇️ Télécharger l'Excel de gestion (ABC + dormants)",
-            data=moteur.exporter_pilotage_excel(pilotage),
-            file_name=("pilotage_stock_"
-                       f"{st.session_state['date_analyse']:%Y-%m-%d}.xlsx"),
+            "⬇️ Télécharger l'Excel du stock en rotation",
+            data=stock_rotation.exporter_stock_rotation_excel(resultat_stock),
+            file_name=commun.nom_fichier_export(
+                "stock_rotation", st.session_state["date_analyse"]),
+            mime=("application/vnd.openxmlformats-officedocument."
+                  "spreadsheetml.sheet"),
+            type="primary", use_container_width=True)
+
+# ===========================================================================
+# MODULE 2 — GESTION DES RUPTURES (moteur_ruptures.py)
+# ===========================================================================
+with module_ruptures:
+    if resultat is None:
+        st.info("Déposez aussi les fichiers **Ruptures GPNC** et "
+                "**Ruptures UNIPHARMA**, puis relancez l'analyse pour "
+                "activer ce module.")
+    else:
+        r = resultat.resume
+        # Accès défensifs : un résultat resté en session pendant une mise à
+        # jour du code peut dater d'une version sans ces champs.
+        df_vigilance = getattr(resultat, "vigilance", pd.DataFrame())
+        df_justesse = getattr(resultat, "ecartes_justesse", pd.DataFrame())
+
+        st.markdown('<div class="kpi-row">' + "".join([
+            _tuile_kpi("Ruptures GPNC analysées", r["analyses"],
+                       sous=f'{r["vendus"]} vendus en pharmacie'),
+            _tuile_kpi("À commander UNIPHARMA", r["a_commander"], "accent",
+                       sous=f'🟢 {r["anticiper"]} à anticiper'),
+            _tuile_kpi("🔴 Urgents", r["urgents"], "critical",
+                       sous="stock épuisé ou ≤ 3 jours"),
+            _tuile_kpi("🟡 Modérés", r["moderes"], "warning",
+                       sous="stock 4 à 15 jours"),
+            _tuile_kpi("❌ Sans solution", r["sans_solution"], "serious",
+                       sous="rupture chez les deux fournisseurs"),
+            _tuile_kpi("⚠️ Rotation à vérifier", r.get("rotation_douteuse", 0),
+                       "warning", sous="rupture passée possible"),
+            _tuile_kpi("🔭 Vigilance stock", r.get("vigilance", len(df_vigilance)),
+                       "warning", sous="rupture en rayon à venir (hors GPNC)"),
+        ]) + "</div>", unsafe_allow_html=True)
+
+        # --- Suivi quotidien : quoi de neuf depuis l'analyse précédente ? --
+        if not mode_demo:
+            produits_jour = (list(resultat.onglet1["Produit"])
+                             + list(resultat.onglet2["Produit"]))
+            date_prec, nouveaux, resolus = moteur.comparer_a_analyse_precedente(
+                produits_jour, historique, st.session_state["date_analyse"])
+            if date_prec is None:
+                st.caption("📅 Première analyse enregistrée — le comparatif "
+                           "quotidien (nouvelles ruptures / résolues) "
+                           "démarrera dès la prochaine.")
+            else:
+                st.markdown(
+                    f"**📅 Depuis l'analyse du {date_prec:%d/%m/%Y}** : "
+                    f"🆕 {len(nouveaux)} nouvelle(s) rupture(s) à traiter · "
+                    f"✅ {len(resolus)} sortie(s) de la liste")
+                c_nouv, c_res = st.columns(2)
+                if nouveaux:
+                    with c_nouv, st.expander(
+                            f"🆕 Nouvelles ruptures ({len(nouveaux)})"):
+                        st.write("\n".join(f"- {p}" for p in nouveaux))
+                if resolus:
+                    with c_res, st.expander(
+                            f"✅ Résolues / sorties ({len(resolus)})"):
+                        st.write("\n".join(f"- {p}" for p in resolus))
+
+        for alerte in resultat.alertes:
+            st.warning(alerte)
+        if resultat.matchs_incertains:
+            with st.expander(f"⚠️ {len(resultat.matchs_incertains)} "
+                             "correspondances incertaines à vérifier "
+                             "(fuzzy matching)"):
+                st.dataframe(pd.DataFrame(resultat.matchs_incertains),
+                             use_container_width=True)
+
+        onglet1, onglet2, onglet_vigilance, onglet_justesse, onglet3 = st.tabs([
+            f"🛒 À commander UNIPHARMA ({len(resultat.onglet1)})",
+            f"❌ Rupture GPNC + UNIPHARMA ({len(resultat.onglet2)})",
+            f"🔭 Vigilance stock ({len(df_vigilance)})",
+            f"⚠️ Écartés de justesse ({len(df_justesse)})",
+            f"📋 Analyse complète ({len(resultat.onglet3)})",
+        ])
+        with onglet1:
+            if resultat.onglet1.empty:
+                st.info("Aucun produit à commander — tous les stocks "
+                        "couvrent la réappro.")
+                st.session_state["onglet1_valide"] = resultat.onglet1
+            else:
+                # Comparaison avec l'historique : ce produit était-il déjà
+                # signalé ? (sans objet en mode démonstration)
+                affichage1 = resultat.onglet1.copy()
+                if not mode_demo:
+                    affichage1["Déjà signalé"] = affichage1["Produit"].apply(
+                        lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
+                            moteur.compter_occurrences_historique(
+                                p, historique, st.session_state["date_analyse"])))
+                # Validation de commande DANS l'outil : cocher/décocher,
+                # ajuster la quantité — l'export Excel reflète les ajustements.
+                affichage1.insert(0, "✔", True)
+                edite = st.data_editor(
+                    affichage1,
+                    column_config={
+                        "✔": st.column_config.CheckboxColumn(
+                            "✔", help="Décochez pour exclure de la commande"),
+                        "Qté à commander (Cmd)": st.column_config.NumberColumn(
+                            "Qté à commander (Cmd)", min_value=0, step=1,
+                            help="Ajustable avant export"),
+                    },
+                    disabled=[c for c in affichage1.columns
+                              if c not in ("✔", "Qté à commander (Cmd)")],
+                    use_container_width=True, hide_index=True,
+                    key="editeur_onglet1")
+                st.caption("Trié par **score de priorité** (risque à 7 j × "
+                           "poids A/B/C × fiabilité de la réappro). "
+                           "Cochez/décochez et ajustez les quantités : "
+                           "l'export Excel reprend vos choix.")
+                st.session_state["onglet1_valide"] = (
+                    edite[edite["✔"]].drop(columns=["✔"]))
+
+            # Fiche produit : historique complet avant de valider.
+            if not mode_demo and not historique.empty:
+                with st.expander("🔎 Historique d'un produit (avant validation)"):
+                    produit_choisi = st.selectbox(
+                        "Produit", sorted(historique["Produit"].unique()),
+                        key="fiche_produit")
+                    fiche = (historique[historique["Produit"] == produit_choisi]
+                             .sort_values("Date analyse", ascending=False))
+                    st.dataframe(fiche, use_container_width=True,
+                                 hide_index=True)
+                    st.caption("Signalements passés, quantités commandées et "
+                               "dates de réappro successivement annoncées "
+                               "(type « surveillance » = écarté de justesse).")
+        with onglet2:
+            _onglet_simple(
+                resultat.onglet2,
+                "Aucun produit en rupture chez les deux fournisseurs.",
+                "Pour ces produits : anticiper l'information patient et "
+                "contacter GPNC pour confirmer les dates de réappro.")
+        with onglet_vigilance:
+            _onglet_simple(
+                df_vigilance,
+                "Aucune rupture en rayon à anticiper : tous les produits "
+                "hors rupture GPNC ont une couverture suffisante.",
+                "Produits que vous vendez, HORS liste de ruptures GPNC, "
+                "dont le stock s'épuise : commander chez GPNC (circuit "
+                "normal) avant la rupture en rayon.")
+        with onglet_justesse:
+            _onglet_simple(
+                df_justesse,
+                "Aucun produit écarté de justesse : les produits écartés "
+                "ont tous une marge confortable.",
+                "Écartés par la règle stricte (le stock couvre la réappro) "
+                "mais avec très peu de marge : si la date de réappro "
+                "glisse, c'est la rupture sèche. À surveiller.")
+        with onglet3:
+            _onglet_simple(
+                resultat.onglet3,
+                "Aucune rupture GPNC analysée.",
+                "Traçabilité : tous les produits en rupture GPNC, avec le "
+                "détail du calcul et le motif de la décision.")
+
+        # L'export reflète les validations/ajustements faits dans l'onglet 1.
+        onglet1_valide = st.session_state.get("onglet1_valide", resultat.onglet1)
+        if "Déjà signalé" in getattr(onglet1_valide, "columns", []):
+            onglet1_valide = onglet1_valide.drop(columns=["Déjà signalé"])
+        resultat_export = dataclasses.replace(resultat, onglet1=onglet1_valide)
+        nb_exclus = len(resultat.onglet1) - len(onglet1_valide)
+        st.download_button(
+            "⬇️ Télécharger le fichier Excel des ruptures"
+            + (f" ({nb_exclus} produit(s) décoché(s))" if nb_exclus else ""),
+            data=moteur.exporter_excel(resultat_export),
+            file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
             mime=("application/vnd.openxmlformats-officedocument."
                   "spreadsheetml.sheet"),
             type="primary", use_container_width=True)
