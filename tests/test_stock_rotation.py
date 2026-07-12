@@ -277,6 +277,27 @@ class TestAnalyseStockRotation:
             "Stock max (calculé)"].iloc[0]
         assert max_serres > max_larges
 
+    def test_cip_et_nom_manquants_affiches_vides(self):
+        # Un CIP absent (NaN dans un export Excel) ne doit pas s'afficher
+        # « nan » dans le tableau.
+        cadencier = _cadencier()
+        cadencier.loc[0, "CIP"] = float("nan")
+        resultat = analyser_stock_rotation(cadencier, _mapping_cadencier())
+        ligne = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "CRITIQUE B/12"]
+        assert ligne["Code CIP"].iloc[0] == ""
+
+    def test_dormant_jamais_vendu_couverture_infinie_lisible(self):
+        # Stock sans aucune vente : couverture infinie → affichage explicite,
+        # pas « inf ».
+        cadencier = _cadencier()
+        cadencier.loc[4, "Stock"] = 40  # SANS HISTORIQUE : stock mais 0 vente
+        resultat = analyser_stock_rotation(cadencier, _mapping_cadencier())
+        dormant = resultat.dormants[
+            resultat.dormants["Nom du produit"] == "SANS HISTORIQUE"]
+        assert len(dormant) == 1
+        assert "∞" in str(dormant["Stock (jours)"].iloc[0])
+
     def test_seuil_alerte_reglable_change_les_alertes(self):
         # Avec un seuil d'alerte relevé à 35, « SOUS MIN » (stock 30) bascule
         # aussi en action requise.
@@ -286,6 +307,94 @@ class TestAnalyseStockRotation:
         ligne = resultat.tableau[
             resultat.tableau["Nom du produit"] == "SOUS MIN"]
         assert ligne["Alerte"].iloc[0] == "🔴 Action requise"
+
+
+# ---------------------------------------------------------------------------
+# Fusion des doublons (même produit sous deux codes CIP)
+# ---------------------------------------------------------------------------
+
+class TestFusionDoublons:
+    """Cas réel : changement de générique — l'ancien code reste dans le
+    cadencier avec stock 0 et un historique qui s'arrête, le nouveau code
+    porte le stock et les ventes récentes. Sans fusion, l'ancienne fiche
+    déclenche une commande fantôme d'un produit déjà en rayon."""
+
+    def _cadencier_doublon(self):
+        return pd.DataFrame({
+            "Produit": ["BISOPROLOL 2,5 B/ 30", "BISOPROLOL 2,5 B/ 30",
+                        "AUTRE PRODUIT"],
+            "CIP": ["3400935295637", "3400930227336", "4009"],
+            "Stock": [0, 79, 50],
+            # Ancien code : ventes jusqu'en janvier puis plus rien.
+            # Nouveau code : prend le relais dès janvier.
+            "Ventes dec":  [90, 0, 5],
+            "Ventes jan":  [87, 10, 5],
+            "Ventes fev":  [0, 109, 5],
+            "Ventes mar":  [0, 119, 5],
+        })
+
+    def _mapping(self):
+        return {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                              "stock": "Stock",
+                              "ventes": ["Ventes dec", "Ventes jan",
+                                         "Ventes fev", "Ventes mar"]}}
+
+    def test_une_seule_ligne_par_produit(self):
+        resultat = analyser_stock_rotation(self._cadencier_doublon(),
+                                           self._mapping())
+        lignes = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "BISOPROLOL 2,5 B/ 30"]
+        assert len(lignes) == 1
+        assert resultat.resume["doublons_fusionnes"] == 1
+
+    def test_pas_de_commande_fantome_sur_l_ancien_code(self):
+        # Fusionné : stock 79, série continue 90/97/109/119 (~104/mois) →
+        # stock au-dessus du min (14 j ≈ 48), rien à commander.
+        resultat = analyser_stock_rotation(self._cadencier_doublon(),
+                                           self._mapping())
+        ligne = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "BISOPROLOL 2,5 B/ 30"].iloc[0]
+        assert ligne["Stock actuel"] == 79
+        assert ligne["Qté à commander"] == 0
+        assert ligne["Alerte"] == "🟢 OK"
+
+    def test_cip_du_code_actif_conserve(self):
+        resultat = analyser_stock_rotation(self._cadencier_doublon(),
+                                           self._mapping())
+        ligne = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "BISOPROLOL 2,5 B/ 30"].iloc[0]
+        assert ligne["Code CIP"] == "3400930227336"  # le nouveau code
+
+    def test_ventes_additionnees_mois_par_mois(self):
+        resultat = analyser_stock_rotation(self._cadencier_doublon(),
+                                           self._mapping())
+        ligne = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "BISOPROLOL 2,5 B/ 30"].iloc[0]
+        # (90 + 97 + 109 + 119) / 4 = 103,75 → série redevenue continue.
+        assert ligne["Consommation/mois"] == pytest.approx(103.8)
+
+    def test_produits_sans_doublon_intacts(self):
+        resultat = analyser_stock_rotation(self._cadencier_doublon(),
+                                           self._mapping())
+        autre = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "AUTRE PRODUIT"]
+        assert len(autre) == 1
+        assert autre["Stock actuel"].iloc[0] == 50
+
+    def test_libelles_vides_jamais_fusionnes(self):
+        cadencier = pd.DataFrame({
+            "Produit": ["", "", "NOMMÉ"],
+            "CIP": ["111111", "222222", "333333"],
+            "Stock": [5, 6, 7],
+            "Ventes mai": [10, 20, 30],
+            "Ventes juin": [10, 20, 30],
+        })
+        mapping = {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                                 "stock": "Stock",
+                                 "ventes": ["Ventes mai", "Ventes juin"]}}
+        resultat = analyser_stock_rotation(cadencier, mapping)
+        assert resultat.resume["total_produits"] == 3
+        assert resultat.resume.get("doublons_fusionnes", 0) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -668,6 +668,12 @@ with module_stock:
                             "immobilisées"),
         ]) + "</div>", unsafe_allow_html=True)
 
+        doublons = rs.get("doublons_fusionnes", 0)
+        if doublons:
+            st.caption(f"🔁 {doublons} ligne(s) en double fusionnée(s) : même "
+                       "produit sous deux codes CIP (changement de générique "
+                       "ou de fournisseur) — stock et ventes additionnés, "
+                       "code le plus récent conservé.")
         jours_we = rs.get("jours_weekend", 0)
         if jours_we:
             st.info(f"📅 **Ajustement week-end actif** : analyse d'un "

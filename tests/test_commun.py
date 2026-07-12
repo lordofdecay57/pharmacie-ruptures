@@ -55,6 +55,40 @@ class TestRotation:
         assert calculer_rotation_mensuelle([], "annuelle") == 0.0
 
 
+class TestRotationProduitRecent:
+    """Les mois à 0 AVANT la première vente (produit pas encore référencé)
+    ne comptent pas : sinon un générique lancé il y a 4 mois voit sa
+    rotation divisée par 3 et son stock min sous-dimensionné d'autant."""
+
+    LANCE_RECEMMENT = [0, 0, 0, 0, 0, 0, 0, 0, 90, 100, 95, 99]
+
+    def test_moyenne_depuis_la_premiere_vente(self):
+        rotation = calculer_rotation_mensuelle(self.LANCE_RECEMMENT, "annuelle")
+        assert rotation == pytest.approx(96)  # et non 384/12 = 32
+
+    def test_lissage_depuis_la_premiere_vente(self):
+        lissee = calculer_rotation_mensuelle(self.LANCE_RECEMMENT, "lissee")
+        assert lissee > 90  # sans la correction : ~64, très sous-estimé
+
+    def test_zeros_de_fin_conserves(self):
+        # Un arrêt de vente (zéros RÉCENTS) reste de la vraie demande nulle.
+        rotation = calculer_rotation_mensuelle([12, 12, 0, 0], "annuelle")
+        assert rotation == pytest.approx(6)
+
+    def test_serie_toute_nulle_inchangee(self):
+        assert calculer_rotation_mensuelle([0, 0, 0], "annuelle") == 0.0
+
+    def test_variabilite_depuis_la_premiere_vente(self):
+        # Demande parfaitement stable depuis le lancement → CV nul, pas
+        # « forte variabilité » à cause des mois d'avant référencement.
+        assert "stable" in variabilite_demande([0, 0, 0, 0, 10, 10, 10, 10])
+
+    def test_pas_de_faux_pic_saisonnier(self):
+        ventes = [0, 0, 0, 0, 0, 0, 10, 10, 10, 10, 12, 10]
+        noms = [f"Ventes M{i}" for i in range(12)]
+        assert pic_saisonnier(ventes, noms) == ""  # 12 < 2× moyenne réelle
+
+
 class TestRotationLissee:
     def test_lissage_exponentiel(self):
         # SES α=0,4 sur [10, 10, 20] : 10 → 10 → 0,4×20+0,6×10 = 14.

@@ -414,18 +414,33 @@ def detecter_colonnes_ventes(colonnes) -> list:
 # Calculs de consommation partagés — utilisés par les DEUX modules métier
 # ---------------------------------------------------------------------------
 
+def _depuis_premiere_vente(valeurs: list) -> list:
+    """Tronque les zéros de TÊTE d'une série mensuelle chronologique.
+
+    Un produit référencé en cours de période affiche des mois à 0 AVANT sa
+    première vente : ce n'est pas de la demande nulle, c'est « pas encore au
+    catalogue ». Les inclure dans une moyenne divise la rotation des produits
+    récents (génériques nouvellement référencés notamment) et fait
+    sous-dimensionner leur stock. Les statistiques se calculent donc depuis
+    la première vente. Série entièrement nulle : inchangée.
+    """
+    premiere = next((i for i, v in enumerate(valeurs) if v != 0), None)
+    return valeurs if premiere is None else valeurs[premiere:]
+
+
 def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> float:
     """Rotation mensuelle estimée.
 
     ``ventes`` : valeurs mensuelles en ordre CHRONOLOGIQUE (la plus récente en
-    dernier). ``periode`` :
+    dernier). Les mois à 0 AVANT la première vente (produit pas encore
+    référencé) sont exclus du calcul. ``periode`` :
       - "annuelle" : moyenne de toutes les valeurs ;
       - "3mois"    : moyenne des 3 dernières ;
       - "lissee"   : lissage exponentiel (α = 0,4) — réactif aux tendances
         récentes, à la hausse COMME à la baisse, sans sur-réagir à un mois
         isolé. Recommandé pour l'analyse quotidienne.
     """
-    valeurs = [parser_nombre(v) for v in ventes]
+    valeurs = _depuis_premiere_vente([parser_nombre(v) for v in ventes])
     if not valeurs:
         return 0.0
     if periode == "3mois":
@@ -536,9 +551,11 @@ def variabilite_demande(ventes: list) -> str:
 
     Sert de base à un stock de sécurité différencié : un produit
     « forte variabilité » mérite plus de marge qu'un produit stable à
-    volume égal. Moins de 3 mois de recul ou demande nulle → « » (inconnu).
+    volume égal. Le recul se compte depuis la PREMIÈRE vente (les mois
+    d'avant référencement gonfleraient artificiellement le CV). Moins de
+    3 mois de recul ou demande nulle → « » (inconnu).
     """
-    valeurs = [parser_nombre(v) for v in ventes]
+    valeurs = _depuis_premiere_vente([parser_nombre(v) for v in ventes])
     if len(valeurs) < 3:
         return ""
     moyenne = sum(valeurs) / len(valeurs)
@@ -556,10 +573,14 @@ def variabilite_demande(ventes: list) -> str:
 def pic_saisonnier(ventes: list, noms_mois: list) -> str:
     """Signale un pic saisonnier probable : un mois ≥ 2× la moyenne.
 
-    Nécessite au moins 6 mois de recul pour distinguer saison et hasard.
+    Nécessite au moins 6 mois de recul DEPUIS LA PREMIÈRE VENTE pour
+    distinguer saison et hasard (les mois d'avant référencement écrasent la
+    moyenne et créent de faux pics).
     ``noms_mois`` : libellés alignés sur ``ventes`` (pour nommer le pic).
     """
-    valeurs = [parser_nombre(v) for v in ventes]
+    completes = [parser_nombre(v) for v in ventes]
+    valeurs = _depuis_premiere_vente(completes)
+    decalage = len(completes) - len(valeurs)
     if len(valeurs) < 6:
         return ""
     moyenne = sum(valeurs) / len(valeurs)
@@ -569,8 +590,9 @@ def pic_saisonnier(ventes: list, noms_mois: list) -> str:
     if maximum < 2 * moyenne:
         return ""
     nom = ""
-    if noms_mois and len(noms_mois) == len(valeurs):
-        nom = str(noms_mois[valeurs.index(maximum)]).replace("Ventes", "").strip()
+    if noms_mois and len(noms_mois) == len(completes):
+        nom = str(noms_mois[decalage + valeurs.index(maximum)]
+                  ).replace("Ventes", "").strip()
     return f"📈 pic {nom}".strip()
 
 

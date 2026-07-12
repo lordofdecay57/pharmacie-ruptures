@@ -42,8 +42,8 @@ import pandas as pd
 
 from commun import (JOURS_PAR_MOIS, calculer_rotation_mensuelle,
                     calculer_stock_jours, calculer_tendance, classer_abc,
-                    corriger_faux_zeros, exporter_classeur, parser_nombre,
-                    variabilite_demande)
+                    corriger_faux_zeros, exporter_classeur, normaliser_libelle,
+                    parser_nombre, variabilite_demande)
 
 # ---------------------------------------------------------------------------
 # Constantes / valeurs par défaut (toutes reconfigurables — voir
@@ -143,6 +143,62 @@ def determiner_cible_reassort(stock_actuel: float, stock_min: float,
     return cible, qte, motif
 
 
+def fusionner_doublons_cadencier(cadencier: pd.DataFrame, m: dict
+                                 ) -> tuple[pd.DataFrame, int]:
+    """Fusionne les lignes du cadencier qui décrivent le MÊME produit sous
+    plusieurs codes CIP (changement de générique ou de fournisseur).
+
+    Cas réel observé : l'ancien code reste dans le cadencier avec un stock 0
+    et un historique de ventes qui s'arrête au mois du changement, pendant
+    que le nouveau code porte le stock et les ventes récentes. Sans fusion,
+    l'ancienne fiche déclenche une commande fantôme d'un produit déjà en
+    rayon sous son nouveau code.
+
+    Fusion par libellé normalisé strictement identique : stock et ventes
+    mensuelles ADDITIONNÉS (les mois de transition se répartissent entre les
+    deux codes, la série fusionnée redevient continue), code CIP de la ligne
+    à l'activité la plus récente (à égalité : celle au stock le plus haut).
+    Les libellés vides ne sont jamais fusionnés entre eux.
+
+    Renvoie ``(cadencier_fusionne, nb_lignes_fusionnees)``.
+    """
+    libelles = cadencier[m["libelle"]].map(normaliser_libelle)
+    en_double = libelles.duplicated(keep=False) & (libelles != "")
+    if not en_double.any():
+        return cadencier, 0
+    colonnes_ventes = [c for c in m.get("ventes", []) if c in cadencier.columns]
+
+    def _activite(ligne) -> tuple:
+        """(index du dernier mois vendu, stock) — pour choisir la ligne
+        « porteuse » du groupe, celle du code actuellement actif."""
+        dernier = -1
+        for i, c in enumerate(colonnes_ventes):
+            if parser_nombre(ligne[c]) > 0:
+                dernier = i
+        return (dernier, parser_nombre(ligne[m["stock"]]))
+
+    lignes, deja_fusionnes = [], set()
+    for idx, ligne in cadencier.iterrows():
+        if not en_double.loc[idx]:
+            lignes.append(ligne)
+            continue
+        cle = libelles.loc[idx]
+        if cle in deja_fusionnes:
+            continue  # groupe déjà émis à sa première occurrence
+        deja_fusionnes.add(cle)
+        groupe = cadencier[libelles == cle]
+        porteuse = max(groupe.index, key=lambda i: _activite(groupe.loc[i]))
+        # astype(object) : la ligne d'un CSV est en dtype texte, les sommes
+        # sont écrites en str pour rester relisibles par parser_nombre.
+        fusion = groupe.loc[porteuse].copy().astype(object)
+        fusion[m["stock"]] = f"{sum(parser_nombre(v) for v in groupe[m['stock']]):g}"
+        for c in colonnes_ventes:
+            fusion[c] = f"{sum(parser_nombre(v) for v in groupe[c]):g}"
+        lignes.append(fusion)
+    nb_fusionnees = len(cadencier) - len(lignes)
+    return pd.DataFrame(lignes), nb_fusionnees
+
+
 # ---------------------------------------------------------------------------
 # Analyse complète du cadencier
 # ---------------------------------------------------------------------------
@@ -188,6 +244,9 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
     """
     params = params or ParametresStockRotation()
     m = mapping["cadencier"]
+    # Même produit sous deux codes CIP (changement de générique) : fusion,
+    # sinon l'ancien code à stock 0 déclenche une commande fantôme.
+    cadencier, doublons_fusionnes = fusionner_doublons_cadencier(cadencier, m)
     colonnes_ventes = [c for c in m["ventes"] if c in cadencier.columns]
     # Pas de réception le week-end : couverture min du JOUR ajustée.
     jours_weekend = jours_supplementaires_weekend(date_analyse)
@@ -195,7 +254,10 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
     lignes = []
     for _, ligne in cadencier.iterrows():
         stock = parser_nombre(ligne[m["stock"]])
-        cip = (str(ligne[m["cip"]]).strip() if m.get("cip") else "")
+        brut_cip = ligne[m["cip"]] if m.get("cip") else ""
+        cip = "" if pd.isna(brut_cip) else str(brut_cip).strip()
+        brut_nom = ligne[m["libelle"]]
+        nom = "" if pd.isna(brut_nom) else str(brut_nom).strip()
         ventes_brutes = [ligne[c] for c in colonnes_ventes]
         nb_corriges = 0
         ventes = ventes_brutes
@@ -235,7 +297,7 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         lignes.append({
             "Alerte": alerte,
             "Code CIP": cip,
-            "Nom du produit": str(ligne[m["libelle"]]).strip(),
+            "Nom du produit": nom,
             "Stock actuel": stock,
             "Consommation/mois": round(rotation, 1),
             "Tendance": calculer_tendance(ventes),
@@ -258,7 +320,8 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
 
     dormants = df[(df["Stock actuel"] > 0)
                   & (df["_stock_jours"] > params.seuil_dormant_jours)].copy()
-    dormants["Stock (jours)"] = dormants["_stock_jours"].round(1)
+    dormants["Stock (jours)"] = dormants["_stock_jours"].map(
+        lambda v: "∞ (aucune vente)" if math.isinf(v) else round(v, 1))
     dormants["Commentaire"] = (
         f"Plus de {params.seuil_dormant_jours:.0f} j de couverture, bien "
         "au-delà du stock max — trésorerie immobilisée, envisager retour "
@@ -285,6 +348,7 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
                             if not dormants.empty else 0.0),
         "qte_totale_a_commander": int(df["Qté à commander"].sum()),
         "jours_weekend": jours_weekend,  # ajustement appliqué au stock min
+        "doublons_fusionnes": doublons_fusionnes,  # anciens codes CIP absorbés
     }
     return ResultatStockRotation(tableau, dormants, resume)
 

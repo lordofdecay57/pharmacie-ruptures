@@ -45,6 +45,21 @@ gonflé le jour de l'analyse pour couvrir l'attente supplémentaire :
 
 L'ajustement appliqué est affiché dans l'interface au-dessus des résultats.
 
+#### Fiabilité du calcul de consommation
+
+- **Produits récemment référencés** : les mois à 0 vente AVANT la première
+  vente (produit pas encore au catalogue) sont exclus de la moyenne — sans
+  quoi un générique lancé il y a 4 mois verrait sa rotation divisée par 3
+  et son stock min sous-dimensionné d'autant.
+- **Doublons de codes CIP** (changement de générique ou de fournisseur) :
+  quand le même produit apparaît sous deux codes, les lignes sont
+  fusionnées (stock et ventes additionnés, code le plus récent conservé).
+  Sans fusion, l'ancien code à stock 0 déclencherait une commande fantôme
+  d'un produit déjà en rayon sous son nouveau code.
+- **Ruptures passées** (option, activée par défaut) : un mois à 0 vente
+  encadré de mois actifs est interprété comme une rupture et interpolé,
+  pas compté comme une absence de demande.
+
 ### Règle métier des 10 unités (priorité sur tout le reste)
 
 > Si le stock actuel d'un produit passe sous un **seuil absolu** (10 unités
