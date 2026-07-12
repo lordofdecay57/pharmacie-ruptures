@@ -224,8 +224,10 @@ l'analyse tourne sur un jeu fictif sans toucher à votre configuration.
 1. **Déposez au moins le cadencier** (`.xlsx`, `.xls`, `.csv` ou `.pdf`) —
    il suffit pour la Gestion des stocks en rotation. Déposez aussi les
    ruptures GPNC et UNIPHARMA pour activer la Gestion des ruptures. Le
-   **cadencier PDF WinPharma** (multi-pages) est reconnu et converti
-   automatiquement — comptez ~1 minute pour 200 pages, puis mis en cache.
+   **cadencier WinPharma** est reconnu et converti automatiquement, dans
+   les deux formats : export **CSV** (bandeau, colonnes achats/ventes
+   mensuelles, chargement instantané — à préférer) et **PDF** multi-pages
+   (~1 minute pour 200 pages, puis mis en cache).
 2. **Vérifiez les colonnes** détectées — corrigez si besoin, mémorisé dans
    `config.yaml`.
 3. **Réglez chaque module** dans la barre latérale (deux sections

@@ -145,10 +145,16 @@ def charger_fichier(contenu, nom_fichier: str) -> pd.DataFrame:
         for encodage in ("utf-8-sig", "utf-8", "latin-1"):
             try:
                 texte = data.decode(encodage)
+            except UnicodeDecodeError:
+                continue
+            df = _parser_cadencier_winpharma_csv(texte)
+            if df is not None:
+                break
+            try:
                 sep = ";" if texte.count(";") >= texte.count(",") else ","
                 df = pd.read_csv(io.StringIO(texte), sep=sep)
                 break
-            except (UnicodeDecodeError, pd.errors.ParserError):
+            except pd.errors.ParserError:
                 continue
         else:
             raise ValueError(f"CSV illisible : {nom_fichier}")
@@ -298,6 +304,67 @@ def _parser_cadencier_winpharma(brutes: list) -> pd.DataFrame:
         raise ValueError("Cadencier WinPharma : aucune ligne produit lisible.")
     return pd.DataFrame(produits,
                         columns=["Produit", "CIP", "Stock"] + colonnes_ventes)
+
+
+def _parser_cadencier_winpharma_csv(texte: str) -> Optional[pd.DataFrame]:
+    """Cadencier de stock WinPharma exporté en CSV → même format normalisé
+    que le parseur PDF : ``Produit`` / ``CIP`` / ``Stock`` / ``Ventes <mois>``
+    en ordre CHRONOLOGIQUE.
+
+    Format observé : bandeau de la pharmacie sur les premières lignes, puis
+    en-tête ``CIP;Code13Réf;Nom;"Formes & presentations";Stock`` suivi de
+    12 mois d'achats « (A) » et 12 mois de ventes « (V) » en ordre
+    ANTI-chronologique, et des colonnes « Total ». Les achats et totaux sont
+    ignorés, la ligne de totaux finale (sans code produit) est éliminée, et
+    le Code13Réf (13 chiffres) est préféré au CIP court pour les appariements.
+    Renvoie None si le texte n'est pas un cadencier WinPharma.
+    """
+    lignes = texte.splitlines()
+    entete = next((i for i, l in enumerate(lignes[:40])
+                   if l.split(";")[0].strip().strip('"').upper() == "CIP"
+                   and "(V)" in l), None)
+    if entete is None:
+        return None
+    brut = pd.read_csv(io.StringIO("\n".join(lignes[entete:])),
+                       sep=";", dtype=str)
+    brut.columns = [str(c).strip() for c in brut.columns]
+
+    ventes_anti_chrono = [c for c in brut.columns
+                          if re.fullmatch(r"(?!Total).+\(V\)", c)]
+    if not ventes_anti_chrono:
+        return None
+    df = pd.DataFrame()
+    df["Produit"] = brut.get("Nom", "").fillna("").map(
+        lambda s: " ".join(str(s).split()))
+    col_code13 = next((c for c in brut.columns
+                       if "code13" in _sans_accents(str(c))), None)
+    code13 = brut[col_code13] if col_code13 else None
+    cip = brut.get("CIP")
+
+    def _meilleur_code(i):
+        codes = []
+        for serie in (code13, cip):
+            if serie is not None:
+                codes.append(re.sub(r"\D", "", str(serie.iloc[i] or "")))
+        codes = [c for c in codes if len(c) >= 6]
+        if not codes:
+            return ""
+        return next((c for c in codes if len(c) == 13), codes[0])
+
+    df["CIP"] = [_meilleur_code(i) for i in range(len(brut))]
+    df["Stock"] = brut.get("Stock", "0").fillna("0")
+    for colonne in reversed(ventes_anti_chrono):  # → ordre chronologique
+        mois = colonne.replace("(V)", "").strip()
+        df[f"Ventes {mois}"] = brut[colonne].fillna("0")
+    # Élimine la ligne de totaux (« Qte : 3621 » / « Manque : -8 ») mais garde
+    # les produits sans code (parapharmacie) : l'appariement retombe alors
+    # sur le libellé.
+    totaux = df["Produit"].str.match(r"(?i)\s*(qte|manque)\s*:")
+    df = df[((df["CIP"] != "") | (df["Produit"] != "")) & ~totaux]
+    df = df.reset_index(drop=True)
+    if df.empty:
+        return None
+    return df
 
 
 # ---------------------------------------------------------------------------

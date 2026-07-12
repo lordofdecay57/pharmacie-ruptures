@@ -12,7 +12,8 @@ import pytest
 
 from commun import (calculer_rotation_mensuelle, calculer_stock_jours,
                     calculer_tendance, charger_fichier, classer_abc,
-                    corriger_faux_zeros, detecter_colonne, normaliser_cip,
+                    corriger_faux_zeros, detecter_colonne,
+                    detecter_colonnes_ventes, normaliser_cip,
                     normaliser_libelle, parser_date, parser_nombre,
                     pic_saisonnier, variabilite_demande, variantes_cip)
 
@@ -232,6 +233,71 @@ class TestChargementFichiers:
         assert detecter_colonne(df.columns, "libelle") == "Libelle"
         assert detecter_colonne(df.columns, "date_reappro") == "Réappro"
         assert parser_date(df["Réappro"].iloc[0]) == date(2026, 6, 3)
+
+
+class TestCadencierWinPharmaCsv:
+    """Export CSV du cadencier WinPharma : bandeau, achats (A) / ventes (V)
+    anti-chronologiques, Code13Réf, ligne de totaux finale."""
+
+    CONTENU = (
+        '"PHARMACIE DE LA FOA M. Lauret Claude Alexandre"\r\n'
+        '"92 Route Territoriale 1 BP 214"\r\n'
+        '"Date :  10/07/2026 13:05"\r\n'
+        '"du 01/07/2025 au 30/06/2026"\r\n'
+        "\r\n"
+        'CIP;Code13Réf;Nom;"Formes & presentations";Stock;'
+        '"Jun (A)";"Mai (A)";"Jun (V)";"Mai (V)";"Total (A)";"Total (V)"\r\n'
+        '3352892;3400933528928;"ABUFENE  400   B/ 30";"60  COMPRIMÉ";'
+        "1;0;2;5;3;2;8\r\n"
+        '3525720004499;3525722032742;"3 CHENES CARBOLINE B/30";;'
+        "17;12;0;3;1;12;4\r\n"
+        ';;"BO COEUR WHITE BRONZE";;2;0;0;1;0;0;1\r\n'
+        ';;"Qte : 3621";"Manque : -8";20;12;2;9;4;14;13\r\n'
+    ).encode("latin-1")
+
+    def _charge(self):
+        return charger_fichier(self.CONTENU, "Cadencier.csv")
+
+    def test_bandeau_ignore_et_totaux_elimines(self):
+        df = self._charge()
+        assert len(df) == 3  # 2 produits codés + 1 sans code, totaux éliminés
+        assert not df["Produit"].str.contains("Qte").any()
+
+    def test_format_normalise_identique_au_pdf(self):
+        df = self._charge()
+        assert list(df.columns) == ["Produit", "CIP", "Stock",
+                                    "Ventes Mai", "Ventes Jun"]
+
+    def test_ventes_remises_en_ordre_chronologique_sans_achats(self):
+        df = self._charge()
+        abufene = df[df["Produit"].str.startswith("ABUFENE")].iloc[0]
+        # Ligne source : Jun (V) = 5, Mai (V) = 3 — et surtout PAS les achats.
+        assert abufene["Ventes Mai"] == "3"
+        assert abufene["Ventes Jun"] == "5"
+
+    def test_code13ref_prefere_au_cip_court(self):
+        df = self._charge()
+        abufene = df[df["Produit"].str.startswith("ABUFENE")].iloc[0]
+        assert abufene["CIP"] == "3400933528928"
+
+    def test_produit_sans_code_conserve(self):
+        df = self._charge()
+        sans_code = df[df["Produit"].str.startswith("BO COEUR")]
+        assert len(sans_code) == 1
+        assert sans_code.iloc[0]["CIP"] == ""
+
+    def test_colonnes_auto_detectees(self):
+        df = self._charge()
+        assert detecter_colonne(df.columns, "libelle") == "Produit"
+        assert detecter_colonne(df.columns, "cip") == "CIP"
+        assert detecter_colonne(df.columns, "stock") == "Stock"
+        assert detecter_colonnes_ventes(df.columns) == ["Ventes Mai",
+                                                        "Ventes Jun"]
+
+    def test_csv_ordinaire_non_intercepte(self):
+        contenu = "CIP;Stock\n3352892;4\n".encode("utf-8")
+        df = charger_fichier(contenu, "autre.csv")
+        assert list(df.columns) == ["CIP", "Stock"]  # chemin générique
 
 
 class TestPdf:
