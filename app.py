@@ -22,6 +22,7 @@ Parcours (suivi dans la barre latérale) :
 """
 
 import dataclasses
+import logging
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -32,6 +33,25 @@ import yaml
 import commun
 import moteur_ruptures as moteur
 import stock_rotation
+
+# ---------------------------------------------------------------------------
+# Garde-fou de lancement : « python app.py » au lieu de « streamlit run
+# app.py ». Dans ce mode, AUCUNE protection Streamlit ne fonctionne —
+# st.stop() est inopérant sans contexte d'exécution, les widgets renvoient
+# None — et le script planterait plus bas (KeyError: 'cadencier'). On
+# relance alors le script correctement, de façon transparente.
+# ---------------------------------------------------------------------------
+from streamlit import runtime
+
+if __name__ == "__main__" and not runtime.exists():
+    import sys
+    from streamlit.web import cli as _stcli
+    print("Lancement de l'interface Streamlit… "
+          "(équivalent : python -m streamlit run app.py)")
+    sys.argv = ["streamlit", "run", str(Path(__file__).resolve())]
+    sys.exit(_stcli.main())
+
+_journal = logging.getLogger("pharmacie.app")
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -277,13 +297,18 @@ for colonne, (cle, titre, aide) in zip(col_fichiers, libelles_zones):
             except ValueError as e:
                 st.error(str(e))
 
-# Mode démonstration : remplace les fichiers manquants par le jeu fictif.
-mode_demo = st.session_state.get("mode_demo", False) and len(dataframes) < 3
+# Mode démonstration : actif tant qu'aucun VRAI cadencier n'est déposé (le
+# cadencier est le seul fichier indispensable — dès qu'il arrive, on repasse
+# en mode normal, même sans les fichiers de ruptures).
+mode_demo = (st.session_state.get("mode_demo", False)
+             and "cadencier" not in dataframes)
 if mode_demo:
     dataframes = jeu_demonstration()
     st.info("🧪 **Mode démonstration** — données fictives (les cas de "
-            "référence : Titanoréine, Ozempic, Aranesp…). Déposez vos vrais "
-            "fichiers ci-dessus pour repasser en mode normal.")
+            "référence : Titanoréine, Ozempic, Aranesp…). Déposez votre "
+            "vrai cadencier ci-dessus pour repasser en mode normal.")
+_journal.info("Fichiers disponibles pour l'analyse : %s%s",
+              sorted(dataframes) or "aucun", " (démo)" if mode_demo else "")
 
 st.caption("💡 Seul le **cadencier** est nécessaire pour la Gestion des "
            "stocks en rotation. Les ruptures GPNC/UNIPHARMA ne sont "
@@ -427,12 +452,13 @@ with st.sidebar:
                "Le mapping et les réglages sont mémorisés dans config.yaml.")
 
 if "cadencier" not in dataframes:
+    _journal.info("Cadencier absent — attente d'un dépôt de fichier.")
     st.info("Déposez au moins le **cadencier** pour continuer — ou "
             "découvrez l'outil avec des données fictives :")
     if st.button("🧪 Essayer avec des données de démonstration"):
         st.session_state["mode_demo"] = True
         st.rerun()
-    st.stop()
+    st.stop()  # efficace : le garde-fou de lancement garantit le runtime
 
 # ---------------------------------------------------------------------------
 # Étape 2 — validation du mapping des colonnes (aperçu + menus déroulants)
@@ -634,6 +660,9 @@ if resultat_stock is None and resultat is None:
     st.stop()
 
 historique = st.session_state.get("historique", charger_historique())
+# Toujours présente après une analyse ; repli sur la date de la barre
+# latérale si la session a été restaurée partiellement.
+date_analyse_resultats = st.session_state.get("date_analyse", date_analyse)
 
 st.divider()
 st.subheader("📊 Résultats")
@@ -705,7 +734,7 @@ with module_stock:
             "⬇️ Télécharger l'Excel du stock en rotation",
             data=stock_rotation.exporter_stock_rotation_excel(resultat_stock),
             file_name=commun.nom_fichier_export(
-                "stock_rotation", st.session_state["date_analyse"]),
+                "stock_rotation", date_analyse_resultats),
             mime=("application/vnd.openxmlformats-officedocument."
                   "spreadsheetml.sheet"),
             type="primary", use_container_width=True)
@@ -747,7 +776,7 @@ with module_ruptures:
             produits_jour = (list(resultat.onglet1["Produit"])
                              + list(resultat.onglet2["Produit"]))
             date_prec, nouveaux, resolus = moteur.comparer_a_analyse_precedente(
-                produits_jour, historique, st.session_state["date_analyse"])
+                produits_jour, historique, date_analyse_resultats)
             if date_prec is None:
                 st.caption("📅 Première analyse enregistrée — le comparatif "
                            "quotidien (nouvelles ruptures / résolues) "
@@ -796,7 +825,7 @@ with module_ruptures:
                     affichage1["Déjà signalé"] = affichage1["Produit"].apply(
                         lambda p: (lambda n: f"🔁 {n} fois" if n else "🆕 nouveau")(
                             moteur.compter_occurrences_historique(
-                                p, historique, st.session_state["date_analyse"])))
+                                p, historique, date_analyse_resultats)))
                 # Validation de commande DANS l'outil : cocher/décocher,
                 # ajuster la quantité — l'export Excel reflète les ajustements.
                 affichage1.insert(0, "✔", True)
@@ -872,7 +901,7 @@ with module_ruptures:
             "⬇️ Télécharger le fichier Excel des ruptures"
             + (f" ({nb_exclus} produit(s) décoché(s))" if nb_exclus else ""),
             data=moteur.exporter_excel(resultat_export),
-            file_name=moteur.nom_fichier_sortie(st.session_state["date_analyse"]),
+            file_name=moteur.nom_fichier_sortie(date_analyse_resultats),
             mime=("application/vnd.openxmlformats-officedocument."
                   "spreadsheetml.sheet"),
             type="primary", use_container_width=True)
