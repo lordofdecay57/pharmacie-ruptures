@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Rend moteur_ruptures importable quel que soit le répertoire de lancement."""
+"""Rend commun/moteur_ruptures/stock_rotation importables quel que soit le
+répertoire de lancement."""
 
 import sys
 from pathlib import Path

@@ -1,16 +1,124 @@
-# 💊 Gestion des ruptures de stock — pharmacie
+# 💊 Pilotage pharmacie — stock & ruptures
 
-Application **locale** (elle tourne sur votre PC, hors-ligne) qui croise chaque
-jour :
+Application **locale** (elle tourne sur votre PC, hors-ligne) organisée en
+**deux modules fonctionnels indépendants**, chacun son onglet principal :
 
-1. le **cadencier** de la pharmacie (ventes + stock actuel),
-2. la liste des **ruptures GPNC** (`ruptgpnc_ia`) — fournisseur principal,
-3. la liste des **ruptures UNIPHARMA** (`ruptocdp_ia`) — fournisseur de dépannage,
+- **📦 Gestion des stocks en rotation** (`stock_rotation.py`) — calcule un
+  **stock min** et un **stock max** par produit à partir du seul cadencier,
+  pour éviter la rupture (sous-stockage) et l'immobilisation de trésorerie
+  (sur-stockage). Ne nécessite QUE le cadencier.
+- **🚨 Gestion des ruptures** (`moteur_ruptures.py`) — croise le cadencier
+  avec les listes de ruptures **GPNC** (`ruptgpnc_ia`, fournisseur
+  principal) et **UNIPHARMA** (`ruptocdp_ia`, dépannage) pour produire le
+  fichier Excel de commande quotidien.
 
-et produit le fichier Excel de décision `commande_ruptures_AAAA-MM-JJ.xlsx`
-(3 onglets : à commander chez UNIPHARMA · rupture chez les deux · traçabilité).
+Les deux modules sont **strictement isolés l'un de l'autre** (aucun ne
+connaît les structures de données de l'autre) mais **mutualisent** leurs
+calculs de consommation (rotation, tendance, variabilité, classement ABC,
+correction des ruptures passées) via un troisième module, `commun.py` —
+voir [Architecture](#architecture) plus bas.
 
-## La règle métier (stricte, sans buffer)
+## 📦 Module 1 — Gestion des stocks en rotation
+
+### Méthode de calcul
+
+Politique min/max exprimée directement en **jours de couverture** :
+
+```
+Stock min = consommation/jour × 14 jours (+ ajustement week-end)
+Stock max = consommation/jour × 30 jours
+```
+
+Les couvertures (14 j / 30 j par défaut) sont réglables dans la barre
+latérale.
+
+#### Ajustement week-end (pas de réception samedi/dimanche)
+
+Les commandes ne sont pas réceptionnées le week-end. Le stock min est donc
+gonflé le jour de l'analyse pour couvrir l'attente supplémentaire :
+
+| Jour de l'analyse | Jours ajoutés au stock min | Pourquoi |
+|---|---|---|
+| Vendredi | +2 j | Commande du vendredi reçue lundi |
+| Samedi | +1 j | Commande du samedi reçue lundi |
+| Dimanche → jeudi | +0 j | Réception le lendemain ouvré |
+
+L'ajustement appliqué est affiché dans l'interface au-dessus des résultats.
+
+#### Fiabilité du calcul de consommation
+
+- **Produits récemment référencés** : les mois à 0 vente AVANT la première
+  vente (produit pas encore au catalogue) sont exclus de la moyenne — sans
+  quoi un générique lancé il y a 4 mois verrait sa rotation divisée par 3
+  et son stock min sous-dimensionné d'autant.
+- **Doublons de codes CIP** (changement de générique ou de fournisseur) :
+  quand le même produit apparaît sous deux codes, les lignes sont
+  fusionnées (stock et ventes additionnés, code le plus récent conservé).
+  Sans fusion, l'ancien code à stock 0 déclencherait une commande fantôme
+  d'un produit déjà en rayon sous son nouveau code.
+- **Ruptures passées** (option, activée par défaut) : un mois à 0 vente
+  encadré de mois actifs est interprété comme une rupture et interpolé,
+  pas compté comme une absence de demande.
+
+### Règle métier des 10 unités (priorité sur tout le reste)
+
+> Si le stock actuel d'un produit passe sous un **seuil absolu** (10 unités
+> par défaut), la cible de réassort est fixée **directement au stock max** —
+> commande immédiate, sans passer par un recomplètement progressif jusqu'au
+> seul stock min.
+
+Concrètement, `determiner_cible_reassort()` applique 3 paliers, dans cet
+ordre de priorité :
+
+| Condition | Cible | Alerte |
+|---|---|---|
+| `stock < seuil (10)` | **Stock max** (commande immédiate) | 🔴 Action requise |
+| `seuil ≤ stock < stock min` | Stock min (réassort progressif) | 🟡 Sous le min |
+| `stock ≥ stock min` | Stock actuel (rien à faire) | 🟢 OK |
+
+Le seuil des 10 unités **prime toujours** sur le stock min calculé, même si
+ce dernier est lui-même inférieur à 10 (cas d'un produit à très faible
+rotation) : c'est un filet de sécurité absolu, indépendant du profil de
+vente du produit. Un produit à rotation nulle (arrêté) ne déclenche jamais
+d'alerte si la quantité à commander calculée est nulle.
+
+### Solution progressive si l'historique manque
+
+Un produit sans aucune vente enregistrée (nouveau, ou cadencier trop court)
+utilise une **consommation par défaut** (paramètre, 0 = désactivé) le temps
+que l'historique s'accumule. Dès qu'une seule vente réelle apparaît dans le
+cadencier, le calcul réel prend automatiquement le dessus — aucune
+intervention nécessaire.
+
+### Paramètres (tous configurables dans la barre latérale, aucun codé en dur)
+
+| Paramètre | Défaut | Rôle |
+|---|---|---|
+| Stock min | 14 j de couverture | Seuil de recomplètement |
+| Stock max | 30 j de couverture | Cible de la commande immédiate |
+| Seuil d'action immédiate | 10 unités | La règle des 10 unités |
+| Consommation par défaut | 0 (désactivé) | Repli si pas d'historique |
+| Seuil de stock dormant | 180 j de couverture | Trésorerie immobilisée |
+| Calcul de la consommation | Annuelle | Annuelle / 3 mois / lissée |
+
+### Tableau produit
+
+| Colonne | Contenu |
+|---|---|
+| Alerte | 🔴 Action requise · 🟡 Sous le min · 🟢 OK |
+| Classe | A/B/C (Pareto, 80/95 % des ventes) |
+| Code CIP · Nom du produit · Stock actuel | — |
+| Consommation/mois · Tendance · Variabilité | Contexte de décision |
+| Stock min (calculé) · Stock max (calculé) | La politique de stock |
+| Cible réassort · Qté à commander · Motif | La décision, explicable |
+
+Un onglet **stock dormant** (couverture > seuil) liste les produits dont la
+trésorerie est immobilisée — envisager retour fournisseur ou arrêt de
+réassort. Export dédié : bouton « Excel du stock en rotation » (2 feuilles).
+
+## 🚨 Module 2 — Gestion des ruptures
+
+### La règle métier (stricte, sans buffer)
 
 Un produit en rupture GPNC **que vous vendez** apparaît uniquement si :
 
@@ -19,110 +127,84 @@ Un produit en rupture GPNC **que vous vendez** apparaît uniquement si :
 - il n'a pas de date de réappro : `stock (en jours) < 30` (objectif 30 jours
   de couverture).
 
-S'il apparaît : disponible chez UNIPHARMA → **Onglet 1** avec la quantité à
-commander (`Cmd`) et l'urgence (🔴 stock épuisé ou ≤ 3 j · 🟡 4-15 j ·
-🟢 > 15 j) ; en rupture aussi chez UNIPHARMA → **Onglet 2** (anticiper
-l'information patient, contacter GPNC).
+S'il apparaît : disponible chez UNIPHARMA → **onglet À commander** avec la
+quantité à commander (`Cmd`) et l'urgence (🔴 stock épuisé ou ≤ 3 j ·
+🟡 4-15 j · 🟢 > 15 j) ; en rupture aussi chez UNIPHARMA → **onglet Sans
+solution** (anticiper l'information patient, contacter GPNC).
 
-## Anticipation des ruptures à venir
+### Anticipation des ruptures à venir
 
-- **🔭 Vigilance stock** : produits que vous vendez, HORS liste de ruptures
-  GPNC, dont la couverture passe sous 7 jours (réglable) — la rupture en
-  rayon arrive, commander chez GPNC avant qu'elle se produise. Un plancher
-  de rotation (5 ventes/mois, réglable) écarte le bruit des produits à
-  rotation très lente.
-- **⚠️ Écartés de justesse** : produits écartés par la règle stricte avec
-  moins de 3 jours de marge (réglable) — si la date de réappro glisse,
-  c'est la rupture sèche. Visibles dans un onglet dédié, sans modifier la
-  règle de commande.
-- **Délai de livraison UNIPHARMA** (réglable, 1 jour par défaut) : ajouté à
-  la couverture cible du calcul de `Cmd` — les boîtes commandées aujourd'hui
-  n'arrivent pas aujourd'hui.
-- **Tendance de la demande** : ↗ / ↘ / → par produit (3 derniers mois vs
-  moyenne globale) ; option « rotation prudente » qui retient la moyenne la
-  plus élevée pour ne jamais sous-couvrir un produit en croissance.
+- **🔭 Vigilance stock** : produits HORS liste de ruptures GPNC dont la
+  couverture passe sous 7 jours (réglable) — la rupture en rayon arrive,
+  commander chez GPNC avant qu'elle se produise.
+- **⚠️ Écartés de justesse** : écartés par la règle stricte avec moins de
+  3 jours de marge (réglable) — si la réappro glisse, rupture sèche.
+- **Délai de livraison UNIPHARMA** (réglable, 0 par défaut) : ajouté à la
+  couverture cible du calcul de `Cmd`.
 - **Dates de réappro repoussées** : l'historique mémorise la date annoncée ;
-  si elle glisse d'une analyse à l'autre, alerte « repoussée N fois » —
-  fournisseur peu fiable sur ce produit, privilégier le dépannage.
-- **Ruptures longues** : un produit aux ventes écrasées à 0 sur toute la
-  période mais déjà signalé dans l'historique passe en « À vérifier » au
-  lieu d'être écarté en silence.
+  si elle glisse d'une analyse à l'autre, alerte « repoussée N fois ».
+- **Ruptures longues** : ventes écrasées à 0 sur toute la période mais déjà
+  signalé → « À vérifier » au lieu d'un écartement silencieux.
 
-Les seuils se règlent dans la barre latérale (« 🎛️ Réglages d'anticipation »).
+### Priorisation quotidienne (le tri du matin)
 
-## Priorisation quotidienne (le tri du matin)
-
-- **Score de priorité 0-100** sur chaque ligne à commander et en vigilance :
-  50 pts de risque de rupture à 7 jours + 30 pts de poids dans vos ventes
-  (classe A/B/C) + 20 pts de fiabilité de la réappro (déjà repoussée, ou
-  sans date). Les listes sont triées par ce score : un produit A à fort
-  risque passe devant un produit C déjà à sec.
-- **P(rupture 7 j)** : probabilité de rupture sous 7 jours, calculée à
-  partir de la variabilité réelle des ventes du produit (ex. « 85 % »).
+- **Score de priorité 0-100** : 50 pts de risque de rupture à 7 jours
+  (probabilité, calculée sur la variabilité réelle des ventes) + 30 pts de
+  poids dans les ventes (classe A/B/C) + 20 pts de fiabilité de la réappro.
+  L'onglet « À commander » est trié par ce score.
 - **Correction des faux zéros** (activée par défaut) : un mois à 0 vente
-  encadré de mois actifs = rupture passée, pas absence de demande — il est
-  interpolé avant le calcul de rotation, ce qui corrige le biais de
-  sous-commande sur les produits qui ont déjà manqué (« 🔧 corrigée »).
-- **Rotation lissée** (option) : lissage exponentiel réactif aux tendances
-  récentes, hausse comme baisse.
+  encadré de mois actifs = rupture passée, pas absence de demande — corrige
+  le biais de sous-commande sur les produits qui ont déjà manqué.
 - **Politique ABC** (option) : couverture cible sans date différenciée —
-  A 21 j (réassort fréquent) · B 30 j · C 14 j (éviter le surstock). La
-  règle d'apparition stricte ne change jamais.
+  A 21 j (réassort fréquent) · B 30 j · C 14 j. La règle d'apparition
+  stricte ne change jamais, seule la quantité est affectée.
 - **Validation de commande dans l'outil** : cochez/décochez les lignes,
   ajustez les quantités — l'export Excel reprend vos choix. Une **fiche
-  produit** (expander 🔎) montre l'historique complet d'un produit avant
-  de valider.
+  produit** (🔎) montre l'historique complet avant de valider.
+- **Suivi quotidien** : chaque analyse (hors démo) est ajoutée à
+  `historique_commandes.csv` ; l'écran affiche le comparatif avec la
+  précédente (🆕 nouvelles ruptures / ✅ résolues).
 
-## Deux axes de travail
+### Fonctionnalités complémentaires
 
-Les résultats sont organisés en **deux grands onglets** qui correspondent à
-deux métiers différents :
+- **Commande en cours** (colonne facultative) : déduite du calcul, évite de
+  recommander ce qui arrive déjà.
+- **Péremption / DLUO** (colonne facultative) : alerte informative si moins
+  de 90 jours — n'écarte pas le produit.
+- **Matching CIP13 ↔ CIP7** : les exports mélangent les deux formats, le
+  moteur les rapproche automatiquement (CIP en priorité, sinon libellé +
+  fuzzy matching).
 
-- **🚨 Gestion des ruptures — le quotidien** : tuiles de synthèse,
-  comparatif avec l'analyse précédente, et les 5 vues d'action (à commander
-  UNIPHARMA, rupture chez les deux, vigilance, écartés de justesse, analyse
-  complète) + export Excel des ruptures. C'est l'écran de tous les jours.
-- **📦 Gestion du stock en rotation — le point de gestion** : classement
-  ABC, variabilité, saisonnalité, stock dormant, taux de service + export
-  Excel dédié. À consulter ponctuellement (point hebdo/mensuel).
+## Architecture
 
-## Gestion du stock en rotation (axe 📦)
+Trois modules Python, une seule règle : **la logique métier est strictement
+séparée de l'interface**, et les deux modules fonctionnels ne s'importent
+jamais l'un l'autre.
 
-Vue d'ensemble calculée depuis le cadencier — n'affecte aucune quantité
-commandée (pratiques standard des officines les mieux gérées) :
+```
+commun.py            Fonctions PURES partagées (parsing, chargement de
+                      fichiers .xlsx/.xls/.csv/.pdf, calculs de consommation :
+                      rotation, tendance, variabilité, classement ABC,
+                      correction des ruptures passées). Ni ruptures
+                      fournisseurs, ni politique de stock min/max.
 
-- **Classement ABC** (Pareto) : A = les produits qui font 80 % des ventes —
-  leurs ruptures coûtent le plus, à surveiller en priorité ;
-- **Variabilité de la demande** (écart-type/moyenne) : base d'un stock de
-  sécurité différencié — un produit « forte variabilité » mérite plus de
-  marge qu'un produit stable ;
-- **Saisonnalité** : signale un mois de pic ≥ 2× la moyenne (à partir de
-  6 mois de recul) ;
-- **💤 Stock dormant** : produits à plus de 6 mois de couverture —
-  trésorerie immobilisée, envisager retour ou arrêt de réassort ;
-- **Taux de service produits A** : % de couples produit A × jour SANS
-  rupture signalée sur 30 jours glissants (alimenté par l'historique).
+stock_rotation.py     MODULE 1 — logique métier pure du stock en rotation.
+  (import commun)     Lit uniquement le cadencier. Stock min/max, règle des
+                       10 unités, stock dormant.
 
-Export dédié : bouton « ⬇️ Télécharger l'Excel de gestion (ABC + dormants) ».
+moteur_ruptures.py    MODULE 2 — logique métier pure des ruptures.
+  (import commun)     Croise cadencier + GPNC + UNIPHARMA. Urgence,
+                       vigilance, écartés de justesse, score de priorité,
+                       historique, suivi quotidien.
 
-## Fonctionnalités complémentaires
+app.py                 Interface Streamlit UNIQUEMENT — importe les 3
+  (import les 3)        modules ci-dessus, affiche 2 onglets principaux.
+```
 
-- **Commande en cours** (colonne facultative du cadencier) : une quantité déjà
-  commandée mais pas reçue est déduite du calcul de couverture et de `Cmd`,
-  pour éviter de recommander ce qui est déjà en route.
-- **Fiabilité de la rotation** : si un mois de ventes est à 0 au milieu de
-  mois actifs, l'outil signale « ⚠️ rupture passée possible » — la rotation
-  est probablement sous-estimée (le produit était en rupture, pas sans
-  demande), à corriger manuellement si besoin.
-- **Péremption / DLUO** (colonne facultative du cadencier) : alerte
-  informative si la péremption est à moins de 90 jours — n'écarte pas le
-  produit, sert juste à vérifier avant de commander davantage.
-- **Suivi quotidien** : chaque analyse (hors mode démo) est ajoutée à
-  `historique_commandes.csv` (local, jamais versionné). À chaque analyse,
-  l'écran affiche le comparatif avec la précédente — 🆕 nouvelles ruptures à
-  traiter, ✅ ruptures sorties de la liste — et l'onglet 1 marque chaque
-  produit « 🆕 nouveau » ou « 🔁 N fois » (rupture qui traîne). Une
-  ré-analyse le même jour remplace celle du jour (pas de doublon).
+`stock_rotation.py` et `moteur_ruptures.py` n'importent **jamais** l'un de
+l'autre : la mutualisation passe exclusivement par `commun.py`. C'est ce qui
+garantit qu'on peut faire évoluer la politique de stock sans risquer de
+casser le calcul des ruptures, et inversement.
 
 ## Installation (une seule fois)
 
@@ -150,48 +232,49 @@ fermez la fenêtre noire (ou Ctrl+C dedans).
 
 💡 **Pour découvrir l'outil sans fichiers** : cliquez sur
 « 🧪 Essayer avec des données de démonstration » sur l'écran d'accueil —
-l'analyse tourne sur un jeu fictif (Titanoréine, Ozempic, Aranesp…) sans
-toucher à votre configuration.
+l'analyse tourne sur un jeu fictif sans toucher à votre configuration.
 
 ## Utilisation (chaque jour)
 
-1. **Exportez et déposez les 3 fichiers du jour** (`.xlsx`, `.xls`, `.csv`
-   ou `.pdf`) dans les trois zones. Le **cadencier PDF WinPharma**
-   (multi-pages, ventes A/V par mois) est reconnu et converti
-   automatiquement — comptez ~1 minute de lecture pour 200 pages, puis le
-   fichier reste en cache. Les PDF scannés (images) ne sont pas lisibles :
-   préférez alors un export Excel/CSV.
-2. **Vérifiez les colonnes** détectées (libellé, CIP, stock, ventes
-   mensuelles, date de réappro) — corrigez avec les menus déroulants si
-   besoin. Votre choix est **mémorisé** (`config.yaml`) : le lendemain,
-   il est pré-rempli.
-3. Choisissez la **date d'analyse** et la **période de rotation** (moyenne
-   annuelle par défaut, ou 3 derniers mois) dans la **barre latérale** — qui
-   affiche aussi la progression (fichiers déposés, analyse lancée).
-4. Cliquez **« Lancer l'analyse »** : les 3 onglets s'affichent à l'écran avec
-   le code couleur d'urgence et un bandeau de résumé.
-5. Cliquez **« Télécharger le fichier Excel »**.
+1. **Déposez au moins le cadencier** (`.xlsx`, `.xls`, `.csv` ou `.pdf`) —
+   il suffit pour la Gestion des stocks en rotation. Déposez aussi les
+   ruptures GPNC et UNIPHARMA pour activer la Gestion des ruptures. Le
+   **cadencier WinPharma** est reconnu et converti automatiquement, dans
+   les deux formats : export **CSV** (bandeau, colonnes achats/ventes
+   mensuelles, chargement instantané — à préférer) et **PDF** multi-pages
+   (~1 minute pour 200 pages, puis mis en cache).
+2. **Vérifiez les colonnes** détectées — corrigez si besoin, mémorisé dans
+   `config.yaml`.
+3. **Réglez chaque module** dans la barre latérale (deux sections
+   distinctes : 📦 Stock en rotation · 🚨 Gestion des ruptures), choisissez
+   la date d'analyse.
+4. Cliquez **« Lancer l'analyse »** : les deux onglets principaux
+   s'affichent avec leurs tuiles de synthèse.
+5. Téléchargez l'Excel de chaque module (boutons dédiés).
 
-⚠️ Les correspondances de produits **incertaines** (libellés proches mais pas
-identiques entre les fichiers) sont listées dans un panneau dédié : vérifiez-les
-avant de commander. Le matching utilise le **code CIP en priorité** quand il est
-présent dans les fichiers — c'est le plus fiable.
+⚠️ Les correspondances de produits **incertaines** (Module Ruptures,
+libellés proches mais pas identiques) sont listées dans un panneau dédié :
+vérifiez-les avant de commander.
 
 ## Structure du projet
 
 ```
 pharmacie-ruptures/
-├── app.py                 # interface (Streamlit) — n'appelle que le moteur
-├── .streamlit/config.toml # thème de l'interface (vert pharmacie)
-├── moteur_ruptures.py     # moteur métier pur, testable indépendamment
-├── config.yaml            # mapping de colonnes mémorisé (créé au 1er lancement)
-├── historique_commandes.csv # historique des analyses (créé à la 1re analyse)
-├── requirements.txt       # dépendances Python
-├── lancer.bat             # double-clic Windows
-├── lancer.command         # double-clic Mac
+├── app.py                  # interface (Streamlit) — n'appelle que les 3 modules
+├── commun.py                # fonctions pures partagées (parsing, fichiers, stats)
+├── stock_rotation.py        # Module 1 — stock min/max, pur, testable indépendamment
+├── moteur_ruptures.py       # Module 2 — ruptures GPNC/UNIPHARMA, pur, testable
+├── .streamlit/config.toml   # thème de l'interface (vert pharmacie)
+├── config.yaml               # mapping + réglages mémorisés (créé au 1er lancement)
+├── historique_commandes.csv  # historique des analyses de ruptures (créé à la 1re)
+├── requirements.txt          # dépendances Python
+├── lancer.bat                 # double-clic Windows
+├── lancer.command              # double-clic Mac
 ├── README.md
 └── tests/
-    └── test_moteur.py     # 130 tests (dont Titanoréine, Ozempic, Aranesp)
+    ├── test_commun.py        # fonctions partagées (parsing, fichiers, statistiques)
+    ├── test_stock_rotation.py # Module 1 : stock min/max, règle des 10 unités
+    └── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
 ```
 
 ## Tests
@@ -201,7 +284,9 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-Les cas de référence validés en conversation sont couverts :
-Titanoréine (réappro 16 j, stock 18 j → écartée), Ozempic 1 mg (stock 5,
-~16,5/mois → ~9 j → 🟡 modéré, Cmd 12), Aranesp 150 (stock 0, réappro 2 j →
-🔴 urgent, Cmd ≥ 1).
+156 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
+Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
+référence Module Stock : règle des 10 unités testée sous tous ses angles
+(seuil prioritaire sur le stock min, non-régression sur les produits
+arrêtés, paramètres reconfigurables).
