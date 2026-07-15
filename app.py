@@ -53,6 +53,10 @@ if __name__ == "__main__" and not runtime.exists():
 
 _journal = logging.getLogger("pharmacie.app")
 
+# Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
+# la bonne version tourne (utile après une mise à jour du dossier local).
+VERSION_APP = "2.1"
+
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
 COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
@@ -78,6 +82,9 @@ st.markdown("""
   border-radius: 14px; padding: 22px 26px; color: #ffffff;
 }
 .hero h1 { color: #ffffff; font-size: 1.55rem; margin: 0 0 6px 0; padding: 0; }
+.hero .version { font-size: .82rem; font-weight: 600; vertical-align: middle;
+  background: rgba(255,255,255,.22); border-radius: 999px; padding: 2px 10px;
+  margin-left: 8px; letter-spacing: .3px; }
 .hero p  { color: rgba(255,255,255,.88); margin: 0; font-size: .95rem; }
 .hero .badge { display: inline-block; background: rgba(255,255,255,.16);
   border-radius: 999px; padding: 3px 14px; font-size: .8rem; margin-top: 12px; }
@@ -96,9 +103,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
+st.markdown(f"""
 <div class="hero">
-  <h1>💊 Pilotage pharmacie — stock &amp; ruptures</h1>
+  <h1>💊 Pilotage pharmacie — stock &amp; ruptures
+    <span class="version">v{VERSION_APP}</span></h1>
   <p>Deux modules indépendants à partir des mêmes fichiers : le <b>stock en
   rotation</b> (stock min/max par produit) et les <b>ruptures fournisseurs</b>
   (GPNC/UNIPHARMA → fichier Excel de commande).</p>
@@ -307,8 +315,9 @@ if mode_demo:
     st.info("🧪 **Mode démonstration** — données fictives (les cas de "
             "référence : Titanoréine, Ozempic, Aranesp…). Déposez votre "
             "vrai cadencier ci-dessus pour repasser en mode normal.")
-_journal.info("Fichiers disponibles pour l'analyse : %s%s",
-              sorted(dataframes) or "aucun", " (démo)" if mode_demo else "")
+_journal.info("Pilotage pharmacie v%s — fichiers disponibles : %s%s",
+              VERSION_APP, sorted(dataframes) or "aucun",
+              " (démo)" if mode_demo else "")
 
 st.caption("💡 Seul le **cadencier** est nécessaire pour la Gestion des "
            "stocks en rotation. Les ruptures GPNC/UNIPHARMA ne sont "
