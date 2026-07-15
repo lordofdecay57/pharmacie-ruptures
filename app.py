@@ -89,19 +89,40 @@ st.markdown("""
 .hero .badge { display: inline-block; background: rgba(255,255,255,.16);
   border-radius: 999px; padding: 3px 14px; font-size: .8rem; margin-top: 12px; }
 
-.kpi-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 12px 0; }
-.kpi { flex: 1 1 160px; max-width: 320px; background: #ffffff;
+.kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 14px 0; }
+.kpi { flex: 1 1 180px; max-width: 340px; background: #ffffff;
   border: 1px solid rgba(11,11,11,.10); border-radius: 12px;
-  padding: 12px 16px 10px; border-top: 3px solid #e1e0d9; }
-.kpi .label { font-size: .78rem; color: #52514e; }
-.kpi .value { font-size: 1.85rem; font-weight: 700; color: #0b0b0b; line-height: 1.2; }
-.kpi .sub   { font-size: .74rem; color: #898781; }
+  padding: 14px 18px 12px; border-top: 4px solid #e1e0d9; }
+.kpi .label { font-size: .82rem; color: #52514e; }
+.kpi .value { font-size: 2.05rem; font-weight: 700; color: #0b0b0b; line-height: 1.2; }
+.kpi .sub   { font-size: .76rem; color: #898781; margin-top: 2px; }
 .kpi.accent   { border-top-color: #0f766e; }
 .kpi.critical { border-top-color: #d03b3b; }
 .kpi.warning  { border-top-color: #fab219; }
 .kpi.serious  { border-top-color: #ec835a; }
+
+/* En-tête d'étape numérotée — rend le parcours linéaire et évident. */
+.step { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
+.step .num { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
+  background: #0f766e; color: #fff; font-weight: 700; font-size: 1.05rem;
+  display: flex; align-items: center; justify-content: center; }
+.step .txt { font-size: 1.25rem; font-weight: 700; color: #0b0b0b; }
+.step .txt small { display: block; font-size: .82rem; font-weight: 400;
+  color: #6b6a66; margin-top: 1px; }
+
+/* Lisibilité générale : tableaux un peu plus aérés et lisibles. */
+[data-testid="stDataFrame"] { font-size: .95rem; }
+section.main .block-container { padding-top: 2.2rem; }
 </style>
 """, unsafe_allow_html=True)
+
+
+def _etape(numero: str, titre: str, sous_titre: str = "") -> None:
+    """Affiche un en-tête d'étape numéroté (parcours guidé ①②③)."""
+    sous = f"<small>{sous_titre}</small>" if sous_titre else ""
+    st.markdown(f'<div class="step"><span class="num">{numero}</span>'
+                f'<span class="txt">{titre}{sous}</span></div>',
+                unsafe_allow_html=True)
 
 st.markdown(f"""
 <div class="hero">
@@ -281,6 +302,9 @@ def jeu_demonstration() -> dict:
 
 config = charger_config()
 
+_etape("1", "Déposez vos fichiers",
+       "Le cadencier suffit pour le stock. Ajoutez GPNC + UNIPHARMA pour les ruptures.")
+
 col_fichiers = st.columns(3)
 libelles_zones = [
     ("cadencier", "📒 Cadencier", "Historique des ventes + stock actuel"),
@@ -319,16 +343,12 @@ _journal.info("Pilotage pharmacie v%s — fichiers disponibles : %s%s",
               VERSION_APP, sorted(dataframes) or "aucun",
               " (démo)" if mode_demo else "")
 
-st.caption("💡 Seul le **cadencier** est nécessaire pour la Gestion des "
-           "stocks en rotation. Les ruptures GPNC/UNIPHARMA ne sont "
-           "requises que pour la Gestion des ruptures.")
-
 # ---------------------------------------------------------------------------
-# Barre latérale — progression + réglages des DEUX modules (séparés)
+# Barre latérale — épurée : progression + date + réglages avancés repliés
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.markdown("## 💊 Pharmacie — stock & ruptures")
+    st.markdown("## 💊 Pilotage pharmacie")
 
     st.markdown("#### Progression")
     for cle, nom, _ in [(c, t.split(" ", 1)[1], a) for c, t, a in libelles_zones]:
@@ -344,20 +364,25 @@ with st.sidebar:
     date_analyse = st.date_input("📅 Date d'analyse", value=date.today(),
                                  format="DD/MM/YYYY")
 
-    # --- Réglages Module 1 : Gestion des stocks en rotation -----------------
-    st.markdown("#### 📦 Réglages — Stock en rotation")
     memo_rotation = (config if isinstance(config, dict) else {}).get(
         "stock_rotation", {})
-    periode_rotation = st.radio(
-        "Calcul de la consommation", ["annuelle", "3mois", "lissee"],
-        index=["annuelle", "3mois", "lissee"].index(
-            memo_rotation.get("periode", "annuelle")),
-        format_func=lambda p: {
-            "annuelle": "Annuelle (moyenne 12 mois)",
-            "3mois": "3 derniers mois",
-            "lissee": "Lissée (réactive aux tendances)"}[p],
-        key="periode_rotation")
-    with st.expander("🎛️ Paramètres stock min / max"):
+
+    # Tous les réglages fins tiennent dans UN panneau replié : l'écran reste
+    # épuré, les valeurs par défaut conviennent à la quasi-totalité des cas.
+    with st.expander("⚙️ Réglages avancés (facultatif)"):
+        st.caption("Les valeurs par défaut conviennent dans la plupart des "
+                   "cas — n'y touchez que si besoin.")
+
+        st.markdown("**📦 Stock en rotation**")
+        periode_rotation = st.radio(
+            "Calcul de la consommation", ["annuelle", "3mois", "lissee"],
+            index=["annuelle", "3mois", "lissee"].index(
+                memo_rotation.get("periode", "annuelle")),
+            format_func=lambda p: {
+                "annuelle": "Annuelle (moyenne 12 mois)",
+                "3mois": "3 derniers mois",
+                "lissee": "Lissée (réactive aux tendances)"}[p],
+            key="periode_rotation")
         couverture_min = st.number_input(
             "Stock min (jours de couverture)", 1, 90,
             value=int(memo_rotation.get(
@@ -398,24 +423,20 @@ with st.sidebar:
             help="Au-delà, le stock est considéré dormant (trésorerie "
                  "immobilisée).")
 
-    st.divider()
-
-    # --- Réglages Module 2 : Gestion des ruptures ---------------------------
-    st.markdown("#### 🚨 Réglages — Gestion des ruptures")
-    periode = st.radio(
-        "Calcul de la rotation", ["annuelle", "3mois", "lissee"],
-        format_func=lambda p: {
-            "annuelle": "Annuelle (moyenne 12 mois)",
-            "3mois": "3 derniers mois",
-            "lissee": "Lissée (réactive aux tendances)"}[p],
-        key="periode_ruptures",
-        help="« Lissée » : lissage exponentiel — suit les hausses ET les "
-             "baisses récentes sans sur-réagir à un mois isolé. Attention : "
-             "un produit en rupture EN COURS (derniers mois à 0) voit sa "
-             "rotation lissée chuter — « Annuelle » reste plus robuste pour "
-             "ces cas, signalés « ⚠️ rupture passée possible ».")
-
-    with st.expander("🎛️ Réglages d'anticipation"):
+        st.divider()
+        st.markdown("**🚨 Gestion des ruptures**")
+        periode = st.radio(
+            "Calcul de la rotation", ["annuelle", "3mois", "lissee"],
+            format_func=lambda p: {
+                "annuelle": "Annuelle (moyenne 12 mois)",
+                "3mois": "3 derniers mois",
+                "lissee": "Lissée (réactive aux tendances)"}[p],
+            key="periode_ruptures",
+            help="« Lissée » : lissage exponentiel — suit les hausses ET les "
+                 "baisses récentes sans sur-réagir à un mois isolé. Attention : "
+                 "un produit en rupture EN COURS (derniers mois à 0) voit sa "
+                 "rotation lissée chuter — « Annuelle » reste plus robuste pour "
+                 "ces cas, signalés « ⚠️ rupture passée possible ».")
         seuil_vigilance = st.number_input(
             "Seuil de vigilance stock (jours)", 1, 30,
             value=int(moteur.SEUIL_VIGILANCE_JOURS),
@@ -457,8 +478,7 @@ with st.sidebar:
         for cle in ("resultat", "resultat_stock", "date_analyse", "mode_demo"):
             st.session_state.pop(cle, None)
         st.rerun()
-    st.caption("🔒 100 % local : vos fichiers ne quittent pas ce poste. "
-               "Le mapping et les réglages sont mémorisés dans config.yaml.")
+    st.caption("🔒 100 % local : vos fichiers ne quittent pas ce poste.")
 
 if "cadencier" not in dataframes:
     _journal.info("Cadencier absent — attente d'un dépôt de fichier.")
@@ -474,9 +494,6 @@ if "cadencier" not in dataframes:
 # ---------------------------------------------------------------------------
 
 st.divider()
-st.subheader("🧭 Vérification des colonnes")
-st.caption("Les colonnes sont détectées automatiquement — confirmez ou "
-           "corrigez, le choix est mémorisé pour les prochaines analyses.")
 
 df_cad = dataframes["cadencier"]
 df_gpnc = dataframes.get("gpnc")
@@ -488,8 +505,18 @@ memo_cad = memo.get("cadencier", {})
 memo_gpnc = memo.get("gpnc", {})
 memo_uni = memo.get("unipharma", {})
 
-with st.expander("📒 Cadencier — colonnes",
-                 expanded=not memo_cad and not mode_demo):
+# Ouvert d'office UNIQUEMENT au premier usage (aucun mapping mémorisé) :
+# ensuite, l'utilisateur passe directement des fichiers au bouton d'analyse.
+premier_usage = not memo_cad and not mode_demo
+_etape("2", "Vérifiez les colonnes détectées",
+       "Repérées automatiquement. À confirmer une seule fois — mémorisé ensuite."
+       if premier_usage else
+       "Repérées automatiquement — ouvrez le panneau seulement si une colonne est mal placée.")
+
+etiquette_colonnes = ("📋 Colonnes des fichiers — à confirmer" if premier_usage
+                      else "📋 Colonnes des fichiers ✓ détectées (cliquer pour ajuster)")
+with st.expander(etiquette_colonnes, expanded=premier_usage):
+    st.markdown("**📒 Cadencier**")
     st.dataframe(df_cad.head(5), use_container_width=True)
     cols = list(df_cad.columns)
     c1, c2, c3 = st.columns(3)
@@ -530,23 +557,10 @@ with st.expander("📒 Cadencier — colonnes",
         st.caption("Alerte si péremption dans moins de 90 jours — "
                    "n'écarte pas le produit, informatif seulement.")
 
-mapping_cadencier = {"libelle": cad_libelle, "cip": cad_cip,
-                     "stock": cad_stock, "ventes": cad_ventes,
-                     "conditionnement": cad_cond,
-                     "commande_en_cours": cad_en_cours,
-                     "peremption": cad_peremption}
-
-problemes_stock = []
-if not cad_ventes:
-    problemes_stock.append(
-        "Cadencier : sélectionnez au moins une colonne de ventes pour "
-        "calculer la consommation.")
-
-mapping_gpnc = mapping_uni = None
-problemes_ruptures = list(problemes_stock)
-if ruptures_disponibles:
-    with st.expander("🔴 Ruptures GPNC — colonnes",
-                     expanded=not memo_gpnc and not mode_demo):
+    gpnc_date = None
+    if ruptures_disponibles:
+        st.divider()
+        st.markdown("**🔴 Ruptures GPNC**")
         st.dataframe(df_gpnc.head(5), use_container_width=True)
         cols = list(df_gpnc.columns)
         c1, c2, c3 = st.columns(3)
@@ -564,8 +578,8 @@ if ruptures_disponibles:
                                _defaut(memo_gpnc.get("date_reappro"), cols,
                                        "date_reappro"), "gpnc_date")
 
-    with st.expander("🟠 Ruptures UNIPHARMA — colonnes",
-                     expanded=not memo_uni and not mode_demo):
+        st.divider()
+        st.markdown("**🟠 Ruptures UNIPHARMA**")
         st.dataframe(df_uni.head(5), use_container_width=True)
         cols = list(df_uni.columns)
         c1, c2 = st.columns(2)
@@ -579,6 +593,20 @@ if ruptures_disponibles:
                              _defaut(memo_uni.get("cip"), cols, "cip"),
                              "uni_cip")
 
+mapping_cadencier = {"libelle": cad_libelle, "cip": cad_cip,
+                     "stock": cad_stock, "ventes": cad_ventes,
+                     "conditionnement": cad_cond,
+                     "commande_en_cours": cad_en_cours,
+                     "peremption": cad_peremption}
+
+problemes_stock = []
+if not cad_ventes:
+    problemes_stock.append(
+        "Cadencier : sélectionnez au moins une colonne de ventes pour "
+        "calculer la consommation.")
+
+mapping_gpnc = mapping_uni = None
+if ruptures_disponibles:
     mapping_gpnc = {"libelle": gpnc_libelle, "cip": gpnc_cip,
                     "date_reappro": gpnc_date}
     mapping_uni = {"libelle": uni_libelle, "cip": uni_cip}
@@ -587,10 +615,8 @@ if ruptures_disponibles:
                    "choisie — tous les produits seront traités avec "
                    "l'objectif 30 jours.")
 else:
-    st.info("Déposez aussi les fichiers **Ruptures GPNC** et **Ruptures "
-            "UNIPHARMA** pour activer le module « Gestion des ruptures ». "
-            "La Gestion des stocks en rotation fonctionne dès maintenant "
-            "avec le seul cadencier.")
+    st.caption("💡 Ajoutez les fichiers **Ruptures GPNC** et **UNIPHARMA** "
+               "pour activer aussi la Gestion des ruptures.")
 
 for p in problemes_stock:
     st.error(p)
@@ -600,6 +626,8 @@ for p in problemes_stock:
 # ---------------------------------------------------------------------------
 
 st.divider()
+_etape("3", "Lancez l'analyse",
+       "Un clic → les résultats et le fichier Excel de commande s'affichent en dessous.")
 if st.button("🔍 Lancer l'analyse", type="primary",
              disabled=bool(problemes_stock), use_container_width=True):
     config_a_sauver = {
