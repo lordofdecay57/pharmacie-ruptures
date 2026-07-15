@@ -228,7 +228,18 @@ pip install -r requirements.txt
 - **À la main** : `streamlit run app.py`
 
 Le navigateur s'ouvre sur `http://localhost:8501`. Pour arrêter l'app :
-fermez la fenêtre noire (ou Ctrl+C dedans).
+fermez la fenêtre noire (ou Ctrl+C dedans). Le **numéro de version** est
+affiché dans le bandeau (ex. `v2.1`) : il permet de vérifier d'un coup
+d'œil que la dernière version tourne bien.
+
+## Mise à jour (Windows, en un clic)
+
+Double-cliquez sur **`mettre-a-jour.bat`** : il télécharge la dernière
+version depuis GitHub, remplace les fichiers programme et relance l'app —
+**sans toucher à vos données** (`config.yaml` et `historique_commandes.csv`
+sont préservés). Après la mise à jour, vérifiez le numéro de version dans le
+bandeau. Si le numéro n'a pas changé, faites **Ctrl + Maj + R** dans le
+navigateur (cache de page).
 
 💡 **Pour découvrir l'outil sans fichiers** : cliquez sur
 « 🧪 Essayer avec des données de démonstration » sur l'écran d'accueil —
