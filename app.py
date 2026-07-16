@@ -704,6 +704,14 @@ date_analyse_resultats = st.session_state.get("date_analyse", date_analyse)
 st.divider()
 st.subheader("📊 Résultats")
 
+_MIME_XLSX = ("application/vnd.openxmlformats-officedocument."
+              "spreadsheetml.sheet")
+# Accès direct aux fichiers Excel sans fouiller les onglets. Conteneur
+# rempli EN FIN de script : l'export des ruptures doit refléter les cases
+# cochées dans l'éditeur de commande, connu seulement après son rendu.
+zone_exports = st.container()
+excel_stock = excel_ruptures = None
+
 module_stock, module_ruptures = st.tabs([
     "📦 Gestion des stocks en rotation",
     "🚨 Gestion des ruptures",
@@ -767,14 +775,14 @@ with module_stock:
             "Couverture très supérieure au stock max — trésorerie "
             "immobilisée. Envisager retour fournisseur ou arrêt de réassort.")
 
+        excel_stock = stock_rotation.exporter_stock_rotation_excel(
+            resultat_stock)
+        nom_excel_stock = commun.nom_fichier_export(
+            "stock_rotation", date_analyse_resultats)
         st.download_button(
             "⬇️ Télécharger l'Excel du stock en rotation",
-            data=stock_rotation.exporter_stock_rotation_excel(resultat_stock),
-            file_name=commun.nom_fichier_export(
-                "stock_rotation", date_analyse_resultats),
-            mime=("application/vnd.openxmlformats-officedocument."
-                  "spreadsheetml.sheet"),
-            type="primary", use_container_width=True)
+            data=excel_stock, file_name=nom_excel_stock, mime=_MIME_XLSX,
+            type="primary", use_container_width=True, key="dl_stock_onglet")
 
 # ===========================================================================
 # MODULE 2 — GESTION DES RUPTURES (moteur_ruptures.py)
@@ -934,11 +942,33 @@ with module_ruptures:
             onglet1_valide = onglet1_valide.drop(columns=["Déjà signalé"])
         resultat_export = dataclasses.replace(resultat, onglet1=onglet1_valide)
         nb_exclus = len(resultat.onglet1) - len(onglet1_valide)
+        excel_ruptures = moteur.exporter_excel(resultat_export)
+        nom_excel_ruptures = moteur.nom_fichier_sortie(date_analyse_resultats)
+        libelle_ruptures = ("⬇️ Télécharger le fichier Excel des ruptures"
+                            + (f" ({nb_exclus} produit(s) décoché(s))"
+                               if nb_exclus else ""))
         st.download_button(
-            "⬇️ Télécharger le fichier Excel des ruptures"
-            + (f" ({nb_exclus} produit(s) décoché(s))" if nb_exclus else ""),
-            data=moteur.exporter_excel(resultat_export),
-            file_name=moteur.nom_fichier_sortie(date_analyse_resultats),
-            mime=("application/vnd.openxmlformats-officedocument."
-                  "spreadsheetml.sheet"),
-            type="primary", use_container_width=True)
+            libelle_ruptures, data=excel_ruptures,
+            file_name=nom_excel_ruptures, mime=_MIME_XLSX,
+            type="primary", use_container_width=True, key="dl_ruptures_onglet")
+
+# ---------------------------------------------------------------------------
+# Accès direct aux exports, affiché SOUS l'en-tête Résultats (conteneur
+# réservé plus haut) — le fichier de commande en un clic, sans chercher.
+# ---------------------------------------------------------------------------
+with zone_exports:
+    if excel_stock is not None or excel_ruptures is not None:
+        c1, c2 = st.columns(2)
+        if excel_stock is not None:
+            with c1:
+                st.download_button(
+                    "⬇️ 📦 Excel — stock en rotation", data=excel_stock,
+                    file_name=nom_excel_stock, mime=_MIME_XLSX,
+                    use_container_width=True, key="dl_stock_haut")
+        if excel_ruptures is not None:
+            with c2:
+                st.download_button(
+                    "⬇️ 🚨 Excel — commande ruptures", data=excel_ruptures,
+                    file_name=nom_excel_ruptures, mime=_MIME_XLSX,
+                    use_container_width=True, key="dl_ruptures_haut")
+        st.write("")
