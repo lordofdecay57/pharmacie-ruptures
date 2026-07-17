@@ -30,7 +30,9 @@ Stock max = consommation/jour × 30 jours
 ```
 
 Les couvertures (14 j / 30 j par défaut) sont réglables dans la barre
-latérale.
+latérale. Les bornes sont arrondies à la **boîte entière supérieure**
+(une borne de 4,2 boîtes se tient en rayon avec 5) et le stock max ne
+passe jamais sous le stock min.
 
 #### Ajustement week-end (pas de réception samedi/dimanche)
 

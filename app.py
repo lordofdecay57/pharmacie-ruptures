@@ -757,8 +757,47 @@ with module_stock:
         st.markdown("**Stock min / max par produit** — calculé uniquement à "
                     "partir du cadencier (aucun lien avec les fichiers de "
                     "ruptures fournisseurs).")
-        st.dataframe(resultat_stock.tableau, use_container_width=True,
-                     hide_index=True, height=460)
+
+        # Recherche + filtre : trouver un produit sans faire défiler 3 500
+        # lignes. Les colonnes d'analyse ne s'affichent qu'à la demande.
+        c_rech, c_alerte, c_detail = st.columns([3, 2, 2])
+        with c_rech:
+            recherche = st.text_input(
+                "🔎 Rechercher (nom ou code CIP)", key="recherche_stock",
+                placeholder="ex. DOLIPRANE ou 3400930…")
+        with c_alerte:
+            filtre_alerte = st.selectbox(
+                "Filtrer par alerte",
+                ["Toutes", "🔴 Action requise", "🟡 Sous le min", "🟢 OK"],
+                key="filtre_alerte_stock")
+        with c_detail:
+            st.write("")
+            st.write("")
+            detail_complet = st.checkbox(
+                "＋ Colonnes d'analyse", key="detail_stock",
+                help="Ajoute classe ABC, consommation, tendance, "
+                     "variabilité, cible de réassort et motif.")
+
+        tableau_stock = resultat_stock.tableau
+        if recherche:
+            terme = recherche.strip().upper()
+            tableau_stock = tableau_stock[
+                tableau_stock["Nom du produit"].astype(str).str.upper()
+                .str.contains(terme, regex=False)
+                | tableau_stock["Code CIP"].astype(str)
+                .str.contains(terme, regex=False)]
+        if filtre_alerte != "Toutes":
+            tableau_stock = tableau_stock[
+                tableau_stock["Alerte"] == filtre_alerte]
+        if not detail_complet:  # vue simple convenue : CIP / nom / stocks
+            tableau_stock = tableau_stock[
+                ["Alerte", "Code CIP", "Nom du produit", "Stock actuel",
+                 "Stock min (calculé)", "Stock max (calculé)",
+                 "Qté à commander"]]
+        st.caption(f"{len(tableau_stock)} produit(s) affiché(s) — les "
+                   "stocks sont en boîtes entières.")
+        st.dataframe(tableau_stock, use_container_width=True,
+                     hide_index=True, height=560)
         st.caption(
             f"Méthode : Stock min = consommation/j × {couverture_min:g} j "
             "(point de commande, +2 j le vendredi / +1 j le samedi car pas "

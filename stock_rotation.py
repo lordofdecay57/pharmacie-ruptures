@@ -276,7 +276,12 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         stock_min = calculer_stock_min(conso_jour, params.couverture_min_jours,
                                        jours_weekend)
         stock_max = calculer_stock_max(conso_jour, params.couverture_max_jours)
-        # Cohérence : l'ajustement week-end ne doit jamais inverser les bornes.
+        # Bornes en BOÎTES ENTIÈRES : une borne de 4,2 boîtes se tient en
+        # rayon avec 5 — arrondi à l'entier supérieur (round(…, 6) neutralise
+        # les artefacts de virgule flottante avant le ceil). Le max ne passe
+        # jamais sous le min (ajustement week-end compris).
+        stock_min = math.ceil(round(stock_min, 6)) if stock_min > 0 else 0
+        stock_max = math.ceil(round(stock_max, 6)) if stock_max > 0 else 0
         stock_max = max(stock_max, stock_min)
         cible, qte, motif = determiner_cible_reassort(
             stock, stock_min, stock_max, params.seuil_alerte_unites)
@@ -298,13 +303,13 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             "Alerte": alerte,
             "Code CIP": cip,
             "Nom du produit": nom,
-            "Stock actuel": stock,
+            "Stock actuel": int(round(stock)),
             "Consommation/mois": round(rotation, 1),
             "Tendance": calculer_tendance(ventes),
             "Variabilité": variabilite_demande(ventes),
-            "Stock min (calculé)": round(stock_min, 1),
-            "Stock max (calculé)": round(stock_max, 1),
-            "Cible réassort": round(cible, 1),
+            "Stock min (calculé)": int(stock_min),
+            "Stock max (calculé)": int(stock_max),
+            "Cible réassort": int(round(cible)),
             "Qté à commander": qte,
             "Motif": motif,
             "_stock_jours": stock_jours,
