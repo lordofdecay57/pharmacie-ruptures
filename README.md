@@ -210,6 +210,10 @@ casser le calcul des ruptures, et inversement.
 
 ## Installation (une seule fois)
 
+> 📄 Version pas à pas illustrée pour un poste non technique :
+> [`Guide-installation.pdf`](Guide-installation.pdf) (installation de
+> Python, téléchargement, premier lancement, mise à jour, dépannage).
+
 1. **Installer Python** (3.10 ou plus récent) : <https://www.python.org/downloads/>
    — sous Windows, cochez bien **« Add Python to PATH »** pendant l'installation.
 2. Récupérer ce dossier `pharmacie-ruptures/` sur le PC (clé USB, téléchargement…).
