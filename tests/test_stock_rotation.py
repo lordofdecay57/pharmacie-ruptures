@@ -97,13 +97,14 @@ class TestJoursWeekend:
 
 
 # ---------------------------------------------------------------------------
-# LA règle métier : seuil absolu des 10 unités (priorité sur le stock min)
+# LA règle métier : seuil absolu des 10 unités — urgence CONFIRMÉE
+# (sous le seuil ET sous le stock min), pas seuil seul
 # ---------------------------------------------------------------------------
 
 class TestReglesDixUnites:
-    def test_sous_le_seuil_cible_directement_le_max(self):
-        # Stock 8 < seuil 10 → cible = stock max DIRECTEMENT, quel que soit
-        # le stock min (même si le stock min calculé serait plus élevé).
+    def test_sous_le_seuil_et_sous_le_min_cible_directement_le_max(self):
+        # Stock 8 < seuil 10 ET < stock min 15 → urgence CONFIRMÉE, cible =
+        # stock max directement.
         cible, qte, motif = determiner_cible_reassort(
             stock_actuel=8, stock_min=15, stock_max=40,
             seuil_alerte_unites=10)
@@ -111,15 +112,19 @@ class TestReglesDixUnites:
         assert qte == 32
         assert "immédiate" in motif and "stock max" in motif
 
-    def test_seuil_prioritaire_meme_si_stock_min_est_bas(self):
-        # Le seuil absolu prime MÊME quand le stock min calculé (3) est
-        # lui-même inférieur à 10 — c'est le cœur de la règle demandée :
-        # pas de recomplètement progressif jusqu'au seul min dans ce cas.
+    def test_sous_le_seuil_mais_deja_au_dessus_du_min_aucune_commande(self):
+        # Cœur du correctif : un produit à faible rotation a souvent un
+        # stock min calculé (3) déjà inférieur au seuil absolu (10). Le
+        # seuil SEUL ne doit plus déclencher l'urgence si le stock (8) est
+        # déjà au-dessus de son propre minimum — sinon 9 alertes rouges sur
+        # 10 se sont révélées être ce faux positif sur le cadencier réel,
+        # gonflant les quantités proposées sans besoin métier.
         cible, qte, motif = determiner_cible_reassort(
             stock_actuel=8, stock_min=3, stock_max=12,
             seuil_alerte_unites=10)
-        assert cible == 12  # stock max, pas stock min (3)
-        assert qte == 4
+        assert cible == 8  # stock actuel : rien à commander
+        assert qte == 0
+        assert "suffisant" in motif.lower()
 
     def test_egal_au_seuil_pas_dans_la_zone_critique(self):
         # stock_actuel == seuil : la comparaison est stricte (<), donc au
@@ -149,13 +154,13 @@ class TestReglesDixUnites:
 
     def test_seuil_sous_le_max_deja_atteint_pas_de_commande_negative(self):
         # Produit à rotation très lente : stock max (6) < seuil absolu (10).
-        # Stock à 8 (sous le seuil, mais déjà au-dessus du max) → la cible
-        # « max » vaut moins que le stock actuel : Cmd = 0, jamais négative.
+        # Stock à 8, déjà au-dessus du min (3) ET du max (6) → aucune
+        # commande, jamais négative.
         cible, qte, motif = determiner_cible_reassort(
             stock_actuel=8, stock_min=3, stock_max=6,
             seuil_alerte_unites=10)
-        assert cible == 6
-        assert qte == 0  # max(0, ceil(6 - 8)) = 0, pas -2
+        assert cible == 8
+        assert qte == 0  # max(0, ceil(8 - 8)) = 0, pas -2
 
     def test_seuil_reglable(self):
         # Avec un seuil à 5 (au lieu de 10 par défaut), un stock de 8 n'est
@@ -164,6 +169,28 @@ class TestReglesDixUnites:
             stock_actuel=8, stock_min=15, stock_max=40,
             seuil_alerte_unites=5)
         assert cible == 15 and "progressif" in motif
+
+    def test_stock_egal_a_son_propre_min_pas_de_fausse_urgence(self):
+        # Cas réel (cadencier) : KETOCONAZOLE CREME — stock 9, stock min
+        # calculé 9 (déjà atteint), sous le seuil absolu (10). Avant le
+        # correctif : commande immédiate jusqu'au stock max malgré un
+        # stock déjà à son minimum. Après : aucune commande.
+        cible, qte, motif = determiner_cible_reassort(
+            stock_actuel=9, stock_min=9, stock_max=18,
+            seuil_alerte_unites=10)
+        assert cible == 9
+        assert qte == 0
+
+    def test_urgence_confirmee_meme_pour_petite_rotation(self):
+        # Le filet de sécurité reste actif quand c'est justifié : stock (5)
+        # sous le seuil (10) ET sous son propre min (7) → urgence réelle,
+        # cible = max.
+        cible, qte, motif = determiner_cible_reassort(
+            stock_actuel=5, stock_min=7, stock_max=15,
+            seuil_alerte_unites=10)
+        assert cible == 15
+        assert qte == 10
+        assert "immédiate" in motif
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +427,61 @@ class TestFusionDoublons:
 # ---------------------------------------------------------------------------
 # Consommation par défaut (solution progressive sans historique)
 # ---------------------------------------------------------------------------
+
+class TestCommandeEnCours:
+    """Les boîtes déjà commandées mais pas encore reçues couvrent aussi la
+    consommation à venir : sans déduction, l'outil recommande de commander
+    comme si rien n'arrivait — double commande systématique."""
+
+    def _cadencier(self):
+        return pd.DataFrame({
+            "Produit": ["AVEC COMMANDE EN COURS", "SANS COMMANDE EN COURS"],
+            "CIP": ["7001", "7002"],
+            "Stock": [2, 2],
+            "En cours": [30, 0],
+            "Ventes avril": [30, 30], "Ventes mai": [30, 30],
+            "Ventes juin": [30, 30],
+        })
+
+    def _mapping(self):
+        return {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                              "stock": "Stock",
+                              "commande_en_cours": "En cours",
+                              "ventes": ["Ventes avril", "Ventes mai",
+                                         "Ventes juin"]}}
+
+    def test_commande_en_cours_deduite_de_la_quantite(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        avec = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "AVEC COMMANDE EN COURS"].iloc[0]
+        sans = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "SANS COMMANDE EN COURS"].iloc[0]
+        # Stock physique identique (2), mais 30 déjà en commande pour l'un :
+        # stock effectif 32 (au-dessus du max) → aucune commande. L'autre
+        # (stock effectif 2, sous le seuil ET sous le min) → urgence.
+        assert avec["Qté à commander"] == 0
+        assert sans["Qté à commander"] > 0
+        assert avec["Stock actuel"] == 2  # le stock AFFICHÉ reste le stock physique
+        assert avec["Alerte"] == "🟢 OK"
+        assert sans["Alerte"] == "🔴 Action requise"
+
+    def test_motif_mentionne_la_deduction(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        avec = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "AVEC COMMANDE EN COURS"].iloc[0]
+        assert "déjà en commande" in avec["Motif"]
+
+    def test_sans_mapping_commande_en_cours_comportement_inchange(self):
+        # Colonne non mappée : équivaut à 0 partout, aucune régression.
+        mapping_sans = {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                                      "stock": "Stock",
+                                      "ventes": ["Ventes avril", "Ventes mai",
+                                                 "Ventes juin"]}}
+        resultat = analyser_stock_rotation(self._cadencier(), mapping_sans)
+        avec = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "AVEC COMMANDE EN COURS"].iloc[0]
+        assert avec["Qté à commander"] > 0  # la déduction n'a pas lieu
+
 
 class TestConsommationParDefaut:
     def test_active_pilote_le_produit_sans_historique(self):
