@@ -62,27 +62,42 @@ L'ajustement appliqué est affiché dans l'interface au-dessus des résultats.
   encadré de mois actifs est interprété comme une rupture et interpolé,
   pas compté comme une absence de demande.
 
-### Règle métier des 10 unités (priorité sur tout le reste)
+### Règle métier des 10 unités (urgence CONFIRMÉE, pas seuil seul)
 
 > Si le stock actuel d'un produit passe sous un **seuil absolu** (10 unités
-> par défaut), la cible de réassort est fixée **directement au stock max** —
-> commande immédiate, sans passer par un recomplètement progressif jusqu'au
-> seul stock min.
+> par défaut) **ET** sous son propre stock min calculé, la cible de
+> réassort est fixée **directement au stock max** — commande immédiate,
+> sans passer par un recomplètement progressif jusqu'au seul stock min.
 
 Concrètement, `determiner_cible_reassort()` applique 3 paliers, dans cet
 ordre de priorité :
 
 | Condition | Cible | Alerte |
 |---|---|---|
-| `stock < seuil (10)` | **Stock max** (commande immédiate) | 🔴 Action requise |
-| `seuil ≤ stock < stock min` | Stock min (réassort progressif) | 🟡 Sous le min |
+| `stock < seuil (10)` **et** `stock < stock min` | **Stock max** (commande immédiate) | 🔴 Action requise |
+| `stock < stock min` (sans les deux conditions ci-dessus) | Stock min (réassort progressif) | 🟡 Sous le min |
 | `stock ≥ stock min` | Stock actuel (rien à faire) | 🟢 OK |
 
-Le seuil des 10 unités **prime toujours** sur le stock min calculé, même si
-ce dernier est lui-même inférieur à 10 (cas d'un produit à très faible
-rotation) : c'est un filet de sécurité absolu, indépendant du profil de
-vente du produit. Un produit à rotation nulle (arrêté) ne déclenche jamais
-d'alerte si la quantité à commander calculée est nulle.
+Le seuil des 10 unités reste un filet de sécurité qui prime sur le
+recomplètement progressif — mais il ne suffit **plus à lui seul** à
+déclencher l'urgence. Pour un produit à faible rotation, le stock min
+calculé (14 j de consommation) est souvent lui-même inférieur à 10 unités :
+sans la double condition, un stock **déjà au-dessus de son propre
+minimum** déclenchait quand même une commande immédiate jusqu'au stock
+max — sur un cadencier réel de 3 500 produits, c'était le cas de **9
+alertes rouges sur 10**, gonflant les quantités proposées de plus de 130 %
+sans justification métier. Un produit à rotation nulle (arrêté) ne
+déclenche jamais d'alerte si la quantité à commander calculée est nulle.
+
+### Commandes déjà en cours (déduites du calcul)
+
+Si la colonne « Commande en cours » du cadencier est renseignée, les
+boîtes déjà commandées mais pas encore reçues sont ajoutées au stock
+physique pour évaluer la cible et l'urgence (`stock effectif = stock +
+en cours`) — comme le fait déjà le Module 2. Sans cette déduction, l'outil
+recommanderait de commander à nouveau ce qui est déjà en route. La colonne
+« Stock actuel » affichée reste le stock physique réel ; la déduction est
+mentionnée dans le motif.
 
 ### Solution progressive si l'historique manque
 

@@ -121,18 +121,27 @@ def determiner_cible_reassort(stock_actuel: float, stock_min: float,
                               stock_max: float, seuil_alerte_unites: float):
     """Politique de réassort à 3 paliers. Renvoie ``(cible, qte, motif)``.
 
-    - ``stock_actuel < seuil_alerte_unites`` (règle ABSOLUE, prioritaire) :
-      cible = stock max directement — commande immédiate, pas de
-      recomplètement partiel, quel que soit le stock min calculé ;
-    - ``seuil_alerte_unites <= stock_actuel < stock_min`` : réassort
-      PROGRESSIF, cible = stock min seulement (situation pas encore
-      critique, pas besoin de monter jusqu'au max) ;
+    - ``stock_actuel < seuil_alerte_unites`` **ET** ``stock_actuel <
+      stock_min`` : urgence confirmée — cible = stock max directement,
+      commande immédiate, pas de recomplètement partiel ;
+    - ``stock_actuel < stock_min`` (sans être sous le seuil absolu, ou
+      sous le seuil mais déjà au-dessus de son propre minimum) : réassort
+      PROGRESSIF, cible = stock min seulement ;
     - ``stock_actuel >= stock_min`` : stock suffisant, aucune commande.
+
+    Le seuil absolu ne suffit PLUS à lui seul à déclencher l'urgence : pour
+    un produit à faible rotation, le stock min calculé (14 j de
+    consommation) est souvent lui-même inférieur au seuil (10 unités par
+    défaut). Sans la double condition, un produit dont le stock est déjà
+    AU-DESSUS de son propre minimum (donc sans besoin réel de commande)
+    déclenchait quand même une commande immédiate jusqu'au stock max —
+    c'était le cas de 9 alertes rouges sur 10 en pratique, gonflant
+    massivement les quantités proposées sans justification métier.
     """
-    if stock_actuel < seuil_alerte_unites:
+    if stock_actuel < seuil_alerte_unites and stock_actuel < stock_min:
         cible = stock_max
-        motif = (f"Stock < {seuil_alerte_unites:g} unités — commande "
-                 "immédiate jusqu'au stock max")
+        motif = (f"Stock < {seuil_alerte_unites:g} unités ET sous le stock "
+                 "min — commande immédiate jusqu'au stock max")
     elif stock_actuel < stock_min:
         cible = stock_min
         motif = "Sous le stock min — réassort progressif jusqu'au stock min"
@@ -213,8 +222,9 @@ class ResultatStockRotation:
 
 COLONNES_STOCK_ROTATION = [
     "Alerte", "Classe", "Code CIP", "Nom du produit", "Stock actuel",
-    "Consommation/mois", "Tendance", "Variabilité", "Stock min (calculé)",
-    "Stock max (calculé)", "Cible réassort", "Qté à commander", "Motif",
+    "Commande en cours", "Consommation/mois", "Tendance", "Variabilité",
+    "Stock min (calculé)", "Stock max (calculé)", "Cible réassort",
+    "Qté à commander", "Motif",
 ]
 COLONNES_DORMANTS_ROTATION = ["Code CIP", "Nom du produit", "Stock actuel",
                               "Consommation/mois", "Stock (jours)",
@@ -254,6 +264,14 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
     lignes = []
     for _, ligne in cadencier.iterrows():
         stock = parser_nombre(ligne[m["stock"]])
+        en_cours = (parser_nombre(ligne[m["commande_en_cours"]])
+                   if m.get("commande_en_cours") else 0.0)
+        # Boîtes déjà commandées mais pas encore reçues : elles couvrent
+        # aussi la consommation à venir. Sans cette déduction, l'outil
+        # propose de commander comme si rien n'arrivait — double
+        # commande systématique sur tout produit ayant un réassort en
+        # cours, quel que soit son profil de rotation.
+        stock_effectif = stock + en_cours
         brut_cip = ligne[m["cip"]] if m.get("cip") else ""
         cip = "" if pd.isna(brut_cip) else str(brut_cip).strip()
         brut_nom = ligne[m["libelle"]]
@@ -283,27 +301,32 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         stock_min = math.ceil(round(stock_min, 6)) if stock_min > 0 else 0
         stock_max = math.ceil(round(stock_max, 6)) if stock_max > 0 else 0
         stock_max = max(stock_max, stock_min)
+        # Cible et urgence évaluées sur le stock EFFECTIF (rayon + en cours) :
+        # ce qui arrive déjà compte comme couverture.
         cible, qte, motif = determiner_cible_reassort(
-            stock, stock_min, stock_max, params.seuil_alerte_unites)
-        stock_jours = calculer_stock_jours(stock, rotation)
+            stock_effectif, stock_min, stock_max, params.seuil_alerte_unites)
+        stock_jours = calculer_stock_jours(stock_effectif, rotation)
 
         # L'alerte suit la quantité RÉELLEMENT à commander : un produit à
         # rotation nulle avec peu de stock (ex. arrêté, non vendu) n'a pas
         # à être signalé « action requise » si rien n'est à commander.
         if qte <= 0:
             alerte = "🟢 OK"
-        elif stock < params.seuil_alerte_unites:
+        elif stock_effectif < params.seuil_alerte_unites:
             alerte = "🔴 Action requise"
         else:
             alerte = "🟡 Sous le min"
         if sans_historique and rotation > 0:
             motif += " (consommation par défaut — pas d'historique)"
+        if en_cours:
+            motif += f" · {en_cours:g} déjà en commande (déduit du calcul)"
 
         lignes.append({
             "Alerte": alerte,
             "Code CIP": cip,
             "Nom du produit": nom,
             "Stock actuel": int(round(stock)),
+            "Commande en cours": int(round(en_cours)) if en_cours else "",
             "Consommation/mois": round(rotation, 1),
             "Tendance": calculer_tendance(ventes),
             "Variabilité": variabilite_demande(ventes),
