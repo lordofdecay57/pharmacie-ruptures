@@ -225,9 +225,13 @@ casser le calcul des ruptures, et inversement.
 
 ## Installation (une seule fois)
 
-> 📄 Version pas à pas illustrée pour un poste non technique :
-> [`Guide-installation.pdf`](Guide-installation.pdf) (installation de
-> Python, téléchargement, premier lancement, mise à jour, dépannage).
+> 📄 Pour transmettre ce dossier à une tierce personne (collègue,
+> remplaçant…) : [`INSTALLATION.txt`](INSTALLATION.txt) est un pense-bête
+> minimal (texte brut, s'ouvre avec le Bloc-notes, aucun logiciel requis)
+> qui explique exactement quoi faire, dans l'ordre. Version illustrée et
+> plus détaillée : [`Guide-installation.pdf`](Guide-installation.pdf)
+> (installation de Python, téléchargement, premier lancement, mise à jour,
+> dépannage).
 
 1. **Installer Python** (3.10 ou plus récent) : <https://www.python.org/downloads/>
    — sous Windows, cochez bien **« Add Python to PATH »** pendant l'installation.

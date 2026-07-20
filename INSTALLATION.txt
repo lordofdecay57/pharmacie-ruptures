@@ -1,0 +1,131 @@
+===============================================================
+  PILOTAGE PHARMACIE - STOCK & RUPTURES
+  Comment installer et lancer l'utilitaire
+===============================================================
+
+Ce dossier contient un outil de gestion des stocks et des ruptures
+pour une pharmacie d'officine. Il fonctionne entierement sur cet
+ordinateur : aucune donnee n'est envoyee sur Internet.
+
+Suivez les 3 etapes ci-dessous, DANS L'ORDRE. Cela prend environ
+15 minutes la premiere fois. Ensuite, l'utilitaire s'ouvrira en un
+simple double-clic.
+
+
+---------------------------------------------------------------
+ETAPE 1 - Installer Python (une seule fois)
+---------------------------------------------------------------
+
+Python est le logiciel gratuit et officiel qui fait fonctionner
+l'utilitaire. Si vous ne savez pas s'il est deja installe, faites
+quand meme cette etape : cela ne pose aucun probleme de le
+reinstaller.
+
+1. Allez sur le site officiel :
+   https://www.python.org/downloads/
+
+2. Cliquez sur le gros bouton "Download Python 3.x.x".
+
+3. Ouvrez le fichier telecharge.
+
+4. TRES IMPORTANT : en bas de la premiere fenetre d'installation,
+   cochez la case :
+
+       [x] Add python.exe to PATH
+
+   (ou "Ajouter python.exe au PATH"). C'est l'etape la plus
+   souvent oubliee - sans elle, l'utilitaire ne pourra pas
+   demarrer.
+
+5. Cliquez sur "Install Now", patientez une a deux minutes, puis
+   cliquez sur "Close".
+
+
+---------------------------------------------------------------
+ETAPE 2 - Lancer l'utilitaire pour la premiere fois
+---------------------------------------------------------------
+
+1. Dans ce dossier, trouvez le fichier nomme :
+
+       lancer.bat
+
+2. Double-cliquez dessus.
+
+3. Une fenetre noire s'ouvre. La toute premiere fois, elle
+   installe automatiquement quelques complements necessaires :
+   beaucoup de texte defile pendant une a deux minutes, c'est
+   normal - NE FERMEZ PAS la fenetre.
+
+4. Votre navigateur internet s'ouvre alors tout seul sur
+   l'utilitaire (adresse locale : localhost:8501). Vous devez voir
+   un bandeau vert "Pilotage pharmacie - stock & ruptures" avec un
+   numero de version a cote du titre (par exemple v2.3).
+
+Astuce : vous pouvez creer un raccourci sur le Bureau pour la
+prochaine fois - clic droit sur lancer.bat, puis
+"Envoyer vers" > "Bureau (creer un raccourci)".
+
+
+---------------------------------------------------------------
+ETAPE 3 - Pendant l'utilisation
+---------------------------------------------------------------
+
+La fenetre noire ouverte a l'etape 2 doit RESTER OUVERTE pendant
+toute l'utilisation : c'est elle qui fait fonctionner l'outil.
+Vous pouvez la reduire, mais ne la fermez pas tant que vous
+travaillez.
+
+Pour arreter l'utilitaire : fermez simplement cette fenetre noire.
+
+Pour le relancer un autre jour : double-cliquez a nouveau sur
+lancer.bat (ou son raccourci Bureau).
+
+
+---------------------------------------------------------------
+METTRE A JOUR L'UTILITAIRE
+---------------------------------------------------------------
+
+Quand une nouvelle version est disponible :
+
+1. Fermez la fenetre noire si l'utilitaire est ouvert.
+2. Double-cliquez sur le fichier "mettre-a-jour.bat" (dans ce
+   meme dossier).
+3. Il telecharge et installe automatiquement la derniere version,
+   SANS toucher a vos donnees (reglages et historique conserves).
+
+
+---------------------------------------------------------------
+EN CAS DE PROBLEME
+---------------------------------------------------------------
+
+- "python n'est pas reconnu" dans la fenetre noire :
+  Python n'a pas ete correctement installe. Refaites l'ETAPE 1 en
+  veillant bien a cocher "Add python.exe to PATH", puis redemarrez
+  l'ordinateur.
+
+- La page ne s'ouvre pas dans le navigateur :
+  Verifiez que la fenetre noire est toujours ouverte. Si elle a
+  ete fermee par erreur, relancez lancer.bat.
+
+- Vous voyez toujours l'ancienne version apres une mise a jour :
+  Faites Ctrl + Maj + R dans le navigateur (rechargement force).
+
+Pour un guide plus detaille, avec des explications pour chaque
+etape, consultez le fichier :
+
+       Guide-installation.pdf
+
+(present dans ce meme dossier).
+
+
+---------------------------------------------------------------
+CONFIDENTIALITE
+---------------------------------------------------------------
+
+L'utilitaire fonctionne 100% en local sur cet ordinateur. Vos
+fichiers (cadencier, listes de ruptures) et les resultats des
+analyses ne quittent jamais ce poste et ne sont envoyes a aucun
+serveur. Seules l'installation et les mises a jour necessitent une
+connexion Internet - pas l'utilisation quotidienne.
+
+===============================================================
