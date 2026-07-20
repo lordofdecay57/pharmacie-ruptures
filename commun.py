@@ -550,23 +550,34 @@ def classer_abc(volumes: list) -> list:
     return classes
 
 
-def variabilite_demande(ventes: list) -> str:
-    """Variabilité de la demande (coefficient de variation σ/μ).
+def coefficient_variation(ventes: list) -> Optional[float]:
+    """Coefficient de variation σ/μ de la demande (None si non calculable).
 
-    Sert de base à un stock de sécurité différencié : un produit
-    « forte variabilité » mérite plus de marge qu'un produit stable à
-    volume égal. Le recul se compte depuis la PREMIÈRE vente (les mois
+    Mesure la RÉGULARITÉ des ventes : proche de 0 = très régulier, > 1 =
+    très erratique. Le recul se compte depuis la PREMIÈRE vente (les mois
     d'avant référencement gonfleraient artificiellement le CV). Moins de
-    3 mois de recul ou demande nulle → « » (inconnu).
+    3 mois de recul ou demande nulle → None (inconnu).
     """
     valeurs = _depuis_premiere_vente([parser_nombre(v) for v in ventes])
     if len(valeurs) < 3:
-        return ""
+        return None
     moyenne = sum(valeurs) / len(valeurs)
     if moyenne <= 0:
-        return ""
+        return None
     ecart_type = (sum((v - moyenne) ** 2 for v in valeurs) / len(valeurs)) ** 0.5
-    cv = ecart_type / moyenne
+    return ecart_type / moyenne
+
+
+def variabilite_demande(ventes: list) -> str:
+    """Variabilité de la demande (coefficient de variation σ/μ), en libellé.
+
+    Sert de base à un stock de sécurité différencié : un produit
+    « forte variabilité » mérite plus de marge qu'un produit stable à
+    volume égal. Moins de 3 mois de recul ou demande nulle → « » (inconnu).
+    """
+    cv = coefficient_variation(ventes)
+    if cv is None:
+        return ""
     if cv < SEUILS_VARIABILITE[0]:
         return f"🟢 stable (CV {cv:.0%})"
     if cv < SEUILS_VARIABILITE[1]:

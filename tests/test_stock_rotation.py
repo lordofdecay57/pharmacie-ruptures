@@ -97,6 +97,45 @@ class TestJoursWeekend:
 
 
 # ---------------------------------------------------------------------------
+# Garde-fou du mode réactif (mensuel/lissé) : ventes récentes nulles
+# ---------------------------------------------------------------------------
+
+class TestGardeFouModeReactif:
+    """En mode mensuel, un produit qui vend sur l'année mais a eu 0 vente le
+    dernier mois (rupture/creux) ne doit PAS disparaître du pilotage."""
+
+    def _cadencier(self):
+        # Vend 10/mois toute l'année SAUF le dernier mois à 0 (rupture).
+        return pd.DataFrame({
+            "Produit": ["EN RUPTURE CE MOIS"], "CIP": ["9100"], "Stock": [3],
+            **{f"Ventes m{i}": [10] for i in range(11)},
+            "Ventes m11": [0],  # dernier mois : rupture
+        })
+
+    def _mapping(self):
+        return {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                              "stock": "Stock",
+                              "ventes": [f"Ventes m{i}" for i in range(12)]}}
+
+    def test_mensuel_ne_masque_pas_le_produit(self):
+        params = ParametresStockRotation(periode_rotation="1mois")
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping(),
+                                           params)
+        assert len(resultat.tableau) == 1  # présent, pas disparu
+        ligne = resultat.tableau.iloc[0]
+        # Repli sur la moyenne annuelle (~9,2/mois) au lieu de 0.
+        assert ligne["Consommation/mois"] > 5
+        assert "repli sur la moyenne annuelle" in ligne["Motif"]
+        assert ligne["Qté à commander"] > 0
+
+    def test_mode_annuel_inchange(self):
+        # En annuel, pas de mention de repli (le calcul est déjà annuel).
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        ligne = resultat.tableau.iloc[0]
+        assert "repli" not in ligne["Motif"]
+
+
+# ---------------------------------------------------------------------------
 # LA règle métier : seuil absolu des 10 unités — urgence CONFIRMÉE
 # (sous le seuil ET sous le stock min), pas seuil seul
 # ---------------------------------------------------------------------------
@@ -588,6 +627,60 @@ class TestRotationFaibleEcartee:
         lent = resultat.tableau[
             resultat.tableau["Nom du produit"] == "ROTATION LENTE"].iloc[0]
         assert lent["Alerte"] != "⚪ Rotation faible"
+
+
+# ---------------------------------------------------------------------------
+# Colonne conseillée : stock min majoré selon la variabilité (indicatif)
+# ---------------------------------------------------------------------------
+
+class TestStockMinConseille:
+    """La colonne « Stock min conseillé (variabilité) » majore le min pour
+    les produits erratiques, SANS changer la quantité à commander."""
+
+    def _cadencier(self):
+        return pd.DataFrame({
+            "Produit": ["REGULIER", "ERRATIQUE"],
+            "CIP": ["9200", "9201"],
+            "Stock": [20, 20],
+            # Régulier vs en dents de scie. Valeurs NON nulles pour l'erratique
+            # (des 0 intérieurs seraient lissés par la correction des ruptures
+            # passées, ce qui effacerait justement la variabilité).
+            "Ventes avril": [10, 2], "Ventes mai": [10, 28], "Ventes juin": [10, 3],
+            "Ventes juil": [10, 27], "Ventes aout": [10, 2], "Ventes sept": [10, 28],
+        })
+
+    def _mapping(self):
+        return {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                              "stock": "Stock",
+                              "ventes": ["Ventes avril", "Ventes mai",
+                                         "Ventes juin", "Ventes juil",
+                                         "Ventes aout", "Ventes sept"]}}
+
+    def test_colonne_presente(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        assert "Stock min conseillé (variabilité)" in resultat.tableau.columns
+
+    def test_erratique_conseille_plus_que_regulier(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        reg = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "REGULIER"].iloc[0]
+        err = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ERRATIQUE"].iloc[0]
+        # Même conso → même stock min de base, mais conseillé plus élevé pour
+        # l'erratique.
+        assert reg["Stock min conseillé (variabilité)"] == reg["Stock min (calculé)"]
+        assert (err["Stock min conseillé (variabilité)"]
+                > err["Stock min (calculé)"])
+
+    def test_conseille_ne_change_pas_la_commande(self):
+        # La colonne est indicative : la quantité à commander reste pilotée
+        # par le stock min/max de base.
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        err = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ERRATIQUE"].iloc[0]
+        # Stock 20 > min de base (5) → aucune commande, malgré un conseillé
+        # plus élevé.
+        assert err["Qté à commander"] == 0
 
 
 # ---------------------------------------------------------------------------
