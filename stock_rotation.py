@@ -52,6 +52,7 @@ from commun import (JOURS_PAR_MOIS, SEUILS_VARIABILITE,
 # ---------------------------------------------------------------------------
 
 SEUIL_ALERTE_UNITES_DEFAUT = 10       # règle métier : sous ce seuil → cible = max
+PLANCHER_STOCK_MAX_UNITES = 10        # produit piloté : stock max jamais < 10
 COUVERTURE_MIN_JOURS_DEFAUT = 14      # stock min = 14 jours de consommation
 COUVERTURE_MAX_JOURS_DEFAUT = 30      # stock max = 30 jours de consommation
 CONSOMMATION_DEFAUT_MENSUELLE = 0.0   # repli si aucun historique (0 = désactivé)
@@ -309,6 +310,13 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         if rotation <= 0 and stock <= 0:
             continue  # ni vente ni stock : rien à piloter
 
+        # Produits à rotation quasi nulle (≤ seuil boîtes/mois) : écartés du
+        # réassort automatique. Calculé TÔT car il conditionne le plancher du
+        # stock max ci-dessous (le plancher ne s'applique qu'aux produits
+        # réellement pilotés).
+        rotation_faible = (params.rotation_min_commande_mensuelle > 0
+                           and 0 < rotation <= params.rotation_min_commande_mensuelle)
+
         conso_jour = rotation / JOURS_PAR_MOIS
         stock_min = calculer_stock_min(conso_jour, params.couverture_min_jours,
                                        jours_weekend)
@@ -320,6 +328,14 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         stock_min = math.ceil(round(stock_min, 6)) if stock_min > 0 else 0
         stock_max = math.ceil(round(stock_max, 6)) if stock_max > 0 else 0
         stock_max = max(stock_max, stock_min)
+        # Plancher métier (règle officine) : pour un produit PILOTÉ (hors
+        # rotation faible), le stock max ne descend jamais sous 10 boîtes —
+        # fond de rayon minimal garanti. Ne concerne pas les produits écartés
+        # du réassort.
+        plancher_applique = False
+        if not rotation_faible and 0 < stock_max < PLANCHER_STOCK_MAX_UNITES:
+            stock_max = PLANCHER_STOCK_MAX_UNITES
+            plancher_applique = True
 
         # Colonne CONSEILLÉE (purement indicative, ne pilote pas la commande) :
         # stock min majoré d'une marge de sécurité pour les produits à ventes
@@ -342,13 +358,6 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             stock_effectif, stock_min, stock_max, params.seuil_alerte_unites)
         stock_jours = calculer_stock_jours(stock_effectif, rotation)
 
-        # Produits à rotation quasi nulle (≤ seuil boîtes/mois) : écartés du
-        # réassort automatique. Commander 1 boîte de centaines de références
-        # vendues moins d'1 fois/mois encombre la commande sans enjeu réel.
-        # Le produit reste visible (traçabilité) mais ne génère aucune Cmd.
-        rotation_faible = (params.rotation_min_commande_mensuelle > 0
-                           and 0 < rotation <= params.rotation_min_commande_mensuelle)
-
         # L'alerte suit la quantité RÉELLEMENT à commander : un produit à
         # rotation nulle avec peu de stock (ex. arrêté, non vendu) n'a pas
         # à être signalé « action requise » si rien n'est à commander.
@@ -370,6 +379,9 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
                       "la moyenne annuelle")
         if en_cours:
             motif += f" · {en_cours:g} déjà en commande (déduit du calcul)"
+        if plancher_applique and not rotation_faible and qte > 0:
+            motif += (f" · stock max relevé au plancher de "
+                      f"{PLANCHER_STOCK_MAX_UNITES} boîtes")
 
         lignes.append({
             "Alerte": alerte,

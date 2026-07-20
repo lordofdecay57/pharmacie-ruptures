@@ -34,6 +34,13 @@ latérale. Les bornes sont arrondies à la **boîte entière supérieure**
 (une borne de 4,2 boîtes se tient en rayon avec 5) et le stock max ne
 passe jamais sous le stock min.
 
+**Plancher du stock max (règle officine)** : pour un produit **piloté**
+(hors « rotation faible »), le stock max ne descend jamais sous **10
+boîtes** — fond de rayon minimal garanti. Un produit vendu 5/mois, dont le
+max calculé serait 5, voit son max porté à 10. Les produits écartés du
+réassort (rotation ≤ 1/mois) et les produits à rotation nulle ne sont pas
+concernés. Le motif signale les produits relevés au plancher.
+
 #### Ajustement week-end (pas de réception samedi/dimanche)
 
 Les commandes ne sont pas réceptionnées le week-end. Le stock min est donc

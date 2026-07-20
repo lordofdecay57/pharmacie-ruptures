@@ -97,6 +97,59 @@ class TestJoursWeekend:
 
 
 # ---------------------------------------------------------------------------
+# Plancher métier : stock max jamais < 10 pour un produit piloté
+# ---------------------------------------------------------------------------
+
+class TestPlancherStockMax:
+    """Règle officine : le stock max d'un produit PILOTÉ ne descend jamais
+    sous 10 boîtes (fond de rayon). Les produits écartés (rotation faible)
+    ne sont pas concernés."""
+
+    def _cadencier(self):
+        return pd.DataFrame({
+            "Produit": ["PILOTE FAIBLE MAX", "ROTATION FAIBLE"],
+            "CIP": ["9300", "9301"],
+            "Stock": [0, 0],
+            # PILOTE FAIBLE MAX : ~5/mois → max de base 5 (< 10) mais pilotÉ.
+            # ROTATION FAIBLE : ~1/mois → écarté, pas de plancher.
+            "Ventes avril": [5, 1], "Ventes mai": [5, 1], "Ventes juin": [5, 1],
+        })
+
+    def _mapping(self):
+        return {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                              "stock": "Stock",
+                              "ventes": ["Ventes avril", "Ventes mai",
+                                         "Ventes juin"]}}
+
+    def test_produit_pilote_max_releve_a_10(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        ligne = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "PILOTE FAIBLE MAX"].iloc[0]
+        assert ligne["Stock max (calculé)"] == 10  # relevé de 5 à 10
+        assert "plancher de 10" in ligne["Motif"]
+        # Stock 0 < seuil 10 ET < min → commande jusqu'au max plancher (10).
+        assert ligne["Qté à commander"] == 10
+
+    def test_rotation_faible_non_concernee(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        ligne = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ROTATION FAIBLE"].iloc[0]
+        assert ligne["Alerte"] == "⚪ Rotation faible"
+        assert ligne["Stock max (calculé)"] < 10  # pas de plancher
+        assert ligne["Qté à commander"] == 0
+
+    def test_max_deja_au_dessus_de_10_inchange(self):
+        # Un produit à forte rotation (max ≥ 10) n'est pas touché.
+        cad = pd.DataFrame({
+            "Produit": ["GROS VENDEUR"], "CIP": ["9302"], "Stock": [0],
+            "Ventes avril": [40], "Ventes mai": [40], "Ventes juin": [40]})
+        resultat = analyser_stock_rotation(cad, self._mapping())
+        ligne = resultat.tableau.iloc[0]
+        assert ligne["Stock max (calculé)"] == 40
+        assert "plancher" not in ligne["Motif"]
+
+
+# ---------------------------------------------------------------------------
 # Garde-fou du mode réactif (mensuel/lissé) : ventes récentes nulles
 # ---------------------------------------------------------------------------
 
