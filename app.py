@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "2.7"
+VERSION_APP = "2.8"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -765,11 +765,23 @@ if st.button("🔍 Lancer l'analyse", type="primary",
         except Exception as e:
             st.error(f"Erreur — Gestion des ruptures : {e}")
     st.session_state["date_analyse"] = date_analyse
+    st.session_state["version_resultats"] = VERSION_APP  # cf. garde anti-stale
     st.rerun()  # rafraîchit la coche « Analyse lancée » de la barre latérale
 
 # ---------------------------------------------------------------------------
 # Étape 4 — résultats, un onglet principal par module fonctionnel
 # ---------------------------------------------------------------------------
+
+# Écarte un résultat calculé par une version ANTÉRIEURE resté en mémoire de
+# session après une mise à jour (structure de colonnes différente → plantages
+# type KeyError). On invite alors simplement à relancer l'analyse.
+if st.session_state.get("version_resultats") not in (None, VERSION_APP):
+    for _cle in ("resultat", "resultat_stock", "historique"):
+        st.session_state.pop(_cle, None)
+    st.session_state.pop("version_resultats", None)
+    st.info("🔄 L'application a été mise à jour — relancez l'analyse pour "
+            "afficher les résultats à jour.")
+    st.stop()
 
 resultat_stock = st.session_state.get("resultat_stock")
 resultat = st.session_state.get("resultat")
@@ -873,10 +885,17 @@ with module_stock:
             tableau_stock = tableau_stock[
                 tableau_stock["Alerte"] == filtre_alerte]
         if not detail_complet:  # vue simple convenue : CIP / nom / stocks
+            # Sélection défensive : ne garder que les colonnes réellement
+            # présentes. Protège contre un résultat calculé par une version
+            # antérieure resté en mémoire de session après une mise à jour
+            # (une colonne récente y serait absente → KeyError sinon).
+            colonnes_simples = ["Alerte", "Code CIP", "Nom du produit",
+                                "Stock actuel", "Stock min (calculé)",
+                                "Stock max (calculé)",
+                                "Stock min conseillé (variabilité)",
+                                "Qté à commander"]
             tableau_stock = tableau_stock[
-                ["Alerte", "Code CIP", "Nom du produit", "Stock actuel",
-                 "Stock min (calculé)", "Stock max (calculé)",
-                 "Stock min conseillé (variabilité)", "Qté à commander"]]
+                [c for c in colonnes_simples if c in tableau_stock.columns]]
         st.caption(f"{len(tableau_stock)} produit(s) affiché(s) — les "
                    "stocks sont en boîtes entières. La colonne « Stock min "
                    "conseillé (variabilité) » est indicative : elle majore le "
