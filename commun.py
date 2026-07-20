@@ -436,6 +436,8 @@ def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> floa
     référencé) sont exclus du calcul. ``periode`` :
       - "annuelle" : moyenne de toutes les valeurs ;
       - "3mois"    : moyenne des 3 dernières ;
+      - "1mois"    : le dernier mois seul — le plus réactif, mais sensible à
+        un mois atypique (pic, creux ou rupture ponctuelle) ;
       - "lissee"   : lissage exponentiel (α = 0,4) — réactif aux tendances
         récentes, à la hausse COMME à la baisse, sans sur-réagir à un mois
         isolé. Recommandé pour l'analyse quotidienne.
@@ -443,6 +445,8 @@ def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> floa
     valeurs = _depuis_premiere_vente([parser_nombre(v) for v in ventes])
     if not valeurs:
         return 0.0
+    if periode == "1mois":
+        return valeurs[-1]
     if periode == "3mois":
         valeurs = valeurs[-3:]
     elif periode == "lissee":

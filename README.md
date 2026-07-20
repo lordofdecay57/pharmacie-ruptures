@@ -128,7 +128,7 @@ intervention nécessaire.
 | Seuil d'action immédiate | 10 unités | La règle des 10 unités |
 | Consommation par défaut | 0 (désactivé) | Repli si pas d'historique |
 | Seuil de stock dormant | 180 j de couverture | Trésorerie immobilisée |
-| Calcul de la consommation | Annuelle | Annuelle / 3 mois / lissée |
+| Calcul de la consommation | Annuelle | Annuelle / trimestrielle (3 mois) / mensuelle (dernier mois) / lissée |
 
 ### Tableau produit
 

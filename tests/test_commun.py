@@ -48,6 +48,11 @@ class TestRotation:
     def test_trois_mois(self):
         assert calculer_rotation_mensuelle(self.VENTES, "3mois") == pytest.approx(20)
 
+    def test_un_mois(self):
+        # Dernier mois seul : le plus réactif.
+        assert calculer_rotation_mensuelle(self.VENTES, "1mois") == pytest.approx(20)
+        assert calculer_rotation_mensuelle([5, 8, 30], "1mois") == pytest.approx(30)
+
     def test_virgule_francaise(self):
         assert calculer_rotation_mensuelle(["16,5"], "annuelle") == pytest.approx(16.5)
 
