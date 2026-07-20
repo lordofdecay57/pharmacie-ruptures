@@ -55,6 +55,7 @@ COUVERTURE_MIN_JOURS_DEFAUT = 14      # stock min = 14 jours de consommation
 COUVERTURE_MAX_JOURS_DEFAUT = 30      # stock max = 30 jours de consommation
 CONSOMMATION_DEFAUT_MENSUELLE = 0.0   # repli si aucun historique (0 = désactivé)
 SEUIL_DORMANT_JOURS_DEFAUT = 180      # > 6 mois de couverture → stock dormant
+ROTATION_MIN_COMMANDE_DEFAUT = 1.0    # rotation ≤ ce seuil → pas de réassort auto
 
 
 @dataclass
@@ -68,6 +69,10 @@ class ParametresStockRotation:
     corriger_ruptures_passees: bool = True
     consommation_defaut_mensuelle: float = CONSOMMATION_DEFAUT_MENSUELLE
     seuil_dormant_jours: float = SEUIL_DORMANT_JOURS_DEFAUT
+    # Produits à rotation ≤ ce seuil (boîtes/mois) : écartés du réassort
+    # automatique (classe C à rotation quasi nulle — commander 1 boîte de
+    # chacun encombrerait la commande sans enjeu réel). 0 = ne rien écarter.
+    rotation_min_commande_mensuelle: float = ROTATION_MIN_COMMANDE_DEFAUT
 
 
 # ---------------------------------------------------------------------------
@@ -307,16 +312,28 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             stock_effectif, stock_min, stock_max, params.seuil_alerte_unites)
         stock_jours = calculer_stock_jours(stock_effectif, rotation)
 
+        # Produits à rotation quasi nulle (≤ seuil boîtes/mois) : écartés du
+        # réassort automatique. Commander 1 boîte de centaines de références
+        # vendues moins d'1 fois/mois encombre la commande sans enjeu réel.
+        # Le produit reste visible (traçabilité) mais ne génère aucune Cmd.
+        rotation_faible = (params.rotation_min_commande_mensuelle > 0
+                           and 0 < rotation <= params.rotation_min_commande_mensuelle)
+
         # L'alerte suit la quantité RÉELLEMENT à commander : un produit à
         # rotation nulle avec peu de stock (ex. arrêté, non vendu) n'a pas
         # à être signalé « action requise » si rien n'est à commander.
-        if qte <= 0:
+        if rotation_faible:
+            cible, qte = stock, 0
+            alerte = "⚪ Rotation faible"
+            motif = (f"Rotation ≤ {params.rotation_min_commande_mensuelle:g}/mois "
+                     "— écarté du réassort automatique")
+        elif qte <= 0:
             alerte = "🟢 OK"
         elif stock_effectif < params.seuil_alerte_unites:
             alerte = "🔴 Action requise"
         else:
             alerte = "🟡 Sous le min"
-        if sans_historique and rotation > 0:
+        if not rotation_faible and sans_historique and rotation > 0:
             motif += " (consommation par défaut — pas d'historique)"
         if en_cours:
             motif += f" · {en_cours:g} déjà en commande (déduit du calcul)"
@@ -357,8 +374,10 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
     dormants = (dormants.sort_values("Stock actuel", ascending=False)
                 .reindex(columns=COLONNES_DORMANTS_ROTATION))
 
-    # Priorité d'affichage : action requise d'abord, puis sous le min.
-    ordre_alerte = {"🔴 Action requise": 0, "🟡 Sous le min": 1, "🟢 OK": 2}
+    # Priorité d'affichage : action requise, sous le min, OK, puis rotation
+    # faible (écartée du réassort) en dernier.
+    ordre_alerte = {"🔴 Action requise": 0, "🟡 Sous le min": 1, "🟢 OK": 2,
+                    "⚪ Rotation faible": 3}
     df["_ordre"] = df["Alerte"].map(ordre_alerte)
     tableau = (df.sort_values(["_ordre", "Qté à commander"],
                               ascending=[True, False])
@@ -368,6 +387,7 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         "total_produits": len(df),
         "action_requise": int((df["Alerte"] == "🔴 Action requise").sum()),
         "sous_le_min": int((df["Alerte"] == "🟡 Sous le min").sum()),
+        "rotation_faible": int((df["Alerte"] == "⚪ Rotation faible").sum()),
         "nb_a": int((df["Classe"] == "A").sum()),
         "nb_b": int((df["Classe"] == "B").sum()),
         "nb_c": int((df["Classe"] == "C").sum()),
@@ -386,12 +406,19 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
 # ---------------------------------------------------------------------------
 
 _COULEURS_ALERTE = {"🔴 Action requise": "F8CBAD", "🟡 Sous le min": "FFE699",
-                    "🟢 OK": "C6EFCE"}
+                    "🟢 OK": "C6EFCE", "⚪ Rotation faible": "E7E6E1"}
 
 
 def exporter_stock_rotation_excel(resultat: ResultatStockRotation) -> bytes:
-    """Classeur de gestion du stock en rotation : min/max + dormants."""
+    """Classeur de gestion du stock en rotation : min/max + dormants.
+
+    Le fichier étant le bon de commande, les produits « ⚪ Rotation faible »
+    (écartés du réassort automatique) n'y figurent pas — ils restent
+    consultables dans l'application."""
+    tableau = resultat.tableau
+    if not tableau.empty and "Alerte" in tableau.columns:
+        tableau = tableau[tableau["Alerte"] != "⚪ Rotation faible"]
     return exporter_classeur(
-        [("Stock min-max", resultat.tableau),
+        [("Stock min-max", tableau),
          ("Stock dormant", resultat.dormants)],
         couleurs_par_colonne={"Alerte": _COULEURS_ALERTE})

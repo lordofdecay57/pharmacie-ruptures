@@ -508,6 +508,89 @@ class TestConsommationParDefaut:
 
 
 # ---------------------------------------------------------------------------
+# Écarter les produits à rotation trop faible du réassort automatique
+# ---------------------------------------------------------------------------
+
+class TestRotationFaibleEcartee:
+    """Les produits vendus ≤ seuil boîtes/mois n'encombrent pas la commande :
+    écartés du réassort auto, mais conservés (traçabilité)."""
+
+    def _cadencier(self):
+        return pd.DataFrame({
+            "Produit": ["ROTATION LENTE", "ROTATION NORMALE"],
+            "CIP": ["8001", "8002"],
+            "Stock": [0, 0],
+            # ROTATION LENTE : ~1 boîte/mois (3 sur 3 mois). ROTATION NORMALE
+            # : ~20/mois. Les deux à stock 0.
+            "Ventes avril": [1, 20], "Ventes mai": [1, 20],
+            "Ventes juin": [1, 20],
+        })
+
+    def _mapping(self):
+        return {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                              "stock": "Stock",
+                              "ventes": ["Ventes avril", "Ventes mai",
+                                         "Ventes juin"]}}
+
+    def test_produit_lent_ecarte_par_defaut(self):
+        # Défaut = 1/mois : ROTATION LENTE (1/mois) est écartée.
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        lent = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ROTATION LENTE"].iloc[0]
+        assert lent["Alerte"] == "⚪ Rotation faible"
+        assert lent["Qté à commander"] == 0
+        assert "écarté" in lent["Motif"]
+
+    def test_produit_normal_toujours_commande(self):
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        normal = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ROTATION NORMALE"].iloc[0]
+        assert normal["Alerte"] == "🔴 Action requise"
+        assert normal["Qté à commander"] > 0
+
+    def test_seuil_reglable(self):
+        # Seuil relevé à 25 : même ROTATION NORMALE (20/mois) est écartée.
+        params = ParametresStockRotation(rotation_min_commande_mensuelle=25)
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping(),
+                                           params)
+        assert set(resultat.tableau["Alerte"]) == {"⚪ Rotation faible"}
+        assert resultat.resume["qte_totale_a_commander"] == 0
+        assert resultat.resume["rotation_faible"] == 2
+
+    def test_desactivable_avec_zero(self):
+        # Seuil 0 : plus rien n'est écarté, comportement historique.
+        params = ParametresStockRotation(rotation_min_commande_mensuelle=0)
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping(),
+                                           params)
+        assert "⚪ Rotation faible" not in set(resultat.tableau["Alerte"])
+        lent = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ROTATION LENTE"].iloc[0]
+        assert lent["Qté à commander"] > 0
+
+    def test_absent_de_l_export_excel(self):
+        # Le fichier de commande ne contient pas les produits écartés.
+        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
+        contenu = exporter_stock_rotation_excel(resultat)
+        relu = pd.read_excel(pd.io.common.BytesIO(contenu),
+                             sheet_name="Stock min-max")
+        assert "ROTATION LENTE" not in relu["Nom du produit"].values
+        assert "ROTATION NORMALE" in relu["Nom du produit"].values
+
+    def test_rotation_nulle_non_concernee(self):
+        # Rotation strictement nulle (produit arrêté) : reste 🟢 OK / ignoré,
+        # PAS classé « rotation faible » (le filtre vise les ventes rares,
+        # pas les produits sans aucune vente).
+        cad = self._cadencier()
+        cad.loc[cad["Produit"] == "ROTATION LENTE",
+                ["Ventes avril", "Ventes mai", "Ventes juin"]] = [0, 0, 0]
+        cad.loc[cad["Produit"] == "ROTATION LENTE", "Stock"] = 3
+        resultat = analyser_stock_rotation(cad, self._mapping())
+        lent = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ROTATION LENTE"].iloc[0]
+        assert lent["Alerte"] != "⚪ Rotation faible"
+
+
+# ---------------------------------------------------------------------------
 # Export Excel dédié
 # ---------------------------------------------------------------------------
 

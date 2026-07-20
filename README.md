@@ -74,6 +74,7 @@ ordre de priorité :
 
 | Condition | Cible | Alerte |
 |---|---|---|
+| rotation ≤ seuil (1 boîte/mois) | — (écarté) | ⚪ Rotation faible |
 | `stock < seuil (10)` **et** `stock < stock min` | **Stock max** (commande immédiate) | 🔴 Action requise |
 | `stock < stock min` (sans les deux conditions ci-dessus) | Stock min (réassort progressif) | 🟡 Sous le min |
 | `stock ≥ stock min` | Stock actuel (rien à faire) | 🟢 OK |
@@ -88,6 +89,17 @@ max — sur un cadencier réel de 3 500 produits, c'était le cas de **9
 alertes rouges sur 10**, gonflant les quantités proposées de plus de 130 %
 sans justification métier. Un produit à rotation nulle (arrêté) ne
 déclenche jamais d'alerte si la quantité à commander calculée est nulle.
+
+### Produits à rotation faible écartés du réassort (⚪)
+
+Les produits vendus au maximum **1 boîte/mois** (seuil réglable) sont
+écartés du réassort automatique : commander 1 boîte de chacune des
+centaines de références vendues très rarement encombrerait la commande
+sans enjeu réel. Sur le cadencier réel, ce filtre fait passer la commande
+de **1 231 à 425 lignes** (−65 %) tout en conservant l'essentiel du volume.
+Ces produits restent visibles et cherchables dans l'application (filtre
+« ⚪ Rotation faible ») mais ne figurent pas dans le fichier Excel de
+commande. Mettre le seuil à 0 les réintègre tous.
 
 ### Commandes déjà en cours (déduites du calcul)
 
