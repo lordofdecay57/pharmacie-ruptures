@@ -22,6 +22,7 @@ Parcours (suivi dans la barre latérale) :
 """
 
 import dataclasses
+import hashlib
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -55,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "2.3"
+VERSION_APP = "2.4"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -195,6 +196,19 @@ def _defaut(memo_valeur, colonnes: list, role: str):
     if memo_valeur and memo_valeur in colonnes:
         return memo_valeur
     return commun.detecter_colonne(colonnes, role)
+
+
+def _signature_colonnes(colonnes) -> str:
+    """Empreinte courte de la liste de colonnes d'un fichier.
+
+    Suffixe les clés des widgets de mapping : dès qu'un fichier de
+    structure DIFFÉRENTE est chargé (colonnes différentes), les widgets
+    repartent à zéro au lieu d'hériter d'une sélection mémorisée pour un
+    AUTRE fichier — sinon une colonne choisie par erreur (ou correcte pour
+    un ancien fichier mais fausse pour le nouveau) peut rester cochée
+    silencieusement après un changement de cadencier dans la même session."""
+    empreinte = "|".join(str(c) for c in colonnes)
+    return hashlib.md5(empreinte.encode("utf-8")).hexdigest()[:8]
 
 
 def charger_historique() -> pd.DataFrame:
@@ -519,41 +533,89 @@ with st.expander(etiquette_colonnes, expanded=premier_usage):
     st.markdown("**📒 Cadencier**")
     st.dataframe(df_cad.head(5), use_container_width=True)
     cols = list(df_cad.columns)
-    c1, c2, c3 = st.columns(3)
+    # Suffixe de clé propre à CE fichier : changer de cadencier (structure
+    # de colonnes différente) réinitialise tous les menus ci-dessous au
+    # lieu d'hériter d'une sélection faite pour un autre fichier.
+    sig_cad = _signature_colonnes(cols)
+
+    c1, c2 = st.columns(2)
     with c1:
         cad_libelle = _choix("Libellé produit", cols,
                              _defaut(memo_cad.get("libelle"), cols, "libelle"),
-                             "cad_libelle", optionnel=False)
+                             f"cad_libelle_{sig_cad}", optionnel=False)
         cad_cip = _choix("Code CIP (recommandé)", cols,
-                         _defaut(memo_cad.get("cip"), cols, "cip"), "cad_cip")
+                         _defaut(memo_cad.get("cip"), cols, "cip"),
+                         f"cad_cip_{sig_cad}")
     with c2:
         cad_stock = _choix("Stock actuel", cols,
                            _defaut(memo_cad.get("stock"), cols, "stock"),
-                           "cad_stock", optionnel=False)
+                           f"cad_stock_{sig_cad}", optionnel=False)
         cad_cond = _choix("Conditionnement (facultatif)", cols,
                           _defaut(memo_cad.get("conditionnement"), cols,
-                                  "conditionnement"), "cad_cond")
-    with c3:
-        memo_ventes = [c for c in (memo_cad.get("ventes") or []) if c in cols]
-        defaut_ventes = memo_ventes or [
-            c for c in commun.detecter_colonnes_ventes(cols) if c in cols]
-        cad_ventes = st.multiselect(
-            "Colonnes de ventes mensuelles — ordre chronologique, "
-            "la plus récente en DERNIER",
-            cols, default=defaut_ventes, key="cad_ventes")
+                                  "conditionnement"), f"cad_cond_{sig_cad}")
+
+    st.markdown("**Période de ventes prise en compte**")
+    # Le choix ne porte QUE sur des colonnes reconnues comme des ventes —
+    # jamais le libellé produit ou une autre colonne par erreur (ancien bug :
+    # une sélection mémorisée pour un autre fichier pouvait laisser une
+    # colonne texte comme « Produit » cochée parmi les ventes).
+    candidats_ventes = [c for c in commun.detecter_colonnes_ventes(cols) if c in cols]
+    memo_ventes = [c for c in (memo_cad.get("ventes") or []) if c in candidats_ventes]
+    MODE_TOUT = "Tout l'historique détecté (recommandé)"
+    MODE_PERIODE = "Choisir une période précise"
+    index_mode = 1 if (memo_ventes and memo_ventes != candidats_ventes) else 0
+    mode_ventes = st.radio(
+        "Mois à inclure dans le calcul de consommation", [MODE_TOUT, MODE_PERIODE],
+        index=index_mode, horizontal=True, key=f"mode_ventes_{sig_cad}",
+        help="« Tout l'historique » utilise les mois détectés automatiquement "
+             "(recommandé — plus de recul, calcul plus fiable). « Choisir une "
+             "période » restreint le calcul à une plage de mois consécutifs, "
+             "par exemple pour ignorer une période non représentative.")
+    if not candidats_ventes:
+        cad_ventes = []
+        st.warning("Aucune colonne de ventes mensuelles détectée "
+                   "automatiquement dans ce fichier.")
+    elif mode_ventes == MODE_TOUT:
+        cad_ventes = candidats_ventes
+        st.caption(f"✓ {len(candidats_ventes)} mois détectés, de "
+                   f"« {candidats_ventes[0]} » à « {candidats_ventes[-1]} ».")
+    else:
+        depart = (memo_ventes[0] if memo_ventes and memo_ventes[0] in candidats_ventes
+                 else candidats_ventes[0])
+        fin = (memo_ventes[-1] if memo_ventes and memo_ventes[-1] in candidats_ventes
+              else candidats_ventes[-1])
+        cd1, cd2 = st.columns(2)
+        with cd1:
+            debut = st.selectbox("Du mois", candidats_ventes,
+                                 index=candidats_ventes.index(depart),
+                                 key=f"cad_ventes_debut_{sig_cad}")
+        with cd2:
+            fin = st.selectbox("Au mois", candidats_ventes,
+                               index=candidats_ventes.index(fin),
+                               key=f"cad_ventes_fin_{sig_cad}")
+        i_debut, i_fin = sorted([candidats_ventes.index(debut),
+                                 candidats_ventes.index(fin)])
+        cad_ventes = candidats_ventes[i_debut:i_fin + 1]
+        st.caption(f"{len(cad_ventes)} mois retenus, de « {cad_ventes[0]} » "
+                   f"à « {cad_ventes[-1]} ».")
+
     c4, c5 = st.columns(2)
     with c4:
         cad_en_cours = _choix(
             "Commande en cours (facultatif)", cols,
             _defaut(memo_cad.get("commande_en_cours"), cols, "commande_en_cours"),
-            "cad_en_cours")
-        st.caption("Qté déjà commandée mais pas reçue — déduite du calcul "
-                   "pour éviter de recommander ce qui arrive déjà.")
+            f"cad_en_cours_{sig_cad}")
+        st.caption("Colonne indiquant les boîtes déjà commandées au "
+                   "fournisseur mais pas encore livrées — déduite du calcul "
+                   "pour éviter de recommander ce qui arrive déjà. Un export "
+                   "WinPharma standard ne contient généralement PAS cette "
+                   "information : laisser sur « (aucune) » est normal, le "
+                   "calcul fonctionne très bien sans.")
     with c5:
         cad_peremption = _choix(
             "Péremption / DLUO (facultatif)", cols,
             _defaut(memo_cad.get("peremption"), cols, "peremption"),
-            "cad_peremption")
+            f"cad_peremption_{sig_cad}")
         st.caption("Alerte si péremption dans moins de 90 jours — "
                    "n'écarte pas le produit, informatif seulement.")
 
@@ -563,35 +625,37 @@ with st.expander(etiquette_colonnes, expanded=premier_usage):
         st.markdown("**🔴 Ruptures GPNC**")
         st.dataframe(df_gpnc.head(5), use_container_width=True)
         cols = list(df_gpnc.columns)
+        sig_gpnc = _signature_colonnes(cols)
         c1, c2, c3 = st.columns(3)
         with c1:
             gpnc_libelle = _choix("Libellé produit", cols,
                                   _defaut(memo_gpnc.get("libelle"), cols,
                                           "libelle"),
-                                  "gpnc_libelle", optionnel=False)
+                                  f"gpnc_libelle_{sig_gpnc}", optionnel=False)
         with c2:
             gpnc_cip = _choix("Code CIP (recommandé)", cols,
                               _defaut(memo_gpnc.get("cip"), cols, "cip"),
-                              "gpnc_cip")
+                              f"gpnc_cip_{sig_gpnc}")
         with c3:
             gpnc_date = _choix("Date de réappro", cols,
                                _defaut(memo_gpnc.get("date_reappro"), cols,
-                                       "date_reappro"), "gpnc_date")
+                                       "date_reappro"), f"gpnc_date_{sig_gpnc}")
 
         st.divider()
         st.markdown("**🟠 Ruptures UNIPHARMA**")
         st.dataframe(df_uni.head(5), use_container_width=True)
         cols = list(df_uni.columns)
+        sig_uni = _signature_colonnes(cols)
         c1, c2 = st.columns(2)
         with c1:
             uni_libelle = _choix("Libellé produit", cols,
                                  _defaut(memo_uni.get("libelle"), cols,
                                          "libelle"),
-                                 "uni_libelle", optionnel=False)
+                                 f"uni_libelle_{sig_uni}", optionnel=False)
         with c2:
             uni_cip = _choix("Code CIP (recommandé)", cols,
                              _defaut(memo_uni.get("cip"), cols, "cip"),
-                             "uni_cip")
+                             f"uni_cip_{sig_uni}")
 
 mapping_cadencier = {"libelle": cad_libelle, "cip": cad_cip,
                      "stock": cad_stock, "ventes": cad_ventes,
