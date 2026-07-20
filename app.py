@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "2.4"
+VERSION_APP = "2.5"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -423,6 +423,17 @@ with st.sidebar:
             key="corriger_zeros_stock",
             help="Un mois à 0 vente ENTRE deux mois actifs = produit en "
                  "rupture, pas absence de demande.")
+        rotation_min_commande = st.number_input(
+            "Écarter les produits vendus au maximum de (boîtes/mois)", 0.0, 20.0,
+            value=float(memo_rotation.get(
+                "rotation_min_commande",
+                stock_rotation.ROTATION_MIN_COMMANDE_DEFAUT)),
+            step=1.0,
+            help="Les produits à rotation ≤ cette valeur sont écartés du "
+                 "réassort automatique (pas de commande) — évite d'encombrer "
+                 "la commande d'une boîte de chaque produit vendu très "
+                 "rarement. Ils restent consultables via le filtre "
+                 "« ⚪ Rotation faible ». 0 = tout garder.")
         conso_defaut = st.number_input(
             "Consommation par défaut si pas d'historique (unités/mois)", 0, 500,
             value=int(memo_rotation.get("conso_defaut", 0)),
@@ -700,6 +711,7 @@ if st.button("🔍 Lancer l'analyse", type="primary",
                            "couverture_min": couverture_min,
                            "couverture_max": couverture_max,
                            "seuil_alerte": seuil_alerte_unites,
+                           "rotation_min_commande": rotation_min_commande,
                            "conso_defaut": conso_defaut,
                            "seuil_dormant": seuil_dormant},
     }
@@ -718,7 +730,8 @@ if st.button("🔍 Lancer l'analyse", type="primary",
             periode_rotation=periode_rotation,
             corriger_ruptures_passees=corriger_zeros_stock,
             consommation_defaut_mensuelle=conso_defaut,
-            seuil_dormant_jours=seuil_dormant)
+            seuil_dormant_jours=seuil_dormant,
+            rotation_min_commande_mensuelle=rotation_min_commande)
         st.session_state["resultat_stock"] = stock_rotation.analyser_stock_rotation(
             df_cad, {"cadencier": mapping_cadencier}, params_stock,
             date_analyse=date_analyse)
@@ -800,7 +813,9 @@ with module_stock:
                        "warning", sous="réassort progressif conseillé"),
             _tuile_kpi("Qté totale à commander",
                        rs.get("qte_totale_a_commander", 0), "accent",
-                       sous="toutes lignes confondues"),
+                       sous="hors rotation faible écartée"),
+            _tuile_kpi("⚪ Rotation faible", rs.get("rotation_faible", 0),
+                       sous="écartés du réassort auto"),
             _tuile_kpi("💤 Stock dormant", rs.get("dormants", 0), "warning",
                        sous=f'{rs.get("dormants_boites", 0):g} unités '
                             "immobilisées"),
@@ -832,7 +847,8 @@ with module_stock:
         with c_alerte:
             filtre_alerte = st.selectbox(
                 "Filtrer par alerte",
-                ["Toutes", "🔴 Action requise", "🟡 Sous le min", "🟢 OK"],
+                ["Toutes", "🔴 Action requise", "🟡 Sous le min", "🟢 OK",
+                 "⚪ Rotation faible"],
                 key="filtre_alerte_stock")
         with c_detail:
             st.write("")
