@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "2.5"
+VERSION_APP = "2.6"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -381,21 +381,25 @@ with st.sidebar:
     memo_rotation = (config if isinstance(config, dict) else {}).get(
         "stock_rotation", {})
 
-    # Tous les réglages fins tiennent dans UN panneau replié : l'écran reste
-    # épuré, les valeurs par défaut conviennent à la quasi-totalité des cas.
-    with st.expander("⚙️ Réglages avancés (facultatif)"):
+    # Réglages fins regroupés dans un panneau — laissé OUVERT par défaut
+    # (visible à gauche) pour un accès direct aux paramètres de calcul.
+    with st.expander("⚙️ Réglages avancés", expanded=True):
         st.caption("Les valeurs par défaut conviennent dans la plupart des "
                    "cas — n'y touchez que si besoin.")
 
         st.markdown("**📦 Stock en rotation**")
+        _options_periode = ["annuelle", "3mois", "1mois", "lissee"]
+        _libelle_periode = {
+            "annuelle": "Annuelle (moyenne 12 mois)",
+            "3mois": "Trimestrielle (3 derniers mois)",
+            "1mois": "Mensuelle (dernier mois seul)",
+            "lissee": "Lissée (réactive aux tendances)"}
+        _memo_p = memo_rotation.get("periode", "annuelle")
         periode_rotation = st.radio(
-            "Calcul de la consommation", ["annuelle", "3mois", "lissee"],
-            index=["annuelle", "3mois", "lissee"].index(
-                memo_rotation.get("periode", "annuelle")),
-            format_func=lambda p: {
-                "annuelle": "Annuelle (moyenne 12 mois)",
-                "3mois": "3 derniers mois",
-                "lissee": "Lissée (réactive aux tendances)"}[p],
+            "Calcul de la consommation", _options_periode,
+            index=_options_periode.index(_memo_p if _memo_p in _options_periode
+                                         else "annuelle"),
+            format_func=lambda p: _libelle_periode[p],
             key="periode_rotation")
         couverture_min = st.number_input(
             "Stock min (jours de couverture)", 1, 90,
@@ -451,17 +455,16 @@ with st.sidebar:
         st.divider()
         st.markdown("**🚨 Gestion des ruptures**")
         periode = st.radio(
-            "Calcul de la rotation", ["annuelle", "3mois", "lissee"],
-            format_func=lambda p: {
-                "annuelle": "Annuelle (moyenne 12 mois)",
-                "3mois": "3 derniers mois",
-                "lissee": "Lissée (réactive aux tendances)"}[p],
+            "Calcul de la rotation", _options_periode,
+            format_func=lambda p: _libelle_periode[p],
             key="periode_ruptures",
-            help="« Lissée » : lissage exponentiel — suit les hausses ET les "
-                 "baisses récentes sans sur-réagir à un mois isolé. Attention : "
-                 "un produit en rupture EN COURS (derniers mois à 0) voit sa "
-                 "rotation lissée chuter — « Annuelle » reste plus robuste pour "
-                 "ces cas, signalés « ⚠️ rupture passée possible ».")
+            help="« Mensuelle » : le dernier mois seul, le plus réactif mais "
+                 "sensible à un mois atypique. « Lissée » : lissage "
+                 "exponentiel — suit les hausses ET les baisses récentes sans "
+                 "sur-réagir à un mois isolé. Attention : un produit en rupture "
+                 "EN COURS (derniers mois à 0) voit sa rotation mensuelle ou "
+                 "lissée chuter — « Annuelle » reste plus robuste pour ces cas, "
+                 "signalés « ⚠️ rupture passée possible ».")
         seuil_vigilance = st.number_input(
             "Seuil de vigilance stock (jours)", 1, 30,
             value=int(moteur.SEUIL_VIGILANCE_JOURS),
