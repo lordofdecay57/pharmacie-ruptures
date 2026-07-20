@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "2.6"
+VERSION_APP = "2.7"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -876,9 +876,12 @@ with module_stock:
             tableau_stock = tableau_stock[
                 ["Alerte", "Code CIP", "Nom du produit", "Stock actuel",
                  "Stock min (calculé)", "Stock max (calculé)",
-                 "Qté à commander"]]
+                 "Stock min conseillé (variabilité)", "Qté à commander"]]
         st.caption(f"{len(tableau_stock)} produit(s) affiché(s) — les "
-                   "stocks sont en boîtes entières.")
+                   "stocks sont en boîtes entières. La colonne « Stock min "
+                   "conseillé (variabilité) » est indicative : elle majore le "
+                   "stock min pour les produits à ventes irrégulières, sans "
+                   "changer la quantité à commander.")
         st.dataframe(tableau_stock, use_container_width=True,
                      hide_index=True, height=560)
         st.caption(

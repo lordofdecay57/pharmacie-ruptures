@@ -40,8 +40,9 @@ from typing import Optional
 
 import pandas as pd
 
-from commun import (JOURS_PAR_MOIS, calculer_rotation_mensuelle,
-                    calculer_stock_jours, calculer_tendance, classer_abc,
+from commun import (JOURS_PAR_MOIS, SEUILS_VARIABILITE,
+                    calculer_rotation_mensuelle, calculer_stock_jours,
+                    calculer_tendance, classer_abc, coefficient_variation,
                     corriger_faux_zeros, exporter_classeur, normaliser_libelle,
                     parser_nombre, variabilite_demande)
 
@@ -228,7 +229,8 @@ class ResultatStockRotation:
 COLONNES_STOCK_ROTATION = [
     "Alerte", "Classe", "Code CIP", "Nom du produit", "Stock actuel",
     "Commande en cours", "Consommation/mois", "Tendance", "Variabilité",
-    "Stock min (calculé)", "Stock max (calculé)", "Cible réassort",
+    "Stock min (calculé)", "Stock max (calculé)",
+    "Stock min conseillé (variabilité)", "Cible réassort",
     "Qté à commander", "Motif",
 ]
 COLONNES_DORMANTS_ROTATION = ["Code CIP", "Nom du produit", "Stock actuel",
@@ -288,6 +290,18 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             ventes, nb_corriges = corriger_faux_zeros(ventes_brutes)
 
         rotation = calculer_rotation_mensuelle(ventes, params.periode_rotation)
+        # Garde-fou des modes réactifs (mensuel, 3 mois, lissé) : si le calcul
+        # récent tombe à 0 alors que le produit VEND sur l'année, c'est une
+        # rupture/creux ponctuel — pas une fin de vie. On retombe sur la
+        # moyenne annuelle pour ne pas faire DISPARAÎTRE du pilotage un
+        # produit qui rote réellement (280 cas sur le cadencier réel).
+        rotation_recente_nulle = False
+        if rotation <= 0 and params.periode_rotation != "annuelle":
+            rotation_annuelle = calculer_rotation_mensuelle(ventes, "annuelle")
+            if rotation_annuelle > 0:
+                rotation = rotation_annuelle
+                rotation_recente_nulle = True
+
         sans_historique = all(parser_nombre(v) == 0 for v in ventes_brutes)
         if rotation <= 0 and sans_historique and params.consommation_defaut_mensuelle > 0:
             rotation = params.consommation_defaut_mensuelle
@@ -306,6 +320,22 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         stock_min = math.ceil(round(stock_min, 6)) if stock_min > 0 else 0
         stock_max = math.ceil(round(stock_max, 6)) if stock_max > 0 else 0
         stock_max = max(stock_max, stock_min)
+
+        # Colonne CONSEILLÉE (purement indicative, ne pilote pas la commande) :
+        # stock min majoré d'une marge de sécurité pour les produits à ventes
+        # IRRÉGULIÈRES. La marge ne s'ajoute qu'AU-DELÀ du seuil de stabilité
+        # (SEUILS_VARIABILITE[0], soit CV 0,3) : un produit régulier garde
+        # son min de base (cohérent avec le libellé « 🟢 stable »). Facteur
+        # plafonné : CV 1,5 → +120 % au maximum. Le pharmacien peut s'y
+        # référer pour sécuriser les produits à demande instable.
+        cv = coefficient_variation(ventes)
+        marge = max(0.0, min(cv, 1.5) - SEUILS_VARIABILITE[0]) if cv else 0.0
+        if marge <= 0:
+            stock_min_conseille = stock_min
+        else:
+            base = conso_jour * (params.couverture_min_jours + jours_weekend)
+            stock_min_conseille = math.ceil(round(base * (1 + marge), 6))
+            stock_min_conseille = max(stock_min_conseille, stock_min)
         # Cible et urgence évaluées sur le stock EFFECTIF (rayon + en cours) :
         # ce qui arrive déjà compte comme couverture.
         cible, qte, motif = determiner_cible_reassort(
@@ -335,6 +365,9 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             alerte = "🟡 Sous le min"
         if not rotation_faible and sans_historique and rotation > 0:
             motif += " (consommation par défaut — pas d'historique)"
+        if not rotation_faible and rotation_recente_nulle:
+            motif += (" · ventes récentes nulles (rupture/creux) — repli sur "
+                      "la moyenne annuelle")
         if en_cours:
             motif += f" · {en_cours:g} déjà en commande (déduit du calcul)"
 
@@ -349,6 +382,7 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             "Variabilité": variabilite_demande(ventes),
             "Stock min (calculé)": int(stock_min),
             "Stock max (calculé)": int(stock_max),
+            "Stock min conseillé (variabilité)": int(stock_min_conseille),
             "Cible réassort": int(round(cible)),
             "Qté à commander": qte,
             "Motif": motif,

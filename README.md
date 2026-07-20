@@ -111,6 +111,28 @@ recommanderait de commander à nouveau ce qui est déjà en route. La colonne
 « Stock actuel » affichée reste le stock physique réel ; la déduction est
 mentionnée dans le motif.
 
+### Garde-fou des modes de calcul réactifs
+
+Les modes « Mensuelle », « Trimestrielle » et « Lissée » privilégient les
+ventes récentes. Problème : un produit qui rote sur l'année mais a eu **0
+vente le dernier mois** (rupture ou creux ponctuel) verrait sa rotation
+tomber à 0 et **disparaître du pilotage** — une rupture masquée. Garde-fou :
+quand le calcul récent tombe à 0 alors que la moyenne annuelle est
+positive, l'outil **retombe sur la moyenne annuelle** pour garder le
+produit piloté (le motif le signale). Sur le cadencier réel, cela évite de
+perdre de vue ~500 produits en mode mensuel.
+
+### Colonne « Stock min conseillé (variabilité) » (indicative)
+
+À côté du stock min/max, une colonne indicative propose un stock min
+**majoré d'une marge de sécurité pour les produits à ventes irrégulières**.
+Le stock min de base est identique pour tous (14 j de couverture) quelle
+que soit la régularité ; or un produit erratique mérite plus de tampon
+qu'un produit régulier à volume égal. La marge ne s'applique **qu'au-delà
+du seuil de stabilité** (CV > 0,3) et reste plafonnée (+120 % au plus). Elle
+**ne change pas la quantité à commander** — le pharmacien s'y réfère
+librement pour sécuriser les produits à demande instable.
+
 ### Solution progressive si l'historique manque
 
 Un produit sans aucune vente enregistrée (nouveau, ou cadencier trop court)
