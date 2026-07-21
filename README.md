@@ -53,6 +53,16 @@ d'au moins 10 %** (ou les produits nouveaux) sont ré-affichées et exportées
 produits. Une case permet de tout réafficher. La première analyse affiche
 tout (pas de référence antérieure).
 
+> Cette règle ne s'applique que si le **document de base n'a pas changé** :
+> si le cadencier déposé a une structure différente (colonnes de ventes
+> différentes, autre fenêtre de mois), la comparaison n'a plus de sens →
+> toutes les lignes ressortent et une nouvelle référence est enregistrée.
+
+**Document de base** (vue par défaut) : centré sur le stock min/max —
+Alerte, Code CIP, Nom, Stock min, Stock max, Stock min conseillé. Le
+**Stock actuel** et la **Qté à commander** s'affichent via la case
+« ＋ Colonnes d'analyse ».
+
 #### Ajustement week-end (pas de réception samedi/dimanche)
 
 Les commandes ne sont pas réceptionnées le week-end. Le stock min est donc
