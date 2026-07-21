@@ -56,13 +56,17 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "3.0"
+VERSION_APP = "3.1"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
 # État du stock min/max de la dernière analyse — sert à ne ressortir, au
 # cadencier suivant, que les lignes dont le stock a changé (≥ 10 %).
 ETAT_STOCK_PATH = Path(__file__).parent / "etat_stock_precedent.csv"
+# Signature des colonnes du cadencier de la dernière analyse : la règle
+# « ne pas ressortir les stocks inchangés » ne s'applique que si le document
+# de base n'a pas changé de structure (mêmes colonnes de ventes, même format).
+ETAT_STOCK_SIG_PATH = Path(__file__).parent / "etat_stock_precedent.sig"
 COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
                        "Qté à commander (Cmd)", "Date réappro", "Type"]
 # Type « commande » : produit signalé (onglets 1-2) — compte dans le
@@ -214,22 +218,30 @@ def _signature_colonnes(colonnes) -> str:
     return hashlib.md5(empreinte.encode("utf-8")).hexdigest()[:8]
 
 
-def charger_etat_stock() -> pd.DataFrame:
-    """Stock min/max de la dernière analyse (référence pour ne ressortir que
-    les lignes modifiées au cadencier suivant). Vide si première analyse."""
+def charger_etat_stock() -> tuple:
+    """(stock min/max de la dernière analyse, signature du cadencier alors
+    utilisé). Vide / None si première analyse."""
+    signature = None
+    if ETAT_STOCK_SIG_PATH.exists():
+        try:
+            signature = ETAT_STOCK_SIG_PATH.read_text(encoding="utf-8").strip()
+        except OSError:
+            signature = None
     if ETAT_STOCK_PATH.exists():
         try:
-            return pd.read_csv(ETAT_STOCK_PATH, dtype={"Code CIP": str})
+            return (pd.read_csv(ETAT_STOCK_PATH, dtype={"Code CIP": str}),
+                    signature)
         except (pd.errors.ParserError, pd.errors.EmptyDataError):
-            return pd.DataFrame(columns=stock_rotation.COLONNES_ETAT_STOCK)
-    return pd.DataFrame(columns=stock_rotation.COLONNES_ETAT_STOCK)
+            pass
+    return (pd.DataFrame(columns=stock_rotation.COLONNES_ETAT_STOCK), signature)
 
 
-def sauver_etat_stock(tableau: pd.DataFrame) -> None:
-    """Mémorise le stock min/max courant comme référence pour la prochaine
-    analyse (comparaison des variations ≥ 10 %)."""
+def sauver_etat_stock(tableau: pd.DataFrame, signature: str) -> None:
+    """Mémorise le stock min/max courant ET la signature des colonnes du
+    cadencier, comme référence pour la prochaine analyse."""
     stock_rotation.etat_stock_a_enregistrer(tableau).to_csv(
         ETAT_STOCK_PATH, index=False, encoding="utf-8")
+    ETAT_STOCK_SIG_PATH.write_text(signature or "", encoding="utf-8")
 
 
 def charger_historique() -> pd.DataFrame:
@@ -764,15 +776,25 @@ if st.button("🔍 Lancer l'analyse", type="primary",
         # ≥ 10 % depuis la dernière analyse, puis mémorise l'état courant.
         # (Pas en démo : ne pas polluer la référence réelle.)
         if not mode_demo:
-            etat_precedent = charger_etat_stock()
+            etat_precedent, signature_prec = charger_etat_stock()
+            signature_cadencier = _signature_colonnes(df_cad.columns)
+            # La règle « ne pas ressortir les stocks inchangés » ne vaut que
+            # si le DOCUMENT DE BASE est le même : si le cadencier a changé de
+            # structure (colonnes différentes), la comparaison n'a pas de sens
+            # → on repart de zéro (toutes les lignes ressortent).
+            document_different = (not etat_precedent.empty
+                                  and signature_prec != signature_cadencier)
+            reference = (pd.DataFrame(columns=stock_rotation.COLONNES_ETAT_STOCK)
+                         if document_different else etat_precedent)
             tab, nb_mod, nb_nouv = stock_rotation.comparer_a_etat_precedent(
-                resultat_stock_obj.tableau, etat_precedent)
+                resultat_stock_obj.tableau, reference)
             resultat_stock_obj.tableau = tab
             resultat_stock_obj.resume["nb_modifiees"] = nb_mod
             resultat_stock_obj.resume["nb_nouvelles"] = nb_nouv
             resultat_stock_obj.resume["etat_precedent_existant"] = (
-                not etat_precedent.empty)
-            sauver_etat_stock(tab)
+                not reference.empty)
+            resultat_stock_obj.resume["document_different"] = document_different
+            sauver_etat_stock(tab, signature_cadencier)
         st.session_state["resultat_stock"] = resultat_stock_obj
     except Exception as e:  # jamais de plantage brut à l'écran
         st.error(f"Erreur — Gestion des stocks en rotation : {e}")
@@ -893,6 +915,11 @@ with module_stock:
         # de relire les mêmes lignes). Case pour tout réafficher.
         base_stock = resultat_stock.tableau
         seulement_modifiees = False
+        if rs.get("document_different"):
+            st.warning("📄 Le cadencier déposé a une **structure différente** "
+                       "de la dernière analyse (colonnes de ventes changées) — "
+                       "toutes les lignes sont affichées, la comparaison aux "
+                       "stocks précédents ne s'applique pas.")
         if ("_modifie" in base_stock.columns
                 and rs.get("etat_precedent_existant")):
             nb_mod = int(rs.get("nb_modifiees", 0))
@@ -926,8 +953,9 @@ with module_stock:
             st.write("")
             detail_complet = st.checkbox(
                 "＋ Colonnes d'analyse", key="detail_stock",
-                help="Ajoute classe ABC, consommation, tendance, "
-                     "variabilité, cible de réassort et motif.")
+                help="Ajoute Stock actuel, Qté à commander, classe ABC, "
+                     "consommation, tendance, variabilité, cible de réassort "
+                     "et motif.")
 
         tableau_stock = base_stock
         if recherche:
@@ -945,21 +973,23 @@ with module_stock:
             # présentes. Protège contre un résultat calculé par une version
             # antérieure resté en mémoire de session après une mise à jour
             # (une colonne récente y serait absente → KeyError sinon).
+            # Document de base centré sur le stock min/max. « Stock actuel »
+            # et « Qté à commander » sont déplacés dans « ＋ Colonnes
+            # d'analyse » à la demande du pharmacien.
             colonnes_simples = ["Alerte", "Code CIP", "Nom du produit",
-                                "Stock actuel", "Stock min (calculé)",
-                                "Stock max (calculé)",
-                                "Stock min conseillé (variabilité)",
-                                "Qté à commander"]
+                                "Stock min (calculé)", "Stock max (calculé)",
+                                "Stock min conseillé (variabilité)"]
             tableau_stock = tableau_stock[
                 [c for c in colonnes_simples if c in tableau_stock.columns]]
         else:  # vue détaillée : masquer les colonnes techniques internes
             tableau_stock = tableau_stock[
                 [c for c in tableau_stock.columns if not str(c).startswith("_")]]
         st.caption(f"{len(tableau_stock)} produit(s) affiché(s) — les "
-                   "stocks sont en boîtes entières. La colonne « Stock min "
-                   "conseillé (variabilité) » est indicative : elle majore le "
-                   "stock min pour les produits à ventes irrégulières, sans "
-                   "changer la quantité à commander.")
+                   "stocks sont en boîtes entières. Document de base centré "
+                   "sur le stock min/max ; **Stock actuel** et **Qté à "
+                   "commander** apparaissent via « ＋ Colonnes d'analyse ». "
+                   "« Stock min conseillé (variabilité) » est indicative "
+                   "(marge pour les ventes irrégulières).")
         st.dataframe(tableau_stock, use_container_width=True,
                      hide_index=True, height=560)
         st.caption(
