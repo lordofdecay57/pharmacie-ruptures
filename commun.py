@@ -435,6 +435,7 @@ def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> floa
     dernier). Les mois à 0 AVANT la première vente (produit pas encore
     référencé) sont exclus du calcul. ``periode`` :
       - "annuelle" : moyenne de toutes les valeurs ;
+      - "6mois"    : moyenne des 6 dernières ;
       - "3mois"    : moyenne des 3 dernières ;
       - "1mois"    : le dernier mois seul — le plus réactif, mais sensible à
         un mois atypique (pic, creux ou rupture ponctuelle) ;
@@ -447,7 +448,9 @@ def calculer_rotation_mensuelle(ventes: list, periode: str = "annuelle") -> floa
         return 0.0
     if periode == "1mois":
         return valeurs[-1]
-    if periode == "3mois":
+    if periode == "6mois":
+        valeurs = valeurs[-6:]
+    elif periode == "3mois":
         valeurs = valeurs[-3:]
     elif periode == "lissee":
         lisse = valeurs[0]

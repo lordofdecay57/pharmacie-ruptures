@@ -18,7 +18,8 @@ import pytest
 
 from stock_rotation import (ParametresStockRotation, analyser_stock_rotation,
                             calculer_stock_max, calculer_stock_min,
-                            determiner_cible_reassort,
+                            comparer_a_etat_precedent, determiner_cible_reassort,
+                            etat_stock_a_enregistrer,
                             exporter_stock_rotation_excel,
                             jours_supplementaires_weekend)
 
@@ -100,20 +101,9 @@ class TestJoursWeekend:
 # Plancher métier : stock max jamais < 10 pour un produit piloté
 # ---------------------------------------------------------------------------
 
-class TestPlancherStockMax:
-    """Règle officine : le stock max d'un produit PILOTÉ ne descend jamais
-    sous 10 boîtes (fond de rayon). Les produits écartés (rotation faible)
-    ne sont pas concernés."""
-
-    def _cadencier(self):
-        return pd.DataFrame({
-            "Produit": ["PILOTE FAIBLE MAX", "ROTATION FAIBLE"],
-            "CIP": ["9300", "9301"],
-            "Stock": [0, 0],
-            # PILOTE FAIBLE MAX : ~5/mois → max de base 5 (< 10) mais pilotÉ.
-            # ROTATION FAIBLE : ~1/mois → écarté, pas de plancher.
-            "Ventes avril": [5, 1], "Ventes mai": [5, 1], "Ventes juin": [5, 1],
-        })
+class TestStockMinSupprimePetitMax:
+    """Règle officine : pour les lignes dont le stock max < 10, le stock min
+    est SUPPRIMÉ (pas de point de commande automatique)."""
 
     def _mapping(self):
         return {"cadencier": {"libelle": "Produit", "cip": "CIP",
@@ -121,32 +111,26 @@ class TestPlancherStockMax:
                               "ventes": ["Ventes avril", "Ventes mai",
                                          "Ventes juin"]}}
 
-    def test_produit_pilote_max_releve_a_10(self):
-        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
-        ligne = resultat.tableau[
-            resultat.tableau["Nom du produit"] == "PILOTE FAIBLE MAX"].iloc[0]
-        assert ligne["Stock max (calculé)"] == 10  # relevé de 5 à 10
-        assert "plancher de 10" in ligne["Motif"]
-        # Stock 0 < seuil 10 ET < min → commande jusqu'au max plancher (10).
-        assert ligne["Qté à commander"] == 10
+    def test_min_supprime_si_max_inferieur_10(self):
+        # ~5/mois → max de base 5 (< 10) → min supprimé.
+        cad = pd.DataFrame({
+            "Produit": ["PETIT MAX"], "CIP": ["9300"], "Stock": [1],
+            "Ventes avril": [5], "Ventes mai": [5], "Ventes juin": [5]})
+        ligne = analyser_stock_rotation(cad, self._mapping()).tableau.iloc[0]
+        assert ligne["Stock max (calculé)"] < 10
+        assert ligne["Stock min (calculé)"] == 0
+        assert "stock min supprimé" in ligne["Motif"]
+        assert ligne["Qté à commander"] == 0  # sans min, pas de commande auto
 
-    def test_rotation_faible_non_concernee(self):
-        resultat = analyser_stock_rotation(self._cadencier(), self._mapping())
-        ligne = resultat.tableau[
-            resultat.tableau["Nom du produit"] == "ROTATION FAIBLE"].iloc[0]
-        assert ligne["Alerte"] == "⚪ Rotation faible"
-        assert ligne["Stock max (calculé)"] < 10  # pas de plancher
-        assert ligne["Qté à commander"] == 0
-
-    def test_max_deja_au_dessus_de_10_inchange(self):
-        # Un produit à forte rotation (max ≥ 10) n'est pas touché.
+    def test_min_conserve_si_max_10_ou_plus(self):
+        # ~40/mois → max ≥ 10 → min conservé.
         cad = pd.DataFrame({
             "Produit": ["GROS VENDEUR"], "CIP": ["9302"], "Stock": [0],
             "Ventes avril": [40], "Ventes mai": [40], "Ventes juin": [40]})
-        resultat = analyser_stock_rotation(cad, self._mapping())
-        ligne = resultat.tableau.iloc[0]
-        assert ligne["Stock max (calculé)"] == 40
-        assert "plancher" not in ligne["Motif"]
+        ligne = analyser_stock_rotation(cad, self._mapping()).tableau.iloc[0]
+        assert ligne["Stock max (calculé)"] >= 10
+        assert ligne["Stock min (calculé)"] > 0
+        assert "stock min supprimé" not in ligne["Motif"]
 
 
 # ---------------------------------------------------------------------------
@@ -650,14 +634,17 @@ class TestRotationFaibleEcartee:
         assert resultat.resume["rotation_faible"] == 2
 
     def test_desactivable_avec_zero(self):
-        # Seuil 0 : plus rien n'est écarté, comportement historique.
+        # Seuil 0 : plus aucun produit n'est marqué « rotation faible ».
         params = ParametresStockRotation(rotation_min_commande_mensuelle=0)
         resultat = analyser_stock_rotation(self._cadencier(), self._mapping(),
                                            params)
         assert "⚪ Rotation faible" not in set(resultat.tableau["Alerte"])
-        lent = resultat.tableau[
-            resultat.tableau["Nom du produit"] == "ROTATION LENTE"].iloc[0]
-        assert lent["Qté à commander"] > 0
+        # ROTATION NORMALE (max ≥ 10) garde son min et se commande.
+        # (ROTATION LENTE a un max < 10 → min supprimé par la règle dédiée,
+        # indépendamment du filtre rotation faible.)
+        normal = resultat.tableau[
+            resultat.tableau["Nom du produit"] == "ROTATION NORMALE"].iloc[0]
+        assert normal["Qté à commander"] > 0
 
     def test_absent_de_l_export_excel(self):
         # Le fichier de commande ne contient pas les produits écartés.
@@ -734,6 +721,60 @@ class TestStockMinConseille:
         # Stock 20 > min de base (5) → aucune commande, malgré un conseillé
         # plus élevé.
         assert err["Qté à commander"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Cadencier n+1 : ne ressortir que les lignes modifiées (≥ 10 %)
+# ---------------------------------------------------------------------------
+
+class TestComparerEtatPrecedent:
+    def _tableau(self, min_max):
+        return pd.DataFrame({
+            "Code CIP": [c for c, _, _ in min_max],
+            "Nom du produit": [n for _, n, _ in min_max],
+            "Stock min (calculé)": [mm[0] for *_, mm in min_max],
+            "Stock max (calculé)": [mm[1] for *_, mm in min_max]})
+
+    def test_premiere_analyse_tout_modifie(self):
+        tab = self._tableau([("111", "A", (10, 20)), ("222", "B", (5, 12))])
+        annote, nb_mod, nb_nouv = comparer_a_etat_precedent(tab, None)
+        assert annote["_modifie"].all()
+        assert nb_mod == 2 and nb_nouv == 2
+
+    def test_ligne_inchangee_exclue(self):
+        prec = self._tableau([("111", "A", (10, 20))])
+        courant = self._tableau([("111", "A", (10, 20))])  # identique
+        annote, nb_mod, _ = comparer_a_etat_precedent(courant, prec)
+        assert not annote["_modifie"].iloc[0]
+        assert nb_mod == 0
+
+    def test_variation_sous_10pct_exclue(self):
+        prec = self._tableau([("111", "A", (100, 200))])
+        courant = self._tableau([("111", "A", (105, 209))])  # +5 %, +4,5 %
+        annote, nb_mod, _ = comparer_a_etat_precedent(courant, prec)
+        assert not annote["_modifie"].iloc[0]
+
+    def test_variation_au_dessus_10pct_incluse(self):
+        prec = self._tableau([("111", "A", (100, 200))])
+        courant = self._tableau([("111", "A", (100, 230))])  # max +15 %
+        annote, nb_mod, _ = comparer_a_etat_precedent(courant, prec)
+        assert annote["_modifie"].iloc[0]
+        assert nb_mod == 1
+
+    def test_nouveau_produit_inclus(self):
+        prec = self._tableau([("111", "A", (10, 20))])
+        courant = self._tableau([("111", "A", (10, 20)),
+                                 ("333", "C", (4, 9))])
+        annote, nb_mod, nb_nouv = comparer_a_etat_precedent(courant, prec)
+        c = annote[annote["Code CIP"] == "333"].iloc[0]
+        assert c["_modifie"]
+        assert nb_nouv == 1
+
+    def test_etat_a_enregistrer_colonnes(self):
+        res = analyser_stock_rotation(_cadencier(), _mapping_cadencier())
+        etat = etat_stock_a_enregistrer(res.tableau)
+        assert list(etat.columns) == ["Code CIP", "Nom du produit",
+                                      "Stock min (calculé)", "Stock max (calculé)"]
 
 
 # ---------------------------------------------------------------------------

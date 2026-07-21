@@ -34,12 +34,24 @@ latérale. Les bornes sont arrondies à la **boîte entière supérieure**
 (une borne de 4,2 boîtes se tient en rayon avec 5) et le stock max ne
 passe jamais sous le stock min.
 
-**Plancher du stock max (règle officine)** : pour un produit **piloté**
-(hors « rotation faible »), le stock max ne descend jamais sous **10
-boîtes** — fond de rayon minimal garanti. Un produit vendu 5/mois, dont le
-max calculé serait 5, voit son max porté à 10. Les produits écartés du
-réassort (rotation ≤ 1/mois) et les produits à rotation nulle ne sont pas
-concernés. Le motif signale les produits relevés au plancher.
+**Suppression du stock min pour les petits produits (règle officine)** :
+pour les lignes dont le **stock max calculé est inférieur à 10 boîtes**, le
+stock min est **supprimé** (mis à 0) — ces petits produits ne sont plus
+pilotés par un point de commande automatique. Seuls les produits vendus
+≥ 10/mois (max ≥ 10) conservent un stock min et déclenchent des commandes.
+Le motif signale les lignes concernées.
+
+**Périodes de calcul de la consommation** : annuelle (12 mois),
+**semestrielle (6 mois)**, trimestrielle (3 mois), mensuelle (dernier
+mois) ou lissée — au choix dans la barre latérale.
+
+**Cadencier n+1 — ne ressortir que les lignes modifiées** : l'analyse
+mémorise le stock min/max de chaque produit (`etat_stock_precedent.csv`).
+À l'analyse suivante, seules les lignes dont le stock min ou max a **varié
+d'au moins 10 %** (ou les produits nouveaux) sont ré-affichées et exportées
+— les lignes inchangées sont masquées pour ne pas relire les mêmes
+produits. Une case permet de tout réafficher. La première analyse affiche
+tout (pas de référence antérieure).
 
 #### Ajustement week-end (pas de réception samedi/dimanche)
 

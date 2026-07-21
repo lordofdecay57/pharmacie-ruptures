@@ -1,4 +1,5 @@
 config.yaml
 historique_commandes.csv
+etat_stock_precedent.csv
 __pycache__/
 .pytest_cache/

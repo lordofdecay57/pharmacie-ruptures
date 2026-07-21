@@ -56,10 +56,13 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "2.9"
+VERSION_APP = "3.0"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
+# État du stock min/max de la dernière analyse — sert à ne ressortir, au
+# cadencier suivant, que les lignes dont le stock a changé (≥ 10 %).
+ETAT_STOCK_PATH = Path(__file__).parent / "etat_stock_precedent.csv"
 COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
                        "Qté à commander (Cmd)", "Date réappro", "Type"]
 # Type « commande » : produit signalé (onglets 1-2) — compte dans le
@@ -209,6 +212,24 @@ def _signature_colonnes(colonnes) -> str:
     silencieusement après un changement de cadencier dans la même session."""
     empreinte = "|".join(str(c) for c in colonnes)
     return hashlib.md5(empreinte.encode("utf-8")).hexdigest()[:8]
+
+
+def charger_etat_stock() -> pd.DataFrame:
+    """Stock min/max de la dernière analyse (référence pour ne ressortir que
+    les lignes modifiées au cadencier suivant). Vide si première analyse."""
+    if ETAT_STOCK_PATH.exists():
+        try:
+            return pd.read_csv(ETAT_STOCK_PATH, dtype={"Code CIP": str})
+        except (pd.errors.ParserError, pd.errors.EmptyDataError):
+            return pd.DataFrame(columns=stock_rotation.COLONNES_ETAT_STOCK)
+    return pd.DataFrame(columns=stock_rotation.COLONNES_ETAT_STOCK)
+
+
+def sauver_etat_stock(tableau: pd.DataFrame) -> None:
+    """Mémorise le stock min/max courant comme référence pour la prochaine
+    analyse (comparaison des variations ≥ 10 %)."""
+    stock_rotation.etat_stock_a_enregistrer(tableau).to_csv(
+        ETAT_STOCK_PATH, index=False, encoding="utf-8")
 
 
 def charger_historique() -> pd.DataFrame:
@@ -388,9 +409,10 @@ with st.sidebar:
                    "cas — n'y touchez que si besoin.")
 
         st.markdown("**📦 Stock en rotation**")
-        _options_periode = ["annuelle", "3mois", "1mois", "lissee"]
+        _options_periode = ["annuelle", "6mois", "3mois", "1mois", "lissee"]
         _libelle_periode = {
             "annuelle": "Annuelle (moyenne 12 mois)",
+            "6mois": "Semestrielle (6 derniers mois)",
             "3mois": "Trimestrielle (3 derniers mois)",
             "1mois": "Mensuelle (dernier mois seul)",
             "lissee": "Lissée (réactive aux tendances)"}
@@ -735,9 +757,23 @@ if st.button("🔍 Lancer l'analyse", type="primary",
             consommation_defaut_mensuelle=conso_defaut,
             seuil_dormant_jours=seuil_dormant,
             rotation_min_commande_mensuelle=rotation_min_commande)
-        st.session_state["resultat_stock"] = stock_rotation.analyser_stock_rotation(
+        resultat_stock_obj = stock_rotation.analyser_stock_rotation(
             df_cad, {"cadencier": mapping_cadencier}, params_stock,
             date_analyse=date_analyse)
+        # Cadencier n+1 : marque les lignes dont le stock min/max a bougé de
+        # ≥ 10 % depuis la dernière analyse, puis mémorise l'état courant.
+        # (Pas en démo : ne pas polluer la référence réelle.)
+        if not mode_demo:
+            etat_precedent = charger_etat_stock()
+            tab, nb_mod, nb_nouv = stock_rotation.comparer_a_etat_precedent(
+                resultat_stock_obj.tableau, etat_precedent)
+            resultat_stock_obj.tableau = tab
+            resultat_stock_obj.resume["nb_modifiees"] = nb_mod
+            resultat_stock_obj.resume["nb_nouvelles"] = nb_nouv
+            resultat_stock_obj.resume["etat_precedent_existant"] = (
+                not etat_precedent.empty)
+            sauver_etat_stock(tab)
+        st.session_state["resultat_stock"] = resultat_stock_obj
     except Exception as e:  # jamais de plantage brut à l'écran
         st.error(f"Erreur — Gestion des stocks en rotation : {e}")
 
@@ -852,6 +888,26 @@ with module_stock:
                     "partir du cadencier (aucun lien avec les fichiers de "
                     "ruptures fournisseurs).")
 
+        # Cadencier n+1 : par défaut, on ne ressort que les lignes dont le
+        # stock min/max a changé de ≥ 10 % depuis la dernière analyse (évite
+        # de relire les mêmes lignes). Case pour tout réafficher.
+        base_stock = resultat_stock.tableau
+        seulement_modifiees = False
+        if ("_modifie" in base_stock.columns
+                and rs.get("etat_precedent_existant")):
+            nb_mod = int(rs.get("nb_modifiees", 0))
+            nb_nouv = int(rs.get("nb_nouvelles", 0))
+            st.info(f"🔁 **{nb_mod} ligne(s) modifiée(s)** depuis la dernière "
+                    f"analyse (dont {nb_nouv} nouvelle(s)) — variation du "
+                    "stock min/max ≥ 10 %. Les lignes inchangées sont "
+                    "masquées pour ne pas relire les mêmes produits.")
+            voir_tout = st.checkbox(
+                "Afficher aussi les lignes inchangées", value=False,
+                key="voir_tout_stock")
+            seulement_modifiees = not voir_tout
+        if seulement_modifiees:
+            base_stock = base_stock[base_stock["_modifie"]]
+
         # Recherche + filtre : trouver un produit sans faire défiler 3 500
         # lignes. Les colonnes d'analyse ne s'affichent qu'à la demande.
         c_rech, c_alerte, c_detail = st.columns([3, 2, 2])
@@ -873,7 +929,7 @@ with module_stock:
                 help="Ajoute classe ABC, consommation, tendance, "
                      "variabilité, cible de réassort et motif.")
 
-        tableau_stock = resultat_stock.tableau
+        tableau_stock = base_stock
         if recherche:
             terme = recherche.strip().upper()
             tableau_stock = tableau_stock[
@@ -896,6 +952,9 @@ with module_stock:
                                 "Qté à commander"]
             tableau_stock = tableau_stock[
                 [c for c in colonnes_simples if c in tableau_stock.columns]]
+        else:  # vue détaillée : masquer les colonnes techniques internes
+            tableau_stock = tableau_stock[
+                [c for c in tableau_stock.columns if not str(c).startswith("_")]]
         st.caption(f"{len(tableau_stock)} produit(s) affiché(s) — les "
                    "stocks sont en boîtes entières. La colonne « Stock min "
                    "conseillé (variabilité) » est indicative : elle majore le "
@@ -919,8 +978,15 @@ with module_stock:
             "Couverture très supérieure au stock max — trésorerie "
             "immobilisée. Envisager retour fournisseur ou arrêt de réassort.")
 
+        # L'export reflète le mode d'affichage : en cadencier n+1, le
+        # document ne contient que les lignes modifiées (≥ 10 %).
+        resultat_pour_export = resultat_stock
+        if seulement_modifiees:
+            resultat_pour_export = dataclasses.replace(
+                resultat_stock,
+                tableau=resultat_stock.tableau[resultat_stock.tableau["_modifie"]])
         excel_stock = stock_rotation.exporter_stock_rotation_excel(
-            resultat_stock)
+            resultat_pour_export)
         nom_excel_stock = commun.nom_fichier_export(
             "stock_rotation", date_analyse_resultats)
         st.download_button(
