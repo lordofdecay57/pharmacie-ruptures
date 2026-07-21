@@ -52,7 +52,7 @@ from commun import (JOURS_PAR_MOIS, SEUILS_VARIABILITE,
 # ---------------------------------------------------------------------------
 
 SEUIL_ALERTE_UNITES_DEFAUT = 10       # règle métier : sous ce seuil → cible = max
-PLANCHER_STOCK_MAX_UNITES = 10        # produit piloté : stock max jamais < 10
+SEUIL_MAX_SANS_MIN_UNITES = 10        # stock max < ce seuil → pas de stock min
 COUVERTURE_MIN_JOURS_DEFAUT = 14      # stock min = 14 jours de consommation
 COUVERTURE_MAX_JOURS_DEFAUT = 30      # stock max = 30 jours de consommation
 CONSOMMATION_DEFAUT_MENSUELLE = 0.0   # repli si aucun historique (0 = désactivé)
@@ -310,13 +310,6 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         if rotation <= 0 and stock <= 0:
             continue  # ni vente ni stock : rien à piloter
 
-        # Produits à rotation quasi nulle (≤ seuil boîtes/mois) : écartés du
-        # réassort automatique. Calculé TÔT car il conditionne le plancher du
-        # stock max ci-dessous (le plancher ne s'applique qu'aux produits
-        # réellement pilotés).
-        rotation_faible = (params.rotation_min_commande_mensuelle > 0
-                           and 0 < rotation <= params.rotation_min_commande_mensuelle)
-
         conso_jour = rotation / JOURS_PAR_MOIS
         stock_min = calculer_stock_min(conso_jour, params.couverture_min_jours,
                                        jours_weekend)
@@ -328,14 +321,20 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
         stock_min = math.ceil(round(stock_min, 6)) if stock_min > 0 else 0
         stock_max = math.ceil(round(stock_max, 6)) if stock_max > 0 else 0
         stock_max = max(stock_max, stock_min)
-        # Plancher métier (règle officine) : pour un produit PILOTÉ (hors
-        # rotation faible), le stock max ne descend jamais sous 10 boîtes —
-        # fond de rayon minimal garanti. Ne concerne pas les produits écartés
-        # du réassort.
-        plancher_applique = False
-        if not rotation_faible and 0 < stock_max < PLANCHER_STOCK_MAX_UNITES:
-            stock_max = PLANCHER_STOCK_MAX_UNITES
-            plancher_applique = True
+        # Règle officine : pour les lignes dont le stock max est < 10 boîtes,
+        # on SUPPRIME le stock min (pas de point de commande automatique) —
+        # ces petits produits ne sont pas pilotés par un minimum.
+        min_supprime = False
+        if 0 < stock_max < SEUIL_MAX_SANS_MIN_UNITES:
+            stock_min = 0
+            min_supprime = True
+
+        # Produits à rotation quasi nulle (≤ seuil boîtes/mois) : écartés du
+        # réassort automatique. Commander 1 boîte de centaines de références
+        # vendues moins d'1 fois/mois encombre la commande sans enjeu réel.
+        # Le produit reste visible (traçabilité) mais ne génère aucune Cmd.
+        rotation_faible = (params.rotation_min_commande_mensuelle > 0
+                           and 0 < rotation <= params.rotation_min_commande_mensuelle)
 
         # Colonne CONSEILLÉE (purement indicative, ne pilote pas la commande) :
         # stock min majoré d'une marge de sécurité pour les produits à ventes
@@ -379,9 +378,9 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
                       "la moyenne annuelle")
         if en_cours:
             motif += f" · {en_cours:g} déjà en commande (déduit du calcul)"
-        if plancher_applique and not rotation_faible and qte > 0:
-            motif += (f" · stock max relevé au plancher de "
-                      f"{PLANCHER_STOCK_MAX_UNITES} boîtes")
+        if min_supprime and not rotation_faible:
+            motif += (f" · stock min supprimé (stock max < "
+                      f"{SEUIL_MAX_SANS_MIN_UNITES})")
 
         lignes.append({
             "Alerte": alerte,
@@ -448,6 +447,77 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
 
 
 # ---------------------------------------------------------------------------
+# Comparaison à l'analyse précédente (cadencier n+1 : ne ressortir que les
+# lignes dont le stock min/max a changé d'au moins 10 %)
+# ---------------------------------------------------------------------------
+
+SEUIL_VARIATION_AFFICHAGE = 0.10  # variation min/max ≥ 10 % → ligne ré-affichée
+COLONNES_ETAT_STOCK = ["Code CIP", "Nom du produit", "Stock min (calculé)",
+                       "Stock max (calculé)"]
+
+
+def _cle_produit(cip, nom) -> str:
+    """Clé d'appariement stable entre deux analyses : CIP + libellé
+    normalisé. Combiner les deux évite les collisions quand plusieurs
+    produits DIFFÉRENTS partagent le même CIP (cas réel dans le cadencier) —
+    le CIP seul les confondrait et ferait ressortir des lignes à tort."""
+    cip = "" if cip is None else str(cip).strip()
+    return f"{cip}|{normaliser_libelle(nom)}"
+
+
+def comparer_a_etat_precedent(tableau: pd.DataFrame,
+                              etat_precedent: Optional[pd.DataFrame],
+                              seuil_pct: float = SEUIL_VARIATION_AFFICHAGE):
+    """Marque les lignes dont le stock min OU max a varié depuis la dernière
+    analyse. Ajoute une colonne booléenne ``_modifie``.
+
+    Une ligne est « modifiée » si elle est NOUVELLE (absente de l'analyse
+    précédente) ou si son stock min ou son stock max a bougé d'au moins
+    ``seuil_pct`` (10 % par défaut) en relatif. Permet de ne ré-afficher, au
+    cadencier suivant, que les lignes réellement modifiées.
+
+    ``etat_precedent`` vide ou None → tout est considéré modifié (première
+    analyse). Renvoie ``(tableau_annoté, nb_modifiees, nb_nouvelles)``.
+    """
+    df = tableau.copy()
+    if df.empty:
+        df["_modifie"] = pd.Series(dtype=bool)
+        return df, 0, 0
+    if etat_precedent is None or etat_precedent.empty:
+        df["_modifie"] = True
+        return df, len(df), len(df)
+
+    precedent = {}
+    for _, r in etat_precedent.iterrows():
+        precedent[_cle_produit(r.get("Code CIP", ""), r.get("Nom du produit", ""))] = (
+            parser_nombre(r.get("Stock min (calculé)")),
+            parser_nombre(r.get("Stock max (calculé)")))
+
+    modifies, nb_nouvelles = [], 0
+    for _, r in df.iterrows():
+        cle = _cle_produit(r["Code CIP"], r["Nom du produit"])
+        if cle not in precedent:
+            modifies.append(True)
+            nb_nouvelles += 1
+            continue
+        old_min, old_max = precedent[cle]
+        var_min = abs(r["Stock min (calculé)"] - old_min) / max(abs(old_min), 1)
+        var_max = abs(r["Stock max (calculé)"] - old_max) / max(abs(old_max), 1)
+        modifies.append(var_min >= seuil_pct or var_max >= seuil_pct)
+
+    df["_modifie"] = modifies
+    return df, int(sum(modifies)), nb_nouvelles
+
+
+def etat_stock_a_enregistrer(tableau: pd.DataFrame) -> pd.DataFrame:
+    """Extrait de quoi mémoriser l'analyse courante (référence pour la
+    prochaine comparaison) : code, nom, stock min et max."""
+    if tableau.empty:
+        return pd.DataFrame(columns=COLONNES_ETAT_STOCK)
+    return tableau.reindex(columns=COLONNES_ETAT_STOCK).copy()
+
+
+# ---------------------------------------------------------------------------
 # Export Excel dédié
 # ---------------------------------------------------------------------------
 
@@ -464,6 +534,8 @@ def exporter_stock_rotation_excel(resultat: ResultatStockRotation) -> bytes:
     tableau = resultat.tableau
     if not tableau.empty and "Alerte" in tableau.columns:
         tableau = tableau[tableau["Alerte"] != "⚪ Rotation faible"]
+    # Retire les colonnes techniques internes (préfixe _) du document.
+    tableau = tableau[[c for c in tableau.columns if not str(c).startswith("_")]]
     return exporter_classeur(
         [("Stock min-max", tableau),
          ("Stock dormant", resultat.dormants)],
