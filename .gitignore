@@ -4,3 +4,10 @@ etat_stock_precedent.csv
 __pycache__/
 .pytest_cache/
 etat_stock_precedent.sig
+
+# Application web (Next.js / Supabase)
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/.env*.local
