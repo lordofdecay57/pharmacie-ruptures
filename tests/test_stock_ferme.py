@@ -15,11 +15,11 @@ test n'a besoin du cadencier ni des fichiers de ruptures fournisseurs.
 
 from datetime import date
 
-import pandas as pd
 import pytest
 
 from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
-                         STATUT_INCONNU, STATUT_OK, STATUT_PERIME,
+                         STATUT_IMMINENT, STATUT_INCONNU, STATUT_OK,
+                         STATUT_PERIME,
                          STATUT_VIGILANCE, ajouter_entree, charger_inventaire,
                          charger_repertoire, cip_depuis_gtin, cle_lot,
                          exporter_csv, exporter_pdf, inventaire_affichable,
@@ -81,6 +81,22 @@ class TestDataMatrix:
         assert code.lot == "LOT42"
         assert code.peremption == date(2027, 11, 30)
 
+    @pytest.mark.parametrize("code,lot,serie", [
+        # Cas réel : lot PUIS série, aucun séparateur émis.
+        ("010340093700001317270930101234AB21987654321", "1234AB", "987654321"),
+        # Le n° de série ne doit pas être amputé de son dernier caractère.
+        ("01034009123456782199988877710LOT9", "LOT9", "999888777"),
+        # Rien après le lot : il court jusqu'au bout.
+        ("010340091234567817271130" + "10ABC123", "ABC123", ""),
+        # Lot entièrement numérique, indiscernable d'un identifiant.
+        ("010340091234567817271130" + "10220518", "220518", ""),
+    ])
+    def test_lot_et_serie_sans_separateur(self, code, lot, serie):
+        """Sans FNC1, la lecture retenue est celle qui n'abandonne aucun
+        caractère inexpliqué — pas la première coupe plausible."""
+        lu = parser_datamatrix(code)
+        assert (lu.lot, lu.serie) == (lot, serie)
+
     def test_jour_00_signifie_fin_de_mois(self):
         code = parser_datamatrix("0103400912345678" + "17270300")
         assert code.peremption == date(2027, 3, 31)
@@ -120,6 +136,17 @@ class TestCodeScanne:
         code = parser_code_scanne("0103400912345678" + "17280229")
         assert code.format == "datamatrix"
         assert code.peremption == date(2028, 2, 29)
+
+    @pytest.mark.parametrize("saisie", ["3400 912 345 678", "3400-912-345-678",
+                                        "3400.912.345.678"])
+    def test_code_recopie_a_la_main_avec_separateurs(self, saisie):
+        """Un CIP relevé sur la boîte est souvent espacé ou ponctué."""
+        code = parser_code_scanne(saisie)
+        assert code.format == "cip13" and code.cip == "3400912345678"
+
+    @pytest.mark.parametrize("saisie", ["DOLIPRANE 1000", "12 34", "AB123456789"])
+    def test_texte_libre_non_pris_pour_un_code(self, saisie):
+        assert not parser_code_scanne(saisie).reconnu
 
     def test_contenu_inconnu_signale_sans_perte(self):
         code = parser_code_scanne("DOLIPRANE 1000")
@@ -329,10 +356,16 @@ class TestCleLot:
 
 class TestStatutPeremption:
     @pytest.mark.parametrize("peremption,attendu", [
-        (date(2026, 7, 30), STATUT_PERIME),
-        (date(2026, 8, 15), STATUT_CRITIQUE),     # 15 j
+        (date(2026, 7, 30), STATUT_PERIME),       # hier
+        (date(2026, 7, 31), STATUT_IMMINENT),     # aujourd'hui : pas périmé
+        (date(2026, 8, 15), STATUT_IMMINENT),     # 15 j
+        (date(2026, 8, 30), STATUT_IMMINENT),     # 30 j pile
+        (date(2026, 8, 31), STATUT_CRITIQUE),     # 31 j
         (date(2026, 10, 29), STATUT_CRITIQUE),    # 90 j pile
+        (date(2026, 10, 30), STATUT_VIGILANCE),   # 91 j
         (date(2026, 11, 30), STATUT_VIGILANCE),   # 122 j
+        (date(2027, 1, 27), STATUT_VIGILANCE),    # 180 j pile
+        (date(2027, 1, 28), STATUT_OK),           # 181 j
         (date(2027, 6, 30), STATUT_OK),
         (None, STATUT_INCONNU),
     ])
@@ -364,6 +397,22 @@ class TestInventaireAffichable:
     def test_inventaire_vide(self):
         assert inventaire_affichable(inventaire_vide(), AUJOURDHUI).empty
 
+    def test_cellules_vides_d_un_fichier_ne_s_affichent_pas_en_nan(self):
+        """Un CSV relu porte des NaN : ils doivent rester des cases vides,
+        pas devenir « nan » à l'écran ni « None » à l'impression."""
+        import pandas as pd
+        brut = pd.DataFrame([{"Nom du produit": "PRÉPARATION", "Dosage": None,
+                              "Code CIP": None, "Lot": None, "Boîtes": 2,
+                              "Unités par boîte": 0, "Unités en vrac": 0,
+                              "Total unités": 0, "Péremption": date(2027, 1, 1),
+                              "Enregistré le": AUJOURDHUI}])
+        vue = inventaire_affichable(brut, AUJOURDHUI)
+        assert vue.iloc[0]["Code CIP"] == "" and vue.iloc[0]["Lot"] == ""
+        texte = exporter_csv(brut, AUJOURDHUI).decode("utf-8-sig")
+        assert "nan" not in texte.lower() and "None" not in texte
+        # Un produit sans CIP compte quand même comme une référence.
+        assert resume_inventaire(brut, AUJOURDHUI)["references"] == 1
+
 
 class TestResume:
     def test_compteurs(self):
@@ -382,8 +431,25 @@ class TestResume:
         assert resume["perimes"] == 1
         assert resume["sans_date"] == 1
 
+    def test_compteurs_de_peremption_par_palier(self):
+        inv = inventaire_vide()
+        for lot, peremption in (("P", date(2026, 7, 1)),     # périmé
+                                ("I", date(2026, 8, 10)),    # < 1 mois
+                                ("C", date(2026, 9, 30)),    # < 3 mois
+                                ("V", date(2026, 12, 31)),   # < 6 mois
+                                ("O", date(2028, 1, 31))):   # OK
+            inv = ajouter_entree(inv, _entree(lot=lot, peremption=peremption),
+                                 AUJOURDHUI)
+        resume = resume_inventaire(inv, AUJOURDHUI)
+        assert resume["perimes"] == 1
+        assert resume["imminents"] == 1
+        assert resume["critiques"] == 1
+        assert resume["vigilance"] == 1
+        assert resume["lignes"] == 5
+
     def test_resume_vide(self):
-        assert resume_inventaire(inventaire_vide(), AUJOURDHUI)["lignes"] == 0
+        vide = resume_inventaire(inventaire_vide(), AUJOURDHUI)
+        assert vide["lignes"] == 0 and vide["imminents"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -450,10 +516,15 @@ class TestRepertoire:
 
 class TestExports:
     def _inventaire(self):
+        """Un lot par palier de péremption, pour couvrir toute la légende."""
         inv = ajouter_entree(inventaire_vide(), _entree(boites=2), AUJOURDHUI)
-        return ajouter_entree(inv, _entree(lot="B2",
-                                           peremption=date(2026, 8, 10)),
-                              AUJOURDHUI)
+        for lot, peremption in (("B2", date(2026, 8, 10)),    # < 1 mois
+                                ("C3", date(2026, 9, 30)),    # < 3 mois
+                                ("D4", date(2026, 12, 31)),   # < 6 mois
+                                ("E5", date(2026, 7, 1))):    # périmé
+            inv = ajouter_entree(inv, _entree(lot=lot, peremption=peremption),
+                                 AUJOURDHUI)
+        return inv
 
     def test_csv_contient_les_informations_demandees(self):
         texte = exporter_csv(self._inventaire(), AUJOURDHUI).decode("utf-8-sig")
@@ -468,7 +539,14 @@ class TestExports:
     def test_csv_trie_la_peremption_la_plus_proche_en_tete(self):
         lignes = exporter_csv(self._inventaire(),
                               AUJOURDHUI).decode("utf-8-sig").splitlines()
-        assert "10/08/2026" in lignes[1]
+        assert "01/07/2026" in lignes[1]   # le lot périmé d'abord
+        assert "10/08/2026" in lignes[2]   # puis le plus proche
+
+    def test_csv_porte_les_quatre_paliers(self):
+        texte = exporter_csv(self._inventaire(), AUJOURDHUI).decode("utf-8-sig")
+        for statut in (STATUT_PERIME, STATUT_IMMINENT, STATUT_CRITIQUE,
+                       STATUT_VIGILANCE, STATUT_OK):
+            assert statut in texte
 
     def test_csv_d_un_inventaire_vide(self):
         texte = exporter_csv(inventaire_vide(), AUJOURDHUI).decode("utf-8-sig")
@@ -488,10 +566,36 @@ class TestExports:
         contenu = exporter_pdf(self._inventaire(), aujourdhui=AUJOURDHUI)
         with pdfplumber.open(pytest.importorskip("io").BytesIO(contenu)) as pdf:
             texte = "\n".join(p.extract_text() or "" for p in pdf.pages)
-        assert "< 3 mois" in texte and "OK" in texte
-        assert not any(c in texte for c in "⛔🔴🟡🟢⚪")
+        for palier in ("PÉRIMÉ", "< 1 mois", "< 3 mois", "< 6 mois", "OK"):
+            assert palier in texte
+        assert not any(c in texte for c in "⛔🔴🟠🟡🟢⚪")
         assert "DOLIPRANE" in texte and "3400912345678" in texte
         assert "10/08/2026" in texte
+
+    def test_pdf_replie_les_noms_longs(self):
+        """Un libellé plus large que sa colonne doit se replier, pas déborder
+        sur les colonnes voisines (sinon la ligne imprimée est illisible)."""
+        pytest.importorskip("reportlab")
+        pdfplumber = pytest.importorskip("pdfplumber")
+        import io as _io
+        long = ("PARACETAMOL BIOGARAN CONSEIL 1000 mg comprimé pelliculé "
+                "sécable boîte de 8")
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(nom=long, boites=2), AUJOURDHUI)
+        with pdfplumber.open(_io.BytesIO(
+                exporter_pdf(inv, aujourdhui=AUJOURDHUI))) as pdf:
+            texte = pdf.pages[0].extract_text()
+        # Le code CIP et la quantité restent intacts, donc non chevauchés.
+        assert "3400912345678" in texte
+        assert "comprimé pelliculé sécable boîte de 8" in texte
+
+    def test_pdf_echappe_les_caracteres_xml(self):
+        """« & » et « < » sont du balisage pour ReportLab : mal échappés,
+        ils feraient échouer la génération."""
+        pytest.importorskip("reportlab")
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(nom="AMOXICILLINE & <ARROW>"), AUJOURDHUI)
+        assert exporter_pdf(inv, aujourdhui=AUJOURDHUI).startswith(b"%PDF")
 
     def test_pdf_d_un_inventaire_vide(self):
         pytest.importorskip("reportlab")

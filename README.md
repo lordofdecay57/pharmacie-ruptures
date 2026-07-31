@@ -282,13 +282,14 @@ l'unité d'enregistrement est donc le **lot**, identifié par
 L'inventaire est toujours trié par péremption la plus proche : c'est l'ordre
 dans lequel on veut traiter les boîtes, et celui de la liste imprimée.
 
-| Statut | Signification |
-|---|---|
-| ⛔ Périmé | date dépassée — à retirer du stock |
-| 🔴 < 3 mois | à écouler ou à remplacer sans tarder |
-| 🟡 < 6 mois | à surveiller |
-| 🟢 OK | plus de 6 mois de marge |
-| ⚪ Sans date | péremption non renseignée |
+| Statut | Seuil | Signification |
+|---|---|---|
+| ⛔ Périmé | date dépassée | à retirer du stock |
+| 🔴 < 1 mois | ≤ 30 j | la boîte ne passera pas le mois — action immédiate |
+| 🟠 < 3 mois | ≤ 90 j | retrait ou remplacement à préparer |
+| 🟡 < 6 mois | ≤ 180 j | à écouler en priorité |
+| 🟢 OK | > 180 j | plus de six mois de marge |
+| ⚪ Sans date | — | péremption non renseignée |
 
 ### Saisie : douchette ou clavier
 
@@ -304,13 +305,24 @@ Trois entrées possibles, dans l'ordre de rapidité :
    produits sans code-barres exploitable (préparations, dispositifs).
 
 Le champ de scan se vide tout seul après chaque lecture, pour enchaîner les
-boîtes sans intervention. Détails techniques pris en charge : préfixes de
-symbologie (`]d2`, `]C1`…), séparateur FNC1 **absent** sur certaines
-douchettes (le n° de lot ne doit pas avaler la péremption qui le suit),
-convention GS1 `JJ = 00` (fin de mois), et jour hors calendrier (`31/02`,
-vu sur des codes mal générés) ramené au dernier jour du mois plutôt que
-rejeté — perdre la péremption d'une boîte coûterait plus cher que ce jour
-d'écart.
+boîtes sans intervention. Détails techniques pris en charge :
+
+- **préfixes de symbologie** ajoutés par certaines douchettes (`]d2`, `]C1`,
+  `]e0`, `]Q3`) ;
+- **séparateur FNC1 absent** — plusieurs douchettes ne l'émettent pas. La
+  lecture retenue est alors celle qui n'abandonne **aucun caractère
+  inexpliqué**, et non la première coupe plausible : sans cette précaution,
+  un lot `LOT42` suivi d'une péremption se lit `LOT4`, et un n° de série se
+  retrouve amputé de son dernier chiffre ;
+- **convention GS1 `JJ = 00`** (fin de mois) et **jour hors calendrier**
+  (`31/02`, vu sur des codes mal générés) ramené au dernier jour du mois
+  plutôt que rejeté — perdre la péremption d'une boîte coûterait plus cher
+  que ce jour d'écart ;
+- **code recopié à la main** avec espaces, points ou tirets
+  (`3400 912 345 678`), sans confondre un libellé chiffré avec un code.
+
+Si une fiche est ouverte et qu'une **autre** boîte est scannée avant de la
+valider, l'abandon est signalé — pas silencieux.
 
 ### Comptage en boîtes ET à l'unité
 
@@ -498,12 +510,13 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-288 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+309 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles
 (seuil prioritaire sur le stock min, non-régression sur les produits
 arrêtés, paramètres reconfigurables). Cas de référence Module Stock fermé :
 Data Matrix sans séparateur FNC1 (`…10LOT4217271130` → lot `LOT42`, et non
-`LOT4`), deux péremptions du même CIP donnant deux lignes, PDF lisible sans
-émoji.
+`LOT4` ; `…101234AB21987654321` → lot `1234AB` **et** série `987654321`),
+deux péremptions du même CIP donnant deux lignes, PDF lisible sans émoji et
+repliant les libellés trop longs.

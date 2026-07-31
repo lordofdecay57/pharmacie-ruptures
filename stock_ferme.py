@@ -47,13 +47,18 @@ COLONNES_STOCK_FERME = [
 COLONNES_REPERTOIRE = ["Code CIP", "Nom du produit", "Dosage",
                        "Unités par boîte"]
 
-#: Une péremption sous ce seuil est signalée en rouge (retrait à préparer).
+#: Péremption imminente : la boîte ne passera pas le mois. C'est le palier
+#: qui déclenche une action immédiate — retrait, remplacement, ou emploi en
+#: priorité absolue.
+SEUIL_PEREMPTION_IMMINENTE_JOURS = 30
+#: Sous ce seuil, le retrait est à préparer.
 SEUIL_PEREMPTION_CRITIQUE_JOURS = 90
 #: Sous ce seuil, la ligne est mise en vigilance (à écouler en priorité).
 SEUIL_PEREMPTION_VIGILANCE_JOURS = 180
 
 STATUT_PERIME = "⛔ Périmé"
-STATUT_CRITIQUE = "🔴 < 3 mois"
+STATUT_IMMINENT = "🔴 < 1 mois"
+STATUT_CRITIQUE = "🟠 < 3 mois"
 STATUT_VIGILANCE = "🟡 < 6 mois"
 STATUT_OK = "🟢 OK"
 STATUT_INCONNU = "⚪ Sans date"
@@ -74,8 +79,14 @@ _AI_FIXES = {
     "16": 6, "17": 6, "20": 2,
 }
 #: Identifiants de longueur VARIABLE, terminés par FNC1.
+#:
+#: L'identifiant ``710`` (CIP français) est volontairement absent : quand la
+#: douchette n'émet pas le FNC1, il est indissociable d'un chiffre suivi de
+#: ``10`` (n° de lot), et il ferait alors couper les numéros de série d'un
+#: caractère trop tôt. Les boîtes françaises portent de toute façon le CIP
+#: dans le GTIN de l'identifiant ``01``.
 _AI_VARIABLES = {"10": "lot", "21": "serie", "30": "quantite",
-                 "240": "reference", "710": "cip_fr"}
+                 "240": "reference"}
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +173,26 @@ def _suite_de_champs_fixes(texte: str) -> bool:
     return True
 
 
+def _suite_avec_champ_variable_final(texte: str) -> bool:
+    """Comme ci-dessus, mais en tolérant UN champ variable en dernier.
+
+    Cas courant : ``…10<lot>21<n° de série>`` sans séparateur. Le n° de
+    série court jusqu'à la fin, donc aucune lecture « tout en champs fixes »
+    n'existe.
+    """
+    while texte:
+        for cle in (texte[:2], texte[:3]):
+            # Un identifiant suivi de rien ne serait pas un champ mais la
+            # fin du champ précédent, coupée au mauvais endroit.
+            if cle in _AI_VARIABLES and len(texte) > len(cle):
+                return True  # ce champ court jusqu'à la fin
+        longueur = _AI_FIXES.get(texte[:2])
+        if longueur is None or len(texte) < 2 + longueur:
+            return False
+        texte = texte[2 + longueur:]
+    return True
+
+
 def _fin_champ_variable(reste: str) -> int:
     """Longueur d'un champ variable quand le séparateur FNC1 est absent.
 
@@ -169,15 +200,22 @@ def _fin_champ_variable(reste: str) -> int:
     identifiant GS1 qui *ressemble* à un en-tête tronquerait le numéro de
     lot dès qu'il contient « 21 » ou « 17 » (« LOT42 » suivi de « 17… » se
     lirait « LOT4 »). On ne coupe donc qu'à un endroit où **tout le reste**
-    s'interprète en champs de longueur fixe : c'est la seule lecture qui ne
-    laisse aucun caractère inexpliqué.
+    s'explique.
+
+    Deux lectures, dans cet ordre : d'abord celle qui ne laisse que des
+    champs de longueur fixe — non ambiguë, donc prioritaire ; à défaut,
+    celle qui tolère un dernier champ variable (``21<n° de série>``).
     """
     coupe = reste.find(_FNC1)
     if coupe != -1:
         return coupe
-    for i in range(1, len(reste) + 1):
-        if _suite_de_champs_fixes(reste[i:]):
-            return i
+    # La borne s'arrête AVANT la fin : un reste vide satisfait trivialement
+    # les deux lectures et ferait toujours gagner « le champ va jusqu'au
+    # bout », qui est justement le repli de dernier recours.
+    for valide in (_suite_de_champs_fixes, _suite_avec_champ_variable_final):
+        for i in range(1, len(reste)):
+            if valide(reste[i:]):
+                return i
     return len(reste)
 
 
@@ -223,8 +261,6 @@ def parser_datamatrix(brut: str) -> Optional[CodeScanne]:
                 code.lot = valeur.strip()
             elif champ == "serie":
                 code.serie = valeur.strip()
-            elif champ == "cip_fr" and not code.cip:
-                code.cip = re.sub(r"\D", "", valeur)
         else:
             break
 
@@ -256,13 +292,18 @@ def parser_code_scanne(brut: str) -> CodeScanne:
     if code is not None:
         return code
 
+    # Un code recopié à la main depuis la boîte est souvent espacé ou
+    # ponctué (« 3400 912 345 678 ») : seuls les séparateurs sont tolérés,
+    # pour ne pas confondre un libellé chiffré avec un code produit.
+    if not re.fullmatch(r"[\d\s.\-]+", texte):
+        return CodeScanne(brut=brut or "")
     chiffres = re.sub(r"\D", "", texte)
-    if len(chiffres) == 13 and chiffres == texte:
+    if len(chiffres) == 13:
         return CodeScanne(cip=chiffres, format="cip13", brut=brut or "")
-    if len(chiffres) == 14 and chiffres == texte:
+    if len(chiffres) == 14:
         return CodeScanne(cip=cip_depuis_gtin(chiffres), gtin=chiffres,
                           format="cip13", brut=brut or "")
-    if len(chiffres) == 7 and chiffres == texte:
+    if len(chiffres) == 7:
         return CodeScanne(cip=chiffres, format="cip7", brut=brut or "")
     return CodeScanne(brut=brut or "")
 
@@ -334,6 +375,14 @@ class EntreeStock:
         self.nom = " ".join(str(self.nom or "").split())
         self.dosage = " ".join(str(self.dosage or "").split())
         self.lot = str(self.lot or "").strip()
+
+
+def _texte(valeur) -> str:
+    """Cellule → texte propre. Les vides d'un fichier relu valent NaN, qu'il
+    ne faut ni afficher (« nan ») ni traiter comme une valeur présente."""
+    if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
+        return ""
+    return " ".join(str(valeur).split())
 
 
 def total_unites(boites: int, unites_par_boite: int, unites_vrac: int) -> int:
@@ -472,6 +521,8 @@ def statut_peremption(peremption, aujourdhui: Optional[date] = None) -> str:
         return STATUT_INCONNU
     if jours < 0:
         return STATUT_PERIME
+    if jours <= SEUIL_PEREMPTION_IMMINENTE_JOURS:
+        return STATUT_IMMINENT
     if jours <= SEUIL_PEREMPTION_CRITIQUE_JOURS:
         return STATUT_CRITIQUE
     if jours <= SEUIL_PEREMPTION_VIGILANCE_JOURS:
@@ -491,6 +542,10 @@ def inventaire_affichable(inventaire: pd.DataFrame,
         return inventaire_vide().assign(**{"Statut": [], "Jours restants": []})
 
     tableau = inventaire.reindex(columns=COLONNES_STOCK_FERME).copy()
+    # Une cellule vide relue d'un fichier vaut NaN : sans ce nettoyage, elle
+    # s'afficherait « nan » dans le tableau et « None » dans le PDF.
+    for colonne in ("Nom du produit", "Dosage", "Code CIP", "Lot"):
+        tableau[colonne] = tableau[colonne].map(_texte)
     tableau["Péremption"] = tableau["Péremption"].map(parser_peremption_saisie)
     tableau["Statut"] = tableau["Péremption"].map(
         lambda p: statut_peremption(p, aujourdhui))
@@ -549,9 +604,15 @@ def resume_inventaire(inventaire: pd.DataFrame,
     tableau = inventaire_affichable(inventaire, aujourdhui)
     if tableau.empty:
         return {"lignes": 0, "references": 0, "boites": 0, "unites": 0,
-                "perimes": 0, "critiques": 0, "vigilance": 0, "sans_date": 0}
+                "perimes": 0, "imminents": 0, "critiques": 0, "vigilance": 0,
+                "sans_date": 0}
+    # Une référence = un CIP ; les produits sans code (préparations,
+    # dispositifs) comptent par leur libellé. On passe par `_texte` car une
+    # cellule vide relue d'un fichier vaut NaN — qui est *vrai* en Python et
+    # ferait donc échouer un simple `a or b`.
     codes = tableau.apply(
-        lambda l: l["Code CIP"] or l["Nom du produit"].upper(), axis=1)
+        lambda l: (_texte(l["Code CIP"])
+                   or _texte(l["Nom du produit"]).upper()), axis=1)
     statuts = tableau["Statut"]
     return {
         "lignes": len(tableau),
@@ -561,6 +622,7 @@ def resume_inventaire(inventaire: pd.DataFrame,
         "unites": int(pd.to_numeric(tableau["Total unités"], errors="coerce")
                       .fillna(0).sum()),
         "perimes": int((statuts == STATUT_PERIME).sum()),
+        "imminents": int((statuts == STATUT_IMMINENT).sum()),
         "critiques": int((statuts == STATUT_CRITIQUE).sum()),
         "vigilance": int((statuts == STATUT_VIGILANCE).sum()),
         "sans_date": int((statuts == STATUT_INCONNU).sum()),
@@ -730,8 +792,9 @@ def exporter_csv(inventaire: pd.DataFrame,
 
 #: Teintes de fond des lignes imprimées, par statut de péremption.
 _COULEURS_PDF = {
-    STATUT_PERIME: (0.96, 0.80, 0.80),
-    STATUT_CRITIQUE: (0.97, 0.85, 0.72),
+    STATUT_PERIME: (0.94, 0.72, 0.72),
+    STATUT_IMMINENT: (0.97, 0.80, 0.76),
+    STATUT_CRITIQUE: (0.99, 0.88, 0.76),
     STATUT_VIGILANCE: (1.00, 0.94, 0.75),
 }
 
@@ -741,6 +804,7 @@ _COULEURS_PDF = {
 #: blanc.
 _STATUT_PDF = {
     STATUT_PERIME: "PÉRIMÉ",
+    STATUT_IMMINENT: "< 1 mois",
     STATUT_CRITIQUE: "< 3 mois",
     STATUT_VIGILANCE: "< 6 mois",
     STATUT_OK: "OK",
@@ -759,10 +823,11 @@ def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
         from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
                                         Table, TableStyle)
+        from xml.sax.saxutils import escape
     except ImportError:
         raise ValueError("Impression PDF indisponible : lancez "
                          "« pip install reportlab » puis réessayez.")
@@ -783,6 +848,7 @@ def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
             f"Édité le {aujourdhui:%d/%m/%Y} — {resume['lignes']} lot(s), "
             f"{resume['references']} référence(s), {resume['boites']} boîte(s), "
             f"{resume['unites']} unité(s) · périmés : {resume['perimes']} · "
+            f"moins d'un mois : {resume['imminents']} · "
             f"moins de 3 mois : {resume['critiques']}",
             styles["Normal"]),
         Spacer(1, 6 * mm),
@@ -796,6 +862,18 @@ def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
     imprime = tableau.astype(str).copy()
     imprime["Statut"] = tableau["Statut"].map(
         lambda s: _STATUT_PDF.get(s, str(s)))
+
+    # Les libellés de médicaments dépassent souvent la largeur de colonne
+    # (« PARACETAMOL BIOGARAN CONSEIL 1000 mg comprimé pelliculé sécable »).
+    # Une chaîne brute déborderait sur les colonnes voisines et rendrait la
+    # ligne illisible : les colonnes de texte libre passent en paragraphes,
+    # qui se replient sur plusieurs lignes.
+    style_cellule = ParagraphStyle("cellule", fontName="Helvetica",
+                                   fontSize=7.5, leading=9)
+    repliees = ("Nom du produit", "Dosage", "Lot")
+    for colonne in repliees:
+        imprime[colonne] = imprime[colonne].map(
+            lambda v: Paragraph(escape(v), style_cellule))
     donnees = [list(imprime.columns)] + imprime.values.tolist()
     largeurs = [22 * mm, 68 * mm, 30 * mm, 30 * mm, 18 * mm, 18 * mm,
                 26 * mm, 30 * mm]

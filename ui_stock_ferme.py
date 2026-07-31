@@ -58,6 +58,10 @@ def _enregistrer(inventaire=None, repertoire=None) -> None:
     if inventaire is not None:
         st.session_state["sf_inventaire"] = inventaire
         stock_ferme.sauver_inventaire(inventaire, INVENTAIRE_PATH)
+        # Change la clé de l'éditeur : ses corrections en cours ne doivent
+        # pas être rejouées sur le tableau qui vient d'être réenregistré.
+        st.session_state["sf_generation"] = (
+            st.session_state.get("sf_generation", 0) + 1)
     if repertoire is not None:
         st.session_state["sf_repertoire"] = repertoire
         stock_ferme.sauver_repertoire(repertoire, REPERTOIRE_PATH)
@@ -99,6 +103,13 @@ def _traiter_scan() -> None:
         return
 
     # Sinon : formulaire de complément, pré-rempli avec ce qu'on sait déjà.
+    # Une fiche déjà ouverte sur un AUTRE produit serait remplacée sans
+    # bruit : on le signale, sinon la boîte précédente est oubliée.
+    precedente = st.session_state.get("sf_en_attente")
+    abandonnee = (precedente is not None
+                  and (precedente.get("cip"), precedente.get("brut"))
+                  != (code.cip, code.brut))
+
     st.session_state["sf_en_attente"] = {
         "cip": code.cip,
         "nom": (connu or {}).get("nom", ""),
@@ -109,11 +120,16 @@ def _traiter_scan() -> None:
         "brut": code.brut,
         "reconnu": code.reconnu,
     }
+    rappel = (" La fiche précédente, non validée, a été abandonnée."
+              if abandonnee else "")
     if not code.reconnu:
         st.session_state["sf_message"] = (
             "avertissement",
             f"Code non reconnu : « {code.brut} ». Complétez la fiche "
-            "ci-dessous — elle sera mémorisée pour les prochains scans.")
+            "ci-dessous — elle sera mémorisée pour les prochains scans."
+            + rappel)
+    elif abandonnee:
+        st.session_state["sf_message"] = ("avertissement", rappel.strip())
     else:
         st.session_state["sf_message"] = None
 
@@ -217,7 +233,10 @@ def _bandeau_kpi(resume: dict, tuile) -> None:
         tuile("⛔ Périmés", resume["perimes"],
               "critical" if resume["perimes"] else "",
               sous="à retirer du stock"),
-        tuile("🔴 Moins de 3 mois", resume["critiques"],
+        tuile("🔴 Moins d'un mois", resume["imminents"],
+              "critical" if resume["imminents"] else "",
+              sous="ne passeront pas le mois"),
+        tuile("🟠 Moins de 3 mois", resume["critiques"],
               "serious" if resume["critiques"] else "",
               sous=f'{resume["vigilance"]} autre(s) sous 6 mois'),
     ]) + "</div>", unsafe_allow_html=True)
@@ -231,9 +250,14 @@ def _tableau_editable(inventaire: pd.DataFrame,
         st.info("Inventaire vide — scannez une première boîte ci-dessus.")
         return None
 
+    # L'éditeur mémorise ses corrections en cours dans l'état de session, sous
+    # sa clé. Après un enregistrement, l'inventaire a changé de forme (lignes
+    # supprimées, ordre revu par échéance) : réutiliser la même clé
+    # réappliquerait les anciennes corrections aux NOUVELLES lignes. On repart
+    # donc d'un éditeur neuf à chaque enregistrement.
     edite = st.data_editor(
         vue, hide_index=True, use_container_width=True, num_rows="dynamic",
-        key="sf_editeur",
+        key=f"sf_editeur_{st.session_state.get('sf_generation', 0)}",
         disabled=["Statut", "Code CIP", "Total unités", "Jours restants",
                   "Enregistré le"],
         column_config={
