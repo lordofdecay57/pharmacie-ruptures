@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "3.1"
+VERSION_APP = "3.2"
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
@@ -136,9 +136,10 @@ st.markdown(f"""
 <div class="hero">
   <h1>💊 Pilotage pharmacie — stock &amp; ruptures
     <span class="version">v{VERSION_APP}</span></h1>
-  <p>Deux modules indépendants à partir des mêmes fichiers : le <b>stock en
-  rotation</b> (stock min/max par produit) et les <b>ruptures fournisseurs</b>
-  (GPNC/UNIPHARMA → fichier Excel de commande).</p>
+  <p>Trois modules indépendants : le <b>stock en rotation</b> (stock min/max
+  par produit) et les <b>ruptures fournisseurs</b> (GPNC/UNIPHARMA → fichier
+  Excel de commande), tous deux issus du cadencier, plus le <b>stock fermé</b>
+  (inventaire scanné boîte par boîte, avec péremptions).</p>
   <span class="badge">🔒 Application 100 % locale — vos données ne quittent pas ce poste</span>
 </div>
 """, unsafe_allow_html=True)
@@ -160,6 +161,29 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.caption(legende)
 
+
+# ---------------------------------------------------------------------------
+# Choix de l'espace de travail
+#
+# Le stock fermé (Module 3) ne travaille sur AUCUN fichier déposé : il a son
+# propre inventaire et ses propres exports. Le brancher ici, avant l'étape 1,
+# lui évite d'être bloqué par les garde-fous « déposez d'abord le cadencier »
+# du parcours principal — et matérialise son indépendance.
+# ---------------------------------------------------------------------------
+
+ESPACE_CADENCIER = "📈 Stock en rotation & ruptures"
+ESPACE_STOCK_FERME = "🔒 Stock fermé (inventaire scanné)"
+
+espace = st.radio(
+    "Espace de travail", [ESPACE_CADENCIER, ESPACE_STOCK_FERME],
+    horizontal=True, label_visibility="collapsed", key="espace_travail",
+    captions=["À partir du cadencier et des fichiers de ruptures.",
+              "Inventaire à part, tenu à la douchette (boîte par boîte)."])
+
+if espace == ESPACE_STOCK_FERME:
+    import ui_stock_ferme
+    ui_stock_ferme.rendre(_etape, _tuile_kpi)
+    st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
 # ---------------------------------------------------------------------------
 # Config (mémorisation du mapping des colonnes + des réglages des 2 modules)

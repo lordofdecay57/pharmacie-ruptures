@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 etat_stock_precedent.sig
 
+# Module « Stock fermé » — inventaire local de la pharmacie
+stock_ferme.csv
+stock_ferme_produits.csv
+
 # Application web (Next.js / Supabase)
 web/node_modules/
 web/.next/
