@@ -1,12 +1,14 @@
 {
-  "name": "web",
+  "name": "pilotage-pharmacie-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "verifier": "vitest run && tsc --noEmit && tsx scripts/comparer-python.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.7.0",

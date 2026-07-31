@@ -26,7 +26,7 @@ const MAPPING: MappingCadencier = {
   ventes: ["Ventes avril", "Ventes mai", "Ventes juin"],
 };
 
-const trouver = (tableau: { nomProduit: string }[], nom: string) =>
+const trouver = <T extends { nomProduit: string }>(tableau: T[], nom: string): T =>
   tableau.find((l) => l.nomProduit === nom)!;
 
 // ---------------------------------------------------------------------------
