@@ -3,7 +3,12 @@ historique_commandes.csv
 etat_stock_precedent.csv
 __pycache__/
 .pytest_cache/
+.coverage
 etat_stock_precedent.sig
+
+# Module « Stock fermé » — inventaire local de la pharmacie
+stock_ferme.csv
+stock_ferme_produits.csv
 
 # Application web (Next.js / Supabase)
 web/node_modules/

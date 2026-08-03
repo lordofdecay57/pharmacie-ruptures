@@ -398,6 +398,11 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             "Qté à commander": qte,
             "Motif": motif,
             "_stock_jours": stock_jours,
+            # Consommation NON arrondie : le classement ABC se fait dessus.
+            # Classer sur la valeur affichée (arrondie au dixième) ferait
+            # basculer de classe deux produits séparés par 0,04 boîte/mois,
+            # au seul gré de l'arrondi.
+            "_consommation_exacte": rotation,
         })
 
     df = pd.DataFrame(lignes)
@@ -406,7 +411,7 @@ def analyser_stock_rotation(cadencier: pd.DataFrame, mapping: dict,
             df.reindex(columns=COLONNES_STOCK_ROTATION),
             df.reindex(columns=COLONNES_DORMANTS_ROTATION), {})
 
-    df["Classe"] = classer_abc(list(df["Consommation/mois"]))
+    df["Classe"] = classer_abc(list(df["_consommation_exacte"]))
 
     dormants = df[(df["Stock actuel"] > 0)
                   & (df["_stock_jours"] > params.seuil_dormant_jours)].copy()

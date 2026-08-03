@@ -52,9 +52,10 @@ if errorlevel 1 (
 
 REM --- 3. Installation des nouveaux fichiers ------------------
 REM  On ne remplace ni ce script, ni vos donnees personnelles
-REM  (mapping des colonnes et historique des analyses).
+REM  (mapping des colonnes, historique des analyses, etat du stock
+REM  min/max et inventaire du stock ferme).
 echo  [3/4] Installation des fichiers...
-robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat config.yaml historique_commandes.csv >nul
+robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv >nul
 if %ERRORLEVEL% GEQ 8 (
     echo  [ERREUR] Copie des fichiers impossible.
     echo.

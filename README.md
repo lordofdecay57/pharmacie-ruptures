@@ -1,7 +1,7 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
 Application **locale** (elle tourne sur votre PC, hors-ligne) organisée en
-**deux modules fonctionnels indépendants**, chacun son onglet principal :
+**trois modules fonctionnels indépendants** :
 
 - **📦 Gestion des stocks en rotation** (`stock_rotation.py`) — calcule un
   **stock min** et un **stock max** par produit à partir du seul cadencier,
@@ -11,12 +11,19 @@ Application **locale** (elle tourne sur votre PC, hors-ligne) organisée en
   avec les listes de ruptures **GPNC** (`ruptgpnc_ia`, fournisseur
   principal) et **UNIPHARMA** (`ruptocdp_ia`, dépannage) pour produire le
   fichier Excel de commande quotidien.
+- **🔒 Gestion du stock fermé** (`stock_ferme.py`) — inventaire tenu **à
+  part** du stock officinal (armoire sécurisée, dotation d'urgence, trousse,
+  réserve de garde), rempli **à la douchette** boîte par boîte, avec la date
+  de péremption de **chaque** boîte. Ne lit aucun fichier : il a son propre
+  inventaire et ses propres impressions (CSV / PDF).
 
-Les deux modules sont **strictement isolés l'un de l'autre** (aucun ne
+Les deux premiers modules sont **strictement isolés l'un de l'autre** (aucun ne
 connaît les structures de données de l'autre) mais **mutualisent** leurs
 calculs de consommation (rotation, tendance, variabilité, classement ABC,
-correction des ruptures passées) via un troisième module, `commun.py` —
-voir [Architecture](#architecture) plus bas.
+correction des ruptures passées) via `commun.py` — voir
+[Architecture](#architecture) plus bas. Le troisième module, lui, ne partage
+**rien** : il ne dépend d'aucun fichier déposé, et se choisit dans le
+sélecteur d'**espace de travail** en haut de l'écran.
 
 ## 📦 Module 1 — Gestion des stocks en rotation
 
@@ -255,11 +262,125 @@ solution** (anticiper l'information patient, contacter GPNC).
   moteur les rapproche automatiquement (CIP en priorité, sinon libellé +
   fuzzy matching).
 
+## 🔒 Module 3 — Gestion du stock fermé
+
+Inventaire tenu **à part** du stock officinal courant : armoire de
+stupéfiants, dotation d'urgence, trousse, réserve de garde, rétrocessions.
+Il n'a **aucun rapport** avec le cadencier : on y entre les boîtes une par
+une, et on en sort une liste de contrôle imprimable.
+
+### La péremption appartient à la boîte, pas au produit
+
+C'est ce qui justifie un module dédié plutôt qu'une colonne de plus dans le
+Module 1. Deux boîtes du même médicament peuvent expirer à six mois d'écart :
+l'unité d'enregistrement est donc le **lot**, identifié par
+`(code CIP, date de péremption, n° de lot)`.
+
+- scanner deux fois la **même** boîte incrémente la ligne existante ;
+- scanner une boîte de **péremption différente** crée une **nouvelle** ligne.
+
+L'inventaire est toujours trié par péremption la plus proche : c'est l'ordre
+dans lequel on veut traiter les boîtes, et celui de la liste imprimée.
+
+| Statut | Seuil | Signification |
+|---|---|---|
+| ⛔ Périmé | date dépassée | à retirer du stock |
+| 🔴 < 1 mois | ≤ 30 j | la boîte ne passera pas le mois — action immédiate |
+| 🟠 < 3 mois | ≤ 90 j | retrait ou remplacement à préparer |
+| 🟡 < 6 mois | ≤ 180 j | à écouler en priorité |
+| 🟢 OK | > 180 j | plus de six mois de marge |
+| ⚪ Sans date | — | péremption non renseignée |
+
+### Entrée ou sortie de stock
+
+Un sélecteur **Entrée / Sortie** commande le champ de scan.
+
+- **Entrée** : la boîte scannée rejoint l'inventaire (voir ci-dessous) ;
+- **Sortie** : chaque scan retire **une boîte**. Le Data Matrix désigne la
+  boîte exacte (CIP + péremption + lot) ; un code-barres linéaire ne donne
+  que le produit, et c'est alors le lot qui **périme le plus tôt** qui sort
+  — règle **FEFO** de l'officine. Si le lot scanné n'est pas à l'inventaire,
+  l'outil sort la boîte la plus proche de la péremption **en le signalant** :
+  sortir un lot pour un autre en silence ruinerait la traçabilité.
+
+### Saisie : douchette ou clavier
+
+Trois entrées possibles, dans l'ordre de rapidité :
+
+1. **Data Matrix GS1** (boîtes récentes) — le code carré donne d'un seul
+   scan le **code CIP**, la **date de péremption** et le **n° de lot**. Si
+   le produit a déjà été nommé une fois, la boîte entre au stock **sans un
+   clic** ;
+2. **code-barres linéaire CIP13** (boîtes anciennes) ou **CIP7** — le code
+   ne donne que l'identité du produit : la péremption reste à saisir ;
+3. **saisie au clavier** — nom du médicament, dosage, CIP : utile pour les
+   produits sans code-barres exploitable (préparations, dispositifs).
+
+Le champ de scan se vide tout seul après chaque lecture, pour enchaîner les
+boîtes sans intervention. Détails techniques pris en charge :
+
+- **préfixes de symbologie** ajoutés par certaines douchettes (`]d2`, `]C1`,
+  `]e0`, `]Q3`) ;
+- **séparateur FNC1 absent** — plusieurs douchettes ne l'émettent pas. La
+  lecture retenue est alors celle qui n'abandonne **aucun caractère
+  inexpliqué**, et non la première coupe plausible : sans cette précaution,
+  un lot `LOT42` suivi d'une péremption se lit `LOT4`, et un n° de série se
+  retrouve amputé de son dernier chiffre ;
+- **convention GS1 `JJ = 00`** (fin de mois) et **jour hors calendrier**
+  (`31/02`, vu sur des codes mal générés) ramené au dernier jour du mois
+  plutôt que rejeté — perdre la péremption d'une boîte coûterait plus cher
+  que ce jour d'écart ;
+- **code recopié à la main** avec espaces, points ou tirets
+  (`3400 912 345 678`), sans confondre un libellé chiffré avec un code.
+
+Si une fiche est ouverte et qu'une **autre** boîte est scannée avant de la
+valider, l'abandon est signalé — pas silencieux.
+
+### Comptage en boîtes ET à l'unité
+
+Chaque lot porte trois quantités :
+
+- **Boîtes** — le comptage principal ;
+- **Unités par boîte** — le conditionnement (comprimés, ampoules…) ;
+- **Unités en vrac** — ce qui reste d'une boîte entamée.
+
+Le **total unités** vaut `boîtes × unités par boîte + vrac`. Sans
+conditionnement renseigné, les boîtes ne sont **pas** converties : l'outil
+préfère afficher « conditionnement non renseigné » plutôt qu'inventer un
+total.
+
+### Mémoire
+
+Deux fichiers, écrits à chaque modification et relus à l'ouverture :
+
+- `stock_ferme.csv` — l'inventaire lui-même ;
+- `stock_ferme_produits.csv` — le **répertoire** des produits déjà
+  identifiés (CIP → nom, dosage, conditionnement). C'est lui qui permet
+  qu'un produit nommé **une fois** n'ait plus jamais à l'être : au scan
+  suivant, la douchette suffit.
+
+L'inventaire se corrige directement dans le tableau (quantité, date, lot) et
+une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
+(nom, dosage, code CIP ou n° de lot) et un filtre **« lots à traiter »**
+(périmés et moins d'un mois) permettent de retrouver une boîte sans faire
+défiler l'inventaire.
+
+### Impression
+
+La liste de stock s'exporte en **CSV** (`;` + BOM : Excel l'ouvre sans
+réglage) et en **PDF**, en totalité ou limitée aux **lots à retirer**
+(périmés et moins d'un mois) — c'est le besoin le plus fréquent (paysage, en-tête répété à chaque page, lignes
+teintées selon l'urgence). Les deux comportent, pour chaque lot : **nom du
+médicament, dosage, code CIP, nombre de boîtes, nombre d'unités et date de
+péremption**, plus le n° de lot. Dans le PDF, le statut est écrit en toutes
+lettres (les polices PDF standard n'ont pas de glyphe d'émoji) : la liste
+reste lisible imprimée en noir et blanc.
+
 ## Architecture
 
-Trois modules Python, une seule règle : **la logique métier est strictement
-séparée de l'interface**, et les deux modules fonctionnels ne s'importent
-jamais l'un l'autre.
+Une seule règle : **la logique métier est strictement séparée de
+l'interface**, et les modules fonctionnels ne s'importent jamais l'un
+l'autre.
 
 ```
 commun.py            Fonctions PURES partagées (parsing, chargement de
@@ -277,12 +398,27 @@ moteur_ruptures.py    MODULE 2 — logique métier pure des ruptures.
                        vigilance, écartés de justesse, score de priorité,
                        historique, suivi quotidien.
 
-app.py                 Interface Streamlit UNIQUEMENT — importe les 3
-  (import les 3)        modules ci-dessus, affiche 2 onglets principaux.
+ui_commun.py          Règles PURES de l'interface (filtrage, empreintes,
+  (aucun streamlit)    historique) — sorties d'app.py pour être testables.
+
+stock_ferme.py        MODULE 3 — logique métier pure du stock fermé.
+  (n'importe RIEN     Lecture des codes scannés (Data Matrix GS1, CIP13,
+   du projet)          CIP7), inventaire par lot, péremptions, exports
+                       CSV et PDF. Ne lit aucun fichier déposé.
+
+ui_stock_ferme.py     Interface Streamlit du MODULE 3, isolée dans son
+  (import stock_ferme) propre fichier — reçoit d'app.py ses seules
+                       fonctions d'habillage, en paramètres.
+
+app.py                 Interface Streamlit UNIQUEMENT — importe les modules
+  (import les 4)        ci-dessus, propose le sélecteur d'espace de travail
+                        puis les 2 onglets du parcours « cadencier ».
 ```
 
 `stock_rotation.py` et `moteur_ruptures.py` n'importent **jamais** l'un de
-l'autre : la mutualisation passe exclusivement par `commun.py`. C'est ce qui
+l'autre : la mutualisation passe exclusivement par `commun.py`.
+`stock_ferme.py`, lui, n'importe aucun module du projet — un test le
+vérifie. C'est ce qui
 garantit qu'on peut faire évoluer la politique de stock sans risquer de
 casser le calcul des ruptures, et inversement.
 
@@ -324,8 +460,8 @@ d'œil que la dernière version tourne bien.
 
 Double-cliquez sur **`mettre-a-jour.bat`** : il télécharge la dernière
 version depuis GitHub, remplace les fichiers programme et relance l'app —
-**sans toucher à vos données** (`config.yaml` et `historique_commandes.csv`
-sont préservés). Après la mise à jour, vérifiez le numéro de version dans le
+**sans toucher à vos données** (`config.yaml`, `historique_commandes.csv`,
+l'état du stock min/max et l'inventaire du stock fermé sont préservés). Après la mise à jour, vérifiez le numéro de version dans le
 bandeau. Si le numéro n'a pas changé, faites **Ctrl + Maj + R** dans le
 navigateur (cache de page).
 
@@ -334,6 +470,11 @@ navigateur (cache de page).
 l'analyse tourne sur un jeu fictif sans toucher à votre configuration.
 
 ## Utilisation (chaque jour)
+
+Le sélecteur d'**espace de travail**, en haut de l'écran, choisit entre le
+parcours « cadencier » (Modules 1 et 2, décrit ci-dessous) et le **stock
+fermé** (Module 3), qui, lui, ne demande aucun fichier : on y scanne, on
+imprime.
 
 1. **Déposez au moins le cadencier** (`.xlsx`, `.xls`, `.csv` ou `.pdf`) —
    il suffit pour la Gestion des stocks en rotation. Déposez aussi les
@@ -359,13 +500,18 @@ vérifiez-les avant de commander.
 
 ```
 pharmacie-ruptures/
-├── app.py                  # interface (Streamlit) — n'appelle que les 3 modules
+├── app.py                  # interface (Streamlit) — n'appelle que les modules
 ├── commun.py                # fonctions pures partagées (parsing, fichiers, stats)
 ├── stock_rotation.py        # Module 1 — stock min/max, pur, testable indépendamment
 ├── moteur_ruptures.py       # Module 2 — ruptures GPNC/UNIPHARMA, pur, testable
+├── stock_ferme.py           # Module 3 — stock fermé (scan, lots, péremptions)
+├── ui_commun.py             # règles pures de l'interface (sans Streamlit)
+├── ui_stock_ferme.py        # interface du Module 3 (Streamlit)
 ├── .streamlit/config.toml   # thème de l'interface (vert pharmacie)
 ├── config.yaml               # mapping + réglages mémorisés (créé au 1er lancement)
 ├── historique_commandes.csv  # historique des analyses de ruptures (créé à la 1re)
+├── stock_ferme.csv           # inventaire du stock fermé (créé au 1er scan)
+├── stock_ferme_produits.csv  # produits mémorisés du stock fermé (CIP → nom)
 ├── requirements.txt          # dépendances Python
 ├── lancer.bat                 # double-clic Windows
 ├── lancer.command              # double-clic Mac
@@ -373,8 +519,14 @@ pharmacie-ruptures/
 └── tests/
     ├── test_commun.py        # fonctions partagées (parsing, fichiers, statistiques)
     ├── test_stock_rotation.py # Module 1 : stock min/max, règle des 10 unités
-    └── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
+    ├── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
+    ├── test_stock_ferme.py    # Module 3 : Data Matrix, lots, péremptions, exports
+    ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
+    └── test_interface.py      # fumée : l'application démarre et répond
 ```
+
+Le test de fumée lance un vrai Streamlit et parcourt les deux espaces dans
+un navigateur ; il s'ignore tout seul si Playwright n'est pas installé.
 
 ## Tests
 
@@ -383,9 +535,13 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-156 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+369 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles
 (seuil prioritaire sur le stock min, non-régression sur les produits
-arrêtés, paramètres reconfigurables).
+arrêtés, paramètres reconfigurables). Cas de référence Module Stock fermé :
+Data Matrix sans séparateur FNC1 (`…10LOT4217271130` → lot `LOT42`, et non
+`LOT4` ; `…101234AB21987654321` → lot `1234AB` **et** série `987654321`),
+deux péremptions du même CIP donnant deux lignes, PDF lisible sans émoji et
+repliant les libellés trop longs.

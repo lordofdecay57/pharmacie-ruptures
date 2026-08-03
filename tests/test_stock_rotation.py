@@ -349,6 +349,50 @@ class TestAnalyseStockRotation:
         assert "Classe" in resultat.tableau.columns
         assert set(resultat.tableau["Classe"]) <= {"A", "B", "C"}
 
+    def test_classement_abc_sur_la_consommation_exacte(self):
+        """Le classement porte sur la rotation RÉELLE, pas sur la valeur
+        arrondie au dixième pour l'affichage : deux produits séparés par
+        quelques centièmes de boîte ne doivent pas être départagés par
+        l'arrondi."""
+        # 10 et 9 ventes sur l'année donnent 0,833 et 0,75 boîte/mois :
+        # deux valeurs DIFFÉRENTES qui s'affichent toutes deux « 0,8 ».
+        mois = [f"Ventes M{i}" for i in range(1, 13)]
+        lignes = []
+        for nom, total in (("GROS", 120), ("MOYEN", 10), ("PETIT", 9)):
+            ligne = {"Produit": nom, "CIP": nom, "Stock": 0}
+            for i, colonne in enumerate(mois):
+                ligne[colonne] = total if i == 0 else 0
+            lignes.append(ligne)
+        resultat = analyser_stock_rotation(
+            pd.DataFrame(lignes),
+            {"cadencier": {"libelle": "Produit", "cip": "CIP",
+                           "stock": "Stock", "ventes": mois}})
+        affichees = dict(zip(resultat.tableau["Nom du produit"],
+                             resultat.tableau["Consommation/mois"]))
+        # Le cas n'est pas trivial : à l'écran, les deux sont indiscernables.
+        assert affichees["MOYEN"] == affichees["PETIT"]
+
+        # Invariant : vendre plus ne peut jamais valoir une classe moins
+        # bonne. Classer sur la valeur arrondie créerait des ex æquo
+        # artificiels, départagés par le seul ordre des lignes.
+        rang = {"A": 0, "B": 1, "C": 2}
+        ventes_exactes = {"GROS": 10.0, "MOYEN": 10 / 12, "PETIT": 9 / 12}
+        classes = dict(zip(resultat.tableau["Nom du produit"],
+                           resultat.tableau["Classe"]))
+        for a in classes:
+            for b in classes:
+                if ventes_exactes[a] > ventes_exactes[b]:
+                    assert rang[classes[a]] <= rang[classes[b]], (
+                        f"{a} vend plus que {b} mais est moins bien classé")
+        assert classes["GROS"] == "A"
+
+    def test_colonnes_techniques_absentes_du_resultat(self):
+        """Les colonnes de travail (préfixe _) ne doivent pas fuiter dans le
+        tableau rendu à l'utilisateur ni dans les exports."""
+        resultat = analyser_stock_rotation(_cadencier(), _mapping_cadencier())
+        assert [c for c in resultat.tableau.columns
+                if str(c).startswith("_")] == []
+
     def test_sans_historique_ni_stock_ignore(self):
         # Consommation par défaut désactivée (0) : produit sans aucune
         # vente ET sans stock → rien à piloter, n'apparaît pas.
