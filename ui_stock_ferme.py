@@ -124,7 +124,10 @@ def _traiter_scan() -> None:
     code = stock_ferme.parser_code_scanne(brut)
     inventaire, repertoire = _etat()
 
-    if st.session_state.get("sf_mode", MODE_ENTREE) == MODE_SORTIE:
+    # On lit le mode RETENU, pas la valeur brute du widget : celui-ci vaut
+    # None quand on reclique dessus pour le déselectionner, et un scan ne
+    # doit pas basculer silencieusement en entrée dans ce cas.
+    if st.session_state.get("sf_mode_choisi", MODE_ENTREE) == MODE_SORTIE:
         st.session_state.pop("sf_en_attente", None)
         if not code.reconnu:
             st.session_state["sf_message"] = (
@@ -425,11 +428,16 @@ def rendre(etape, tuile_kpi) -> None:
     # --- Saisie ------------------------------------------------------------
     etape("1", "Scannez le produit",
           "Douchette (code CIP ou Data Matrix) — ou saisie au clavier.")
-    mode = st.radio("Sens du mouvement", [MODE_ENTREE, MODE_SORTIE],
-                    horizontal=True, key="sf_mode",
-                    label_visibility="collapsed",
-                    captions=["La boîte scannée entre au stock.",
-                              "La boîte scannée sort du stock."])
+    # Entrée ou sortie : c'est la question la plus lourde de conséquences de
+    # l'écran (ajouter ou retirer du stock). Elle mérite deux boutons francs,
+    # pas deux puces — et un code couleur pour qu'une erreur saute aux yeux.
+    mode = st.segmented_control(
+        "Sens du mouvement", [MODE_ENTREE, MODE_SORTIE],
+        default=st.session_state.get("sf_mode_choisi", MODE_ENTREE),
+        label_visibility="collapsed", key="sf_mode")
+    if mode is None:  # le contrôle se déselectionne au second clic
+        mode = st.session_state.get("sf_mode_choisi", MODE_ENTREE)
+    st.session_state["sf_mode_choisi"] = mode
     col_scan, col_manuel = st.columns([3, 1])
     col_scan.text_input(
         "Code scanné", key="sf_scan", on_change=_traiter_scan,

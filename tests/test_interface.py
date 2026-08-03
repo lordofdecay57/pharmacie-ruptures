@@ -24,6 +24,12 @@ RACINE = Path(__file__).resolve().parent.parent
 NAVIGATEUR = "/opt/pw-browsers/chromium"
 DEMARRAGE_MAX_S = 60
 
+#: Libellés des deux espaces de travail, tels qu'affichés dans les onglets.
+#: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
+#: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
+ESPACE_CADENCIER = "Cadencier — stock & ruptures"
+ESPACE_STOCK_FERME = "Stock fermé — inventaire scanné"
+
 
 def _port_libre() -> int:
     with socket.socket() as s:
@@ -113,8 +119,10 @@ class TestDemarrage:
         assert "Pilotage pharmacie" in page.content()
 
     def test_les_deux_espaces_sont_proposes(self, page):
-        assert page.get_by_text("Stock en rotation & ruptures").count() >= 1
-        assert page.get_by_text("Stock fermé (inventaire scanné)").count() >= 1
+        """Les deux espaces ne partagent rien : le choix doit être visible
+        dès l'arrivée, pas caché dans un menu."""
+        assert page.get_by_text(ESPACE_CADENCIER).count() >= 1
+        assert page.get_by_text(ESPACE_STOCK_FERME).count() >= 1
 
     def test_depot_de_fichiers_demande_avant_analyse(self, page):
         """Sans cadencier, le parcours principal invite à en déposer un
@@ -126,7 +134,7 @@ class TestEspaceStockFerme:
     """Le module 3 doit fonctionner SANS aucun fichier déposé."""
 
     def test_ecran_complet(self, page):
-        page.get_by_text("Stock fermé (inventaire scanné)").first.click()
+        page.get_by_text(ESPACE_STOCK_FERME).first.click()
         page.wait_for_timeout(5000)
         _sans_exception(page)
         contenu = page.content()
