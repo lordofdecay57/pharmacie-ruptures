@@ -30,7 +30,7 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import pandas as pd
 
@@ -507,6 +507,68 @@ def retirer_entree(inventaire: pd.DataFrame, cip: str, nom: str,
     return inventaire.reset_index(drop=True)
 
 
+def lot_a_sortir(inventaire: pd.DataFrame, cip: str = "", nom: str = "",
+                 peremption: Optional[date] = None,
+                 lot: str = "") -> Optional[dict]:
+    """Lot à décrémenter pour une sortie de stock, ou ``None`` si absent.
+
+    Un Data Matrix désigne une boîte précise (CIP + péremption + n° de lot)
+    et c'est elle qui sort. Un code-barres linéaire ne donne que le produit :
+    on sort alors la boîte qui périme **le plus tôt** — c'est la règle de
+    l'officine (FEFO), et la seule qui évite de laisser vieillir un lot au
+    fond de l'armoire.
+
+    Le drapeau ``exact`` distingue les deux cas : à ``False``, le scan
+    désignait une boîte qui n'est pas à l'inventaire sous ce lot, et on
+    propose la plus proche de la péremption. L'interface doit le dire —
+    sortir un lot pour un autre en silence ruinerait la traçabilité.
+    """
+    if inventaire is None or inventaire.empty:
+        return None
+    tableau = inventaire.reindex(columns=COLONNES_STOCK_FERME).copy()
+    tableau["Péremption"] = tableau["Péremption"].map(parser_peremption_saisie)
+
+    cip = re.sub(r"\D", "", str(cip or ""))
+    if cip:
+        candidats = tableau[tableau["Code CIP"].map(
+            lambda v: re.sub(r"\D", "", _texte(v))) == cip]
+    else:
+        cible = _texte(nom).upper()
+        candidats = tableau[tableau["Nom du produit"].map(
+            lambda v: _texte(v).upper()) == cible]
+    if candidats.empty:
+        return None
+
+    def _decrire(index, exact: bool) -> dict:
+        ligne = candidats.loc[index]
+        return {"index": index, "exact": exact,
+                "cip": _texte(ligne["Code CIP"]),
+                "nom": _texte(ligne["Nom du produit"]),
+                "dosage": _texte(ligne["Dosage"]),
+                "peremption": ligne["Péremption"],
+                "lot": _texte(ligne["Lot"]),
+                "boites": int(pd.to_numeric(ligne["Boîtes"],
+                                            errors="coerce") or 0)}
+
+    # Le scan désigne-t-il une boîte PRÉCISE ? Seul un Data Matrix le fait.
+    if peremption is not None or lot:
+        precis = candidats
+        if peremption is not None:
+            precis = precis[precis["Péremption"] == peremption]
+        if lot:
+            precis = precis[precis["Lot"].map(
+                lambda v: _texte(v).upper()) == lot.strip().upper()]
+        if not precis.empty:
+            return _decrire(precis.index[0], exact=True)
+
+    # Sinon (code linéaire), ou boîte introuvable sous ce lot : FEFO, la
+    # plus proche de la péremption sort. Les lots sans date passent en
+    # dernier — rien ne presse à leur sujet.
+    ordre = candidats["Péremption"].map(lambda p: date.max if p is None else p)
+    return _decrire(ordre.sort_values(kind="stable").index[0],
+                    exact=(peremption is None and not lot))
+
+
 def jours_avant_peremption(peremption, aujourdhui: date) -> Optional[int]:
     """Jours restants avant expiration (négatif si la boîte est périmée)."""
     peremption = parser_peremption_saisie(peremption)
@@ -760,6 +822,42 @@ def charger_repertoire(chemin: Path) -> pd.DataFrame:
 #: Colonnes de la liste imprimée, dans l'ordre demandé au comptoir.
 COLONNES_IMPRESSION = ["Statut", "Nom du produit", "Dosage", "Code CIP",
                        "Boîtes", "Unités", "Péremption", "Lot"]
+
+#: Statuts retenus par le filtre « à traiter » : ce qui exige une action.
+STATUTS_A_TRAITER = (STATUT_PERIME, STATUT_IMMINENT)
+
+
+def filtrer_inventaire(inventaire: pd.DataFrame, recherche: str = "",
+                       statuts: Optional[Sequence[str]] = None,
+                       aujourdhui: Optional[date] = None) -> pd.DataFrame:
+    """Vue filtrée de l'inventaire : recherche libre et paliers retenus.
+
+    La recherche porte sur le nom, le dosage, le code CIP et le n° de lot —
+    au comptoir on cherche indifféremment par l'un ou l'autre. Elle
+    n'interprète PAS son terme comme une expression régulière : « (30) » est
+    un texte, pas un groupe de capture.
+
+    ``statuts`` restreint aux paliers de péremption voulus ; c'est ce qui
+    permet d'imprimer la seule liste de retrait plutôt que tout le stock.
+
+    Le résultat a la forme d'un INVENTAIRE (mêmes colonnes qu'en entrée) :
+    il se réinjecte donc aussi bien dans l'affichage que dans les exports.
+    """
+    tableau = inventaire_affichable(inventaire, aujourdhui)
+    if tableau.empty:
+        return inventaire_vide()
+    terme = " ".join(str(recherche or "").split()).upper()
+    if terme:
+        colonnes = ("Nom du produit", "Dosage", "Code CIP", "Lot")
+        garde = None
+        for colonne in colonnes:
+            trouve = tableau[colonne].map(
+                lambda v: terme in _texte(v).upper())
+            garde = trouve if garde is None else (garde | trouve)
+        tableau = tableau[garde]
+    if statuts:
+        tableau = tableau[tableau["Statut"].isin(list(statuts))]
+    return tableau.reindex(columns=COLONNES_STOCK_FERME).reset_index(drop=True)
 
 
 def _tableau_impression(inventaire: pd.DataFrame,

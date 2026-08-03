@@ -20,10 +20,13 @@ import pytest
 from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          STATUT_IMMINENT, STATUT_INCONNU, STATUT_OK,
                          STATUT_PERIME,
-                         STATUT_VIGILANCE, ajouter_entree, charger_inventaire,
+                         STATUTS_A_TRAITER, STATUT_VIGILANCE,
+                         ajouter_entree, charger_inventaire,
                          charger_repertoire, cip_depuis_gtin, cle_lot,
-                         exporter_csv, exporter_pdf, inventaire_affichable,
+                         exporter_csv, exporter_pdf, filtrer_inventaire,
+                         inventaire_affichable,
                          inventaire_vide, jours_avant_peremption,
+                         lot_a_sortir,
                          memoriser_produit, nom_fichier_stock_ferme,
                          normaliser_tableau_edite,
                          parser_code_scanne, parser_datamatrix,
@@ -340,6 +343,64 @@ class TestTableauEdite:
         assert propre.iloc[0]["Total unités"] == 8
 
 
+class TestLotASortir:
+    """Sortie de stock à la douchette : quelle boîte part ?"""
+
+    def _inventaire(self):
+        inv = inventaire_vide()
+        for lot, peremption, boites in (("A1", date(2027, 6, 30), 3),
+                                        ("B2", date(2026, 9, 15), 2),
+                                        ("C3", date(2028, 1, 31), 1)):
+            inv = ajouter_entree(inv, _entree(lot=lot, peremption=peremption,
+                                              boites=boites), AUJOURDHUI)
+        return inv
+
+    def test_data_matrix_designe_la_boite_exacte(self):
+        cible = lot_a_sortir(self._inventaire(), cip="3400912345678",
+                             peremption=date(2027, 6, 30), lot="A1")
+        assert (cible["lot"], cible["exact"], cible["boites"]) == ("A1", True, 3)
+
+    def test_code_lineaire_sort_le_lot_qui_perime_le_plus_tot(self):
+        """FEFO : sans quoi un lot vieillirait au fond de l'armoire."""
+        cible = lot_a_sortir(self._inventaire(), cip="3400912345678")
+        assert cible["lot"] == "B2"
+        assert cible["peremption"] == date(2026, 9, 15)
+
+    def test_lot_scanne_absent_replie_sur_fefo_en_le_signalant(self):
+        cible = lot_a_sortir(self._inventaire(), cip="3400912345678",
+                             lot="INEXISTANT")
+        assert cible["lot"] == "B2"
+        assert cible["exact"] is False  # l'interface doit le dire
+
+    def test_lot_sans_date_passe_en_dernier(self):
+        inv = ajouter_entree(self._inventaire(),
+                             _entree(lot="SANSDATE", peremption=None),
+                             AUJOURDHUI)
+        assert lot_a_sortir(inv, cip="3400912345678")["lot"] == "B2"
+
+    def test_produit_sans_cip_identifie_par_son_nom(self):
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(cip="", nom="PRÉPARATION"), AUJOURDHUI)
+        assert lot_a_sortir(inv, nom="préparation")["nom"] == "PRÉPARATION"
+
+    def test_produit_absent(self):
+        assert lot_a_sortir(self._inventaire(), cip="9999999999999") is None
+
+    def test_inventaire_vide(self):
+        assert lot_a_sortir(inventaire_vide(), cip="3400912345678") is None
+
+    def test_sortie_complete_puis_lot_suivant(self):
+        """Deux scans successifs vident le lot le plus proche, puis passent
+        naturellement au suivant."""
+        inv = self._inventaire()
+        for _ in range(2):
+            cible = lot_a_sortir(inv, cip="3400912345678")
+            inv = retirer_entree(inv, cible["cip"], cible["nom"],
+                                 cible["peremption"], cible["lot"], boites=1)
+        assert "B2" not in list(inv["Lot"])            # lot épuisé, ligne ôtée
+        assert lot_a_sortir(inv, cip="3400912345678")["lot"] == "A1"
+
+
 class TestCleLot:
     def test_lot_insensible_a_la_casse(self):
         assert (cle_lot("340", "X", date(2027, 1, 1), "a1")
@@ -412,6 +473,79 @@ class TestInventaireAffichable:
         assert "nan" not in texte.lower() and "None" not in texte
         # Un produit sans CIP compte quand même comme une référence.
         assert resume_inventaire(brut, AUJOURDHUI)["references"] == 1
+
+
+class TestFiltrerInventaire:
+    """Recherche au comptoir et liste de retrait."""
+
+    def _inventaire(self):
+        inv = inventaire_vide()
+        for nom, lot, peremption in (
+                ("DOLIPRANE", "A1", date(2026, 7, 1)),      # périmé
+                ("MORPHINE", "B2", date(2026, 8, 10)),      # < 1 mois
+                ("DIAZEPAM", "C3", date(2026, 9, 30)),      # < 3 mois
+                ("NALOXONE", "D4", date(2028, 1, 31))):     # OK
+            inv = ajouter_entree(inv, _entree(nom=nom, lot=lot,
+                                              peremption=peremption),
+                                 AUJOURDHUI)
+        return inv
+
+    def test_sans_filtre_tout_passe(self):
+        assert len(filtrer_inventaire(self._inventaire(),
+                                      aujourdhui=AUJOURDHUI)) == 4
+
+    def test_liste_de_retrait(self):
+        """Le besoin le plus fréquent : périmés et lots du mois."""
+        retrait = filtrer_inventaire(self._inventaire(),
+                                     statuts=STATUTS_A_TRAITER,
+                                     aujourdhui=AUJOURDHUI)
+        assert list(retrait["Nom du produit"]) == ["DOLIPRANE", "MORPHINE"]
+
+    @pytest.mark.parametrize("terme,attendu", [
+        ("morph", "MORPHINE"),       # nom, insensible à la casse
+        ("c3", "DIAZEPAM"),          # n° de lot
+        ("1000 mg", "DOLIPRANE"),    # dosage
+    ])
+    def test_recherche_sur_les_quatre_colonnes(self, terme, attendu):
+        trouve = filtrer_inventaire(self._inventaire(), recherche=terme,
+                                    aujourdhui=AUJOURDHUI)
+        assert attendu in list(trouve["Nom du produit"])
+
+    def test_recherche_sans_resultat(self):
+        assert filtrer_inventaire(self._inventaire(), recherche="ZZZ",
+                                  aujourdhui=AUJOURDHUI).empty
+
+    def test_terme_non_interprete_comme_expression_reguliere(self):
+        inv = ajouter_entree(self._inventaire(),
+                             _entree(nom="VITAMINE D3 (30)", lot="Z9"),
+                             AUJOURDHUI)
+        trouve = filtrer_inventaire(inv, recherche="(30)",
+                                    aujourdhui=AUJOURDHUI)
+        assert list(trouve["Nom du produit"]) == ["VITAMINE D3 (30)"]
+
+    def test_recherche_et_palier_se_cumulent(self):
+        trouve = filtrer_inventaire(self._inventaire(), recherche="o",
+                                    statuts=STATUTS_A_TRAITER,
+                                    aujourdhui=AUJOURDHUI)
+        assert list(trouve["Nom du produit"]) == ["DOLIPRANE", "MORPHINE"]
+
+    def test_resultat_reutilisable_tel_quel(self):
+        """La sortie a la forme d'un inventaire : elle se réaffiche et
+        s'exporte sans conversion — c'est ce qui permet d'imprimer la
+        liste de retrait."""
+        retrait = filtrer_inventaire(self._inventaire(),
+                                     statuts=STATUTS_A_TRAITER,
+                                     aujourdhui=AUJOURDHUI)
+        assert list(retrait.columns) == COLONNES_STOCK_FERME
+        assert list(inventaire_affichable(retrait, AUJOURDHUI)["Statut"]) == [
+            STATUT_PERIME, STATUT_IMMINENT]
+        texte = exporter_csv(retrait, AUJOURDHUI).decode("utf-8-sig")
+        assert "DOLIPRANE" in texte and "NALOXONE" not in texte
+
+    def test_inventaire_vide(self):
+        vide = filtrer_inventaire(inventaire_vide(), recherche="X",
+                                  aujourdhui=AUJOURDHUI)
+        assert vide.empty and list(vide.columns) == COLONNES_STOCK_FERME
 
 
 class TestResume:

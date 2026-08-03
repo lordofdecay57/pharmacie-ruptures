@@ -71,6 +71,42 @@ def _enregistrer(inventaire=None, repertoire=None) -> None:
 # Saisie
 # ---------------------------------------------------------------------------
 
+MODE_ENTREE = "➕ Entrée"
+MODE_SORTIE = "➖ Sortie"
+
+
+def _traiter_sortie(code, inventaire) -> None:
+    """Sortie de stock à la douchette : une boîte de moins, du bon lot.
+
+    Un Data Matrix désigne la boîte précise ; un code-barres linéaire ne
+    donne que le produit, et c'est alors le lot qui périme le plus tôt qui
+    sort (FEFO).
+    """
+    cible = stock_ferme.lot_a_sortir(inventaire, cip=code.cip,
+                                     peremption=code.peremption, lot=code.lot)
+    if cible is None:
+        st.session_state["sf_message"] = (
+            "avertissement",
+            f"Sortie impossible : « {code.cip or code.brut} » n'est pas à "
+            "l'inventaire. Vérifiez le code, ou passez en mode Entrée.")
+        return
+
+    _enregistrer(inventaire=stock_ferme.retirer_entree(
+        inventaire, cible["cip"], cible["nom"], cible["peremption"],
+        cible["lot"], boites=1))
+    reste = max(0, cible["boites"] - 1)
+    peremption = (f"{cible['peremption']:%d/%m/%Y}" if cible["peremption"]
+                  else "sans date")
+    detail = (f"lot {cible['lot']}, " if cible["lot"] else "") + peremption
+    avertissement = ("" if cible["exact"] else
+                     " ⚠️ Le lot scanné n'était pas à l'inventaire — c'est la "
+                     "boîte périmant le plus tôt qui a été sortie.")
+    st.session_state["sf_message"] = (
+        "ok" if cible["exact"] else "avertissement",
+        f"➖ {cible['nom']} {cible['dosage']} — 1 boîte sortie ({detail}) · "
+        f"reste {reste} boîte(s) sur ce lot." + avertissement)
+
+
 def _traiter_scan() -> None:
     """Rappel de la douchette : elle tape le code puis valide (Entrée).
 
@@ -84,6 +120,19 @@ def _traiter_scan() -> None:
 
     code = stock_ferme.parser_code_scanne(brut)
     inventaire, repertoire = _etat()
+
+    if st.session_state.get("sf_mode", MODE_ENTREE) == MODE_SORTIE:
+        st.session_state.pop("sf_en_attente", None)
+        if not code.reconnu:
+            st.session_state["sf_message"] = (
+                "avertissement",
+                f"Code non reconnu : « {code.brut} ». Une sortie se fait par "
+                "scan ; pour un produit sans code, supprimez la ligne dans "
+                "le tableau.")
+            return
+        _traiter_sortie(code, inventaire)
+        return
+
     connu = stock_ferme.produit_connu(repertoire, code.cip)
 
     # Boîte entièrement identifiée (Data Matrix d'un produit déjà nommé) :
@@ -293,18 +342,31 @@ def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date) -> None:
     st.caption("Nom du médicament, dosage, code CIP, nombre de boîtes et "
                "d'unités, et date de péremption de chaque lot.")
 
+    # Le besoin le plus fréquent n'est pas la liste complète mais la liste de
+    # RETRAIT : ce qui est périmé ou ne passera pas le mois.
+    retrait_seul = st.checkbox(
+        "N'imprimer que les lots à retirer (périmés et moins d'un mois)",
+        key="sf_impression_retrait")
+    a_imprimer = (stock_ferme.filtrer_inventaire(
+        inventaire, statuts=stock_ferme.STATUTS_A_TRAITER,
+        aujourdhui=aujourdhui) if retrait_seul else inventaire)
+    titre = "Stock fermé — lots à retirer" if retrait_seul else "Stock fermé"
+    prefixe = "stock_ferme_retrait" if retrait_seul else "stock_ferme"
+    nombre = len(stock_ferme.inventaire_affichable(a_imprimer, aujourdhui))
+    st.caption(f"{nombre} lot(s) dans le document.")
+
     col_csv, col_pdf = st.columns(2)
     col_csv.download_button(
         "📄 Télécharger en CSV",
-        data=stock_ferme.exporter_csv(inventaire, aujourdhui),
-        file_name=stock_ferme.nom_fichier_stock_ferme("csv", aujourdhui),
+        data=stock_ferme.exporter_csv(a_imprimer, aujourdhui),
+        file_name=f"{prefixe}_{aujourdhui:%Y-%m-%d}.csv",
         mime=_MIME_CSV, use_container_width=True)
     try:
-        pdf = stock_ferme.exporter_pdf(inventaire, "Stock fermé", aujourdhui)
+        pdf = stock_ferme.exporter_pdf(a_imprimer, titre, aujourdhui)
         col_pdf.download_button(
             "🖨️ Télécharger en PDF",
             data=pdf,
-            file_name=stock_ferme.nom_fichier_stock_ferme("pdf", aujourdhui),
+            file_name=f"{prefixe}_{aujourdhui:%Y-%m-%d}.pdf",
             mime=_MIME_PDF, type="primary", use_container_width=True)
     except ValueError as e:
         col_pdf.warning(str(e))
@@ -358,20 +420,35 @@ def rendre(etape, tuile_kpi) -> None:
         (st.success if niveau == "ok" else st.warning)(texte)
 
     # --- Saisie ------------------------------------------------------------
-    etape("1", "Scannez ou saisissez le produit",
+    etape("1", "Scannez le produit",
           "Douchette (code CIP ou Data Matrix) — ou saisie au clavier.")
+    mode = st.radio("Sens du mouvement", [MODE_ENTREE, MODE_SORTIE],
+                    horizontal=True, key="sf_mode",
+                    label_visibility="collapsed",
+                    captions=["La boîte scannée entre au stock.",
+                              "La boîte scannée sort du stock."])
     col_scan, col_manuel = st.columns([3, 1])
     col_scan.text_input(
         "Code scanné", key="sf_scan", on_change=_traiter_scan,
-        placeholder="Douchez la boîte ici (le champ se vide tout seul)",
+        placeholder=("Douchez la boîte à ajouter" if mode == MODE_ENTREE
+                     else "Douchez la boîte à sortir")
+                    + " (le champ se vide tout seul)",
         label_visibility="collapsed")
     col_manuel.button("⌨️ Saisie manuelle", use_container_width=True,
+                      disabled=mode == MODE_SORTIE,
                       on_click=_saisie_manuelle_vierge)
-    st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le code "
-               "CIP, la date de péremption et le n° de lot. Un code-barres "
-               "linéaire ne donne que le CIP : la péremption reste à saisir.")
+    if mode == MODE_ENTREE:
+        st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le "
+                   "code CIP, la date de péremption et le n° de lot. Un "
+                   "code-barres linéaire ne donne que le CIP : la péremption "
+                   "reste à saisir.")
+    else:
+        st.caption("Chaque scan retire **une boîte**. Le Data Matrix désigne "
+                   "la boîte exacte ; un code-barres linéaire ne donne que le "
+                   "produit, et c'est alors le lot qui **périme le plus tôt** "
+                   "qui sort.")
 
-    if "sf_en_attente" in st.session_state:
+    if "sf_en_attente" in st.session_state and mode == MODE_ENTREE:
         _formulaire_complement(inventaire, repertoire)
         inventaire, repertoire = _etat()
 
@@ -381,7 +458,31 @@ def rendre(etape, tuile_kpi) -> None:
                              "à la boîte, pas au produit.")
     _bandeau_kpi(stock_ferme.resume_inventaire(inventaire, aujourdhui),
                  tuile_kpi)
-    corrige = _tableau_editable(inventaire, aujourdhui)
+
+    col_rech, col_filtre = st.columns([3, 2])
+    recherche = col_rech.text_input(
+        "🔎 Rechercher (nom, dosage, code CIP ou n° de lot)",
+        key="sf_recherche", placeholder="ex. MORPHINE, 3400937… ou LOT-A")
+    a_traiter = col_filtre.checkbox(
+        "⚠️ N'afficher que les lots à traiter", key="sf_filtre_traiter",
+        help="Périmés et lots de moins d'un mois.")
+    vue_filtree = stock_ferme.filtrer_inventaire(
+        inventaire, recherche,
+        stock_ferme.STATUTS_A_TRAITER if a_traiter else None, aujourdhui)
+    filtre_actif = bool(recherche) or a_traiter
+    if filtre_actif and vue_filtree.empty:
+        st.info("Aucun lot ne correspond à ce filtre.")
+
+    # Le tableau ne devient modifiable que sur l'inventaire ENTIER : corriger
+    # une vue filtrée réécrirait le stock en perdant les lignes masquées.
+    if filtre_actif:
+        st.dataframe(stock_ferme.inventaire_affichable(vue_filtree, aujourdhui),
+                     use_container_width=True, hide_index=True)
+        st.caption(f"{len(vue_filtree)} lot(s) affiché(s). Videz la recherche "
+                   "et décochez le filtre pour corriger l'inventaire.")
+        corrige = None
+    else:
+        corrige = _tableau_editable(inventaire, aujourdhui)
     if corrige is not None:
         _enregistrer(inventaire=corrige)
         st.rerun()

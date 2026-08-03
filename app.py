@@ -22,7 +22,6 @@ Parcours (suivi dans la barre latérale) :
 """
 
 import dataclasses
-import hashlib
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -34,6 +33,7 @@ import yaml
 import commun
 import moteur_ruptures as moteur
 import stock_rotation
+import ui_commun
 
 # ---------------------------------------------------------------------------
 # Garde-fou de lancement : « python app.py » au lieu de « streamlit run
@@ -67,8 +67,7 @@ ETAT_STOCK_PATH = Path(__file__).parent / "etat_stock_precedent.csv"
 # « ne pas ressortir les stocks inchangés » ne s'applique que si le document
 # de base n'a pas changé de structure (mêmes colonnes de ventes, même format).
 ETAT_STOCK_SIG_PATH = Path(__file__).parent / "etat_stock_precedent.sig"
-COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",
-                       "Qté à commander (Cmd)", "Date réappro", "Type"]
+COLONNES_HISTORIQUE = ui_commun.COLONNES_HISTORIQUE
 # Type « commande » : produit signalé (onglets 1-2) — compte dans le
 # comparatif quotidien. Type « surveillance » : écarté de justesse — sert
 # uniquement au suivi des dates de réappro repoussées. Historique du Module
@@ -196,6 +195,28 @@ def _charger_fichier_cache(data: bytes, nom: str) -> pd.DataFrame:
     return commun.charger_fichier(data, nom)
 
 
+# Les classeurs Excel sont construits à CHAQUE exécution du script, donc à
+# chaque frappe dans la recherche et à chaque case cochée — alors qu'on ne
+# les télécharge qu'une fois. Sur le cadencier réel (3 528 produits), la
+# mise en forme openpyxl coûte près de 4 secondes : sans cache, l'interface
+# est inutilisable. La clé de cache est le CONTENU des tableaux, donc le
+# fichier n'est reconstruit que s'il a réellement changé.
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def _excel_stock_cache(tableau: pd.DataFrame, dormants: pd.DataFrame) -> bytes:
+    return stock_rotation.exporter_stock_rotation_excel(
+        stock_rotation.ResultatStockRotation(tableau, dormants, {}))
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def _excel_ruptures_cache(onglet1: pd.DataFrame, onglet2: pd.DataFrame,
+                          onglet3: pd.DataFrame, vigilance: pd.DataFrame,
+                          justesse: pd.DataFrame) -> bytes:
+    return moteur.exporter_excel(moteur.ResultatAnalyse(
+        onglet1, onglet2, onglet3, {}, [], [],
+        vigilance=vigilance, ecartes_justesse=justesse))
+
+
 def charger_config() -> dict:
     """Mapping + réglages mémorisés lors d'une analyse précédente (ou vide)."""
     if CONFIG_PATH.exists():
@@ -229,17 +250,9 @@ def _defaut(memo_valeur, colonnes: list, role: str):
     return commun.detecter_colonne(colonnes, role)
 
 
-def _signature_colonnes(colonnes) -> str:
-    """Empreinte courte de la liste de colonnes d'un fichier.
-
-    Suffixe les clés des widgets de mapping : dès qu'un fichier de
-    structure DIFFÉRENTE est chargé (colonnes différentes), les widgets
-    repartent à zéro au lieu d'hériter d'une sélection mémorisée pour un
-    AUTRE fichier — sinon une colonne choisie par erreur (ou correcte pour
-    un ancien fichier mais fausse pour le nouveau) peut rester cochée
-    silencieusement après un changement de cadencier dans la même session."""
-    empreinte = "|".join(str(c) for c in colonnes)
-    return hashlib.md5(empreinte.encode("utf-8")).hexdigest()[:8]
+#: Voir ui_commun : empreinte des colonnes d'un fichier, pour repartir de
+#: widgets neufs quand un cadencier de structure différente est déposé.
+_signature_colonnes = ui_commun.signature_colonnes
 
 
 def charger_etat_stock() -> tuple:
@@ -283,31 +296,10 @@ def sauver_historique_analyse(resultat, date_analyse: date) -> pd.DataFrame:
     """Ajoute l'analyse du jour à l'historique local (remplace une éventuelle
     analyse déjà enregistrée à la même date, pour éviter les doublons en cas
     de ré-analyse). Renvoie l'historique mis à jour."""
-    jour = date_analyse.strftime("%Y-%m-%d")
-    lignes = []
-    sources = ((resultat.onglet1, None, "commande"),
-               (resultat.onglet2, "❌ SANS SOLUTION", "commande"),
-               # Écartés de justesse : leurs dates annoncées sont mémorisées
-               # pour détecter les réappros repoussées AVANT que le produit
-               # ne bascule en commande.
-               (resultat.ecartes_justesse, "⚠️ SURVEILLANCE", "surveillance"))
-    for df, urgence_defaut, type_ligne in sources:
-        if df.empty:
-            continue
-        sous = df[["Produit"]].copy()
-        sous["Date analyse"] = jour
-        sous["Urgence"] = df["Urgence"] if "Urgence" in df.columns else urgence_defaut
-        sous["Qté à commander (Cmd)"] = (df["Qté à commander (Cmd)"]
-                                         if "Qté à commander (Cmd)" in df.columns
-                                         else "")
-        # Date de réappro annoncée : mémorisée pour détecter les glissements.
-        sous["Date réappro"] = (df["Date réappro GPNC"]
-                                if "Date réappro GPNC" in df.columns else "")
-        sous["Type"] = type_ligne
-        lignes.append(sous[COLONNES_HISTORIQUE])
-    historique = charger_historique()
-    historique = historique[historique["Date analyse"] != jour]
-    historique = pd.concat([historique] + lignes, ignore_index=True)
+    historique = ui_commun.fusionner_historique(
+        charger_historique(),
+        ui_commun.lignes_historique_analyse(resultat, date_analyse),
+        date_analyse)
     historique.to_csv(HISTORIQUE_PATH, index=False)
     return historique
 
@@ -438,9 +430,10 @@ with st.sidebar:
     memo_rotation = (config if isinstance(config, dict) else {}).get(
         "stock_rotation", {})
 
-    # Réglages fins regroupés dans un panneau — laissé OUVERT par défaut
-    # (visible à gauche) pour un accès direct aux paramètres de calcul.
-    with st.expander("⚙️ Réglages avancés", expanded=True):
+    # Réglages fins regroupés dans un panneau REPLIÉ : les valeurs par
+    # défaut conviennent au quotidien, et déplié il occupait tout l'écran
+    # gauche au détriment de la progression et de la date d'analyse.
+    with st.expander("⚙️ Réglages avancés", expanded=False):
         st.caption("Les valeurs par défaut conviennent dans la plupart des "
                    "cas — n'y touchez que si besoin.")
 
@@ -880,6 +873,7 @@ st.subheader("📊 Résultats")
 
 _MIME_XLSX = ("application/vnd.openxmlformats-officedocument."
               "spreadsheetml.sheet")
+_MIME_CSV = "text/csv"
 # Accès direct aux fichiers Excel sans fouiller les onglets. Conteneur
 # rempli EN FIN de script : l'export des ruptures doit refléter les cases
 # cochées dans l'éditeur de commande, connu seulement après son rendu.
@@ -982,32 +976,10 @@ with module_stock:
                      "et motif.")
 
         tableau_stock = base_stock
-        if recherche:
-            terme = recherche.strip().upper()
-            tableau_stock = tableau_stock[
-                tableau_stock["Nom du produit"].astype(str).str.upper()
-                .str.contains(terme, regex=False)
-                | tableau_stock["Code CIP"].astype(str)
-                .str.contains(terme, regex=False)]
-        if filtre_alerte != "Toutes":
-            tableau_stock = tableau_stock[
-                tableau_stock["Alerte"] == filtre_alerte]
-        if not detail_complet:  # vue simple convenue : CIP / nom / stocks
-            # Sélection défensive : ne garder que les colonnes réellement
-            # présentes. Protège contre un résultat calculé par une version
-            # antérieure resté en mémoire de session après une mise à jour
-            # (une colonne récente y serait absente → KeyError sinon).
-            # Document de base centré sur le stock min/max. « Stock actuel »
-            # et « Qté à commander » sont déplacés dans « ＋ Colonnes
-            # d'analyse » à la demande du pharmacien.
-            colonnes_simples = ["Alerte", "Code CIP", "Nom du produit",
-                                "Stock min (calculé)", "Stock max (calculé)",
-                                "Stock min conseillé (variabilité)"]
-            tableau_stock = tableau_stock[
-                [c for c in colonnes_simples if c in tableau_stock.columns]]
-        else:  # vue détaillée : masquer les colonnes techniques internes
-            tableau_stock = tableau_stock[
-                [c for c in tableau_stock.columns if not str(c).startswith("_")]]
+        tableau_stock = ui_commun.filtrer_stock(tableau_stock, recherche,
+                                                filtre_alerte)
+        tableau_stock = tableau_stock[
+            ui_commun.colonnes_stock_affichees(tableau_stock, detail_complet)]
         st.caption(f"{len(tableau_stock)} produit(s) affiché(s) — les "
                    "stocks sont en boîtes entières. Document de base centré "
                    "sur le stock min/max ; **Stock actuel** et **Qté à "
@@ -1039,14 +1011,21 @@ with module_stock:
             resultat_pour_export = dataclasses.replace(
                 resultat_stock,
                 tableau=resultat_stock.tableau[resultat_stock.tableau["_modifie"]])
-        excel_stock = stock_rotation.exporter_stock_rotation_excel(
-            resultat_pour_export)
+        excel_stock = _excel_stock_cache(resultat_pour_export.tableau,
+                                         resultat_pour_export.dormants)
         nom_excel_stock = commun.nom_fichier_export(
             "stock_rotation", date_analyse_resultats)
-        st.download_button(
+        c_xlsx, c_csv = st.columns([3, 1])
+        c_xlsx.download_button(
             "⬇️ Télécharger l'Excel du stock en rotation",
             data=excel_stock, file_name=nom_excel_stock, mime=_MIME_XLSX,
             type="primary", use_container_width=True, key="dl_stock_onglet")
+        c_csv.download_button(
+            "📄 CSV",
+            data=ui_commun.exporter_csv(resultat_pour_export.tableau),
+            file_name=nom_excel_stock.replace(".xlsx", ".csv"), mime=_MIME_CSV,
+            use_container_width=True, key="dl_stock_csv",
+            help="Même tableau, format d'échange (s'ouvre partout).")
 
 # ===========================================================================
 # MODULE 2 — GESTION DES RUPTURES (moteur_ruptures.py)
@@ -1150,7 +1129,13 @@ with module_ruptures:
                     disabled=[c for c in affichage1.columns
                               if c not in ("✔", "Qté à commander (Cmd)")],
                     use_container_width=True, hide_index=True,
-                    key="editeur_onglet1")
+                    # Clé indexée sur le CONTENU : une nouvelle analyse
+                    # repart d'un éditeur neuf. Avec une clé fixe, les
+                    # cases décochées hier se rejouent par POSITION sur
+                    # les produits d'aujourd'hui, et la commande part
+                    # amputée sans que rien ne le signale.
+                    key=f"editeur_onglet1_"
+                        f"{ui_commun.signature_tableau(resultat.onglet1)}")
                 st.caption("Trié par **score de priorité** (risque à 7 j × "
                            "poids A/B/C × fiabilité de la réappro). "
                            "Cochez/décochez et ajustez les quantités : "
@@ -1204,17 +1189,24 @@ with module_ruptures:
         onglet1_valide = st.session_state.get("onglet1_valide", resultat.onglet1)
         if "Déjà signalé" in getattr(onglet1_valide, "columns", []):
             onglet1_valide = onglet1_valide.drop(columns=["Déjà signalé"])
-        resultat_export = dataclasses.replace(resultat, onglet1=onglet1_valide)
         nb_exclus = len(resultat.onglet1) - len(onglet1_valide)
-        excel_ruptures = moteur.exporter_excel(resultat_export)
+        excel_ruptures = _excel_ruptures_cache(
+            onglet1_valide, resultat.onglet2, resultat.onglet3,
+            df_vigilance, df_justesse)
         nom_excel_ruptures = moteur.nom_fichier_sortie(date_analyse_resultats)
         libelle_ruptures = ("⬇️ Télécharger le fichier Excel des ruptures"
                             + (f" ({nb_exclus} produit(s) décoché(s))"
                                if nb_exclus else ""))
-        st.download_button(
+        c_xlsx_r, c_csv_r = st.columns([3, 1])
+        c_xlsx_r.download_button(
             libelle_ruptures, data=excel_ruptures,
             file_name=nom_excel_ruptures, mime=_MIME_XLSX,
             type="primary", use_container_width=True, key="dl_ruptures_onglet")
+        c_csv_r.download_button(
+            "📄 CSV", data=ui_commun.exporter_csv(onglet1_valide),
+            file_name=nom_excel_ruptures.replace(".xlsx", ".csv"),
+            mime=_MIME_CSV, use_container_width=True, key="dl_ruptures_csv",
+            help="La commande UNIPHARMA seule, en format d'échange.")
 
 # ---------------------------------------------------------------------------
 # Accès direct aux exports, affiché SOUS l'en-tête Résultats (conteneur
