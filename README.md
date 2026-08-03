@@ -291,6 +291,18 @@ dans lequel on veut traiter les boîtes, et celui de la liste imprimée.
 | 🟢 OK | > 180 j | plus de six mois de marge |
 | ⚪ Sans date | — | péremption non renseignée |
 
+### Entrée ou sortie de stock
+
+Un sélecteur **Entrée / Sortie** commande le champ de scan.
+
+- **Entrée** : la boîte scannée rejoint l'inventaire (voir ci-dessous) ;
+- **Sortie** : chaque scan retire **une boîte**. Le Data Matrix désigne la
+  boîte exacte (CIP + péremption + lot) ; un code-barres linéaire ne donne
+  que le produit, et c'est alors le lot qui **périme le plus tôt** qui sort
+  — règle **FEFO** de l'officine. Si le lot scanné n'est pas à l'inventaire,
+  l'outil sort la boîte la plus proche de la péremption **en le signalant** :
+  sortir un lot pour un autre en silence ruinerait la traçabilité.
+
 ### Saisie : douchette ou clavier
 
 Trois entrées possibles, dans l'ordre de rapidité :
@@ -348,12 +360,16 @@ Deux fichiers, écrits à chaque modification et relus à l'ouverture :
   suivant, la douchette suffit.
 
 L'inventaire se corrige directement dans le tableau (quantité, date, lot) et
-une ligne de boîte sortie se supprime par la touche `Suppr`.
+une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
+(nom, dosage, code CIP ou n° de lot) et un filtre **« lots à traiter »**
+(périmés et moins d'un mois) permettent de retrouver une boîte sans faire
+défiler l'inventaire.
 
 ### Impression
 
 La liste de stock s'exporte en **CSV** (`;` + BOM : Excel l'ouvre sans
-réglage) et en **PDF** (paysage, en-tête répété à chaque page, lignes
+réglage) et en **PDF**, en totalité ou limitée aux **lots à retirer**
+(périmés et moins d'un mois) — c'est le besoin le plus fréquent (paysage, en-tête répété à chaque page, lignes
 teintées selon l'urgence). Les deux comportent, pour chaque lot : **nom du
 médicament, dosage, code CIP, nombre de boîtes, nombre d'unités et date de
 péremption**, plus le n° de lot. Dans le PDF, le statut est écrit en toutes
@@ -381,6 +397,9 @@ moteur_ruptures.py    MODULE 2 — logique métier pure des ruptures.
   (import commun)     Croise cadencier + GPNC + UNIPHARMA. Urgence,
                        vigilance, écartés de justesse, score de priorité,
                        historique, suivi quotidien.
+
+ui_commun.py          Règles PURES de l'interface (filtrage, empreintes,
+  (aucun streamlit)    historique) — sorties d'app.py pour être testables.
 
 stock_ferme.py        MODULE 3 — logique métier pure du stock fermé.
   (n'importe RIEN     Lecture des codes scannés (Data Matrix GS1, CIP13,
@@ -486,6 +505,7 @@ pharmacie-ruptures/
 ├── stock_rotation.py        # Module 1 — stock min/max, pur, testable indépendamment
 ├── moteur_ruptures.py       # Module 2 — ruptures GPNC/UNIPHARMA, pur, testable
 ├── stock_ferme.py           # Module 3 — stock fermé (scan, lots, péremptions)
+├── ui_commun.py             # règles pures de l'interface (sans Streamlit)
 ├── ui_stock_ferme.py        # interface du Module 3 (Streamlit)
 ├── .streamlit/config.toml   # thème de l'interface (vert pharmacie)
 ├── config.yaml               # mapping + réglages mémorisés (créé au 1er lancement)
@@ -500,8 +520,13 @@ pharmacie-ruptures/
     ├── test_commun.py        # fonctions partagées (parsing, fichiers, statistiques)
     ├── test_stock_rotation.py # Module 1 : stock min/max, règle des 10 unités
     ├── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
-    └── test_stock_ferme.py    # Module 3 : Data Matrix, lots, péremptions, exports
+    ├── test_stock_ferme.py    # Module 3 : Data Matrix, lots, péremptions, exports
+    ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
+    └── test_interface.py      # fumée : l'application démarre et répond
 ```
+
+Le test de fumée lance un vrai Streamlit et parcourt les deux espaces dans
+un navigateur ; il s'ignore tout seul si Playwright n'est pas installé.
 
 ## Tests
 
@@ -510,7 +535,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-309 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+369 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles

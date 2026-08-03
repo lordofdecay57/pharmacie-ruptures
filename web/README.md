@@ -1,10 +1,13 @@
 # Pilotage pharmacie — version web (Next.js + Supabase + Vercel)
 
+> ⚠️ **Portage suspendu.** L'architecture retenue est celle de
+> l'application **Python** à la racine du dépôt, seule source de vérité.
+> Voir [`ETAT.md`](ETAT.md) pour ce qui avait été porté et ce qui ne l'a
+> jamais été. Le reste de ce document décrit le portage tel qu'il était à
+> l'arrêt.
+
 Réécriture de l'utilitaire en application web : interface **Next.js**
 (déployée sur **Vercel**), données et comptes d'équipe sur **Supabase**.
-
-L'application Streamlit locale (racine du dépôt) reste opérationnelle : les
-deux peuvent coexister pendant la transition.
 
 ## Ce qui est en place
 
