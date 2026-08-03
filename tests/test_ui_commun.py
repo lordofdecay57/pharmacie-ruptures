@@ -7,13 +7,15 @@ l'export : elles méritent le même filet que les moteurs de calcul. Elles ont
 Streamlit.
 """
 
+import pathlib
 from datetime import date
 
 import pandas as pd
 import pytest
 
 from ui_commun import (COLONNES_HISTORIQUE, COLONNES_STOCK_SIMPLES,
-                       colonnes_stock_affichees, filtrer_stock,
+                       colonnes_stock_affichees, dossier_donnees,
+                       filtrer_stock,
                        fusionner_historique, lignes_historique_analyse,
                        signature_colonnes, signature_tableau)
 
@@ -229,6 +231,35 @@ class TestHistorique:
              "Type": "commande"}])
         fusion = fusionner_historique(ancien, pd.DataFrame(), JOUR)
         assert list(fusion["Produit"]) == ["HIER"]
+
+
+class TestDossierDonnees:
+    """Où l'application range config, historique et inventaire.
+
+    Ce n'est pas un détail : ces chemins ne dépendent PAS du répertoire de
+    lancement. Sans possibilité de les déplacer, la suite de tests lirait —
+    et écraserait — les données réelles de la pharmacie.
+    """
+
+    def test_par_defaut_a_cote_du_programme(self, monkeypatch):
+        monkeypatch.delenv("PHARMACIE_DONNEES", raising=False)
+        attendu = pathlib.Path(__file__).resolve().parent.parent
+        assert dossier_donnees() == attendu
+
+    def test_deplacable_par_variable_d_environnement(self, monkeypatch,
+                                                     tmp_path):
+        monkeypatch.setenv("PHARMACIE_DONNEES", str(tmp_path))
+        assert dossier_donnees() == tmp_path
+
+    def test_dossier_cree_s_il_manque(self, monkeypatch, tmp_path):
+        cible = tmp_path / "pas" / "encore" / "la"
+        monkeypatch.setenv("PHARMACIE_DONNEES", str(cible))
+        assert dossier_donnees().is_dir()
+
+    def test_variable_vide_ignoree(self, monkeypatch):
+        monkeypatch.setenv("PHARMACIE_DONNEES", "")
+        attendu = pathlib.Path(__file__).resolve().parent.parent
+        assert dossier_donnees() == attendu
 
 
 class TestIsolation:

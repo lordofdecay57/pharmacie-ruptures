@@ -12,10 +12,30 @@ exécutables dans la suite de tests.
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import date
+from pathlib import Path
 from typing import Optional, Sequence
 
 import pandas as pd
+
+
+def dossier_donnees() -> Path:
+    """Dossier où l'application range SES données (config, historique,
+    inventaire du stock fermé).
+
+    Par défaut le dossier du programme, ce qui rend l'installation
+    autonome : on copie le dossier, on double-clique, tout est là.
+
+    La variable d'environnement ``PHARMACIE_DONNEES`` permet de le
+    déplacer. C'est indispensable aux tests : sans elle, la suite lirait —
+    et écraserait — l'inventaire réel de la pharmacie, puisque ces chemins
+    ne dépendent pas du répertoire de lancement.
+    """
+    choisi = os.environ.get("PHARMACIE_DONNEES")
+    dossier = Path(choisi) if choisi else Path(__file__).resolve().parent
+    dossier.mkdir(parents=True, exist_ok=True)
+    return dossier
 
 #: Colonnes de l'historique des analyses de ruptures.
 COLONNES_HISTORIQUE = ["Date analyse", "Produit", "Urgence",

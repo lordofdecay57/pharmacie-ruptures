@@ -528,6 +528,24 @@ pharmacie-ruptures/
 Le test de fumée lance un vrai Streamlit et parcourt les deux espaces dans
 un navigateur ; il s'ignore tout seul si Playwright n'est pas installé.
 
+## Où l'application range vos données
+
+`config.yaml`, `historique_commandes.csv`, l'état du stock min/max et
+l'inventaire du stock fermé sont écrits **à côté du programme**, pas dans le
+dossier depuis lequel on le lance : copier le dossier suffit à emporter
+l'installation complète.
+
+La variable d'environnement `PHARMACIE_DONNEES` permet de les ranger
+ailleurs (dossier partagé, sauvegarde automatique) :
+
+```
+set PHARMACIE_DONNEES=D:\pharmacie\donnees   (Windows)
+export PHARMACIE_DONNEES=~/pharmacie/donnees   (Mac/Linux)
+```
+
+C'est aussi ce qui permet à la suite de tests de tourner **sans jamais
+toucher** à vos vraies données.
+
 ## Tests
 
 ```
@@ -535,7 +553,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-369 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+373 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles

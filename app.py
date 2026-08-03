@@ -58,15 +58,20 @@ _journal = logging.getLogger("pharmacie.app")
 # la bonne version tourne (utile après une mise à jour du dossier local).
 VERSION_APP = "3.2"
 
-CONFIG_PATH = Path(__file__).parent / "config.yaml"
-HISTORIQUE_PATH = Path(__file__).parent / "historique_commandes.csv"
+# Dossier des données de la pharmacie : celui du programme par défaut,
+# déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
+# ui_commun). Les tests s'en servent pour ne JAMAIS toucher aux vraies
+# données — ces chemins ne dépendent pas du répertoire de lancement.
+_DONNEES = ui_commun.dossier_donnees()
+CONFIG_PATH = _DONNEES / "config.yaml"
+HISTORIQUE_PATH = _DONNEES / "historique_commandes.csv"
 # État du stock min/max de la dernière analyse — sert à ne ressortir, au
 # cadencier suivant, que les lignes dont le stock a changé (≥ 10 %).
-ETAT_STOCK_PATH = Path(__file__).parent / "etat_stock_precedent.csv"
+ETAT_STOCK_PATH = _DONNEES / "etat_stock_precedent.csv"
 # Signature des colonnes du cadencier de la dernière analyse : la règle
 # « ne pas ressortir les stocks inchangés » ne s'applique que si le document
 # de base n'a pas changé de structure (mêmes colonnes de ventes, même format).
-ETAT_STOCK_SIG_PATH = Path(__file__).parent / "etat_stock_precedent.sig"
+ETAT_STOCK_SIG_PATH = _DONNEES / "etat_stock_precedent.sig"
 COLONNES_HISTORIQUE = ui_commun.COLONNES_HISTORIQUE
 # Type « commande » : produit signalé (onglets 1-2) — compte dans le
 # comparatif quotidien. Type « surveillance » : écarté de justesse — sert
