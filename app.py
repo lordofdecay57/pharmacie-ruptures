@@ -89,17 +89,70 @@ st.set_page_config(page_title="Pharmacie — stock & ruptures", page_icon="💊"
 
 st.markdown("""
 <style>
+/* Bandeau volontairement DISCRET : il rappelle où l'on est et quelle
+   version tourne, rien de plus. La place revient au choix de l'espace de
+   travail, juste en dessous, qui est la vraie décision de l'écran. */
 .hero {
   background: linear-gradient(120deg, #0f766e, #0d9488);
-  border-radius: 14px; padding: 22px 26px; color: #ffffff;
+  border-radius: 10px; padding: 10px 18px; color: #ffffff;
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
 }
-.hero h1 { color: #ffffff; font-size: 1.55rem; margin: 0 0 6px 0; padding: 0; }
-.hero .version { font-size: .82rem; font-weight: 600; vertical-align: middle;
-  background: rgba(255,255,255,.22); border-radius: 999px; padding: 2px 10px;
-  margin-left: 8px; letter-spacing: .3px; }
-.hero p  { color: rgba(255,255,255,.88); margin: 0; font-size: .95rem; }
-.hero .badge { display: inline-block; background: rgba(255,255,255,.16);
-  border-radius: 999px; padding: 3px 14px; font-size: .8rem; margin-top: 12px; }
+.hero h1 { color: #ffffff; font-size: 1.12rem; margin: 0; padding: 0;
+  font-weight: 700; }
+.hero .version { font-size: .74rem; font-weight: 600;
+  background: rgba(255,255,255,.22); border-radius: 999px; padding: 1px 9px;
+  letter-spacing: .3px; }
+.hero .local { color: rgba(255,255,255,.85); font-size: .78rem;
+  margin-left: auto; }
+
+/* Choix de l'espace de travail : deux grands onglets, impossibles à
+   manquer. Ciblé par la clé du widget (st-key-espace_travail) pour ne pas
+   déformer les autres groupes de boutons de l'application. */
+.st-key-espace_travail { margin: 12px 0 4px 0; }
+.st-key-espace_travail [data-testid="stButtonGroup"] { gap: 10px; }
+.st-key-espace_travail button {
+  padding: 15px 20px !important; border-radius: 10px !important;
+  border: 1px solid rgba(11,11,11,.14) !important;
+}
+.st-key-espace_travail button p {
+  font-size: 1.05rem !important; font-weight: 600 !important;
+}
+/* L'onglet ACTIF est plein : la couleur seule ne suffirait pas à le
+   distinguer d'un survol, un fond franc le rend évident. */
+.st-key-espace_travail button[kind="segmented_controlActive"] {
+  background: #0f766e !important; border-color: #0f766e !important;
+  box-shadow: 0 2px 6px rgba(15,118,110,.30) !important;
+}
+.st-key-espace_travail button[kind="segmented_controlActive"] p {
+  color: #ffffff !important;
+}
+
+/* Entrée / Sortie du stock fermé : même traitement, avec un code couleur —
+   ajouter et retirer du stock ne se confondent pas. */
+.st-key-sf_mode [data-testid="stButtonGroup"] { gap: 10px; }
+.st-key-sf_mode button {
+  padding: 12px 30px !important; border-radius: 10px !important;
+  border: 1px solid rgba(11,11,11,.14) !important;
+}
+.st-key-sf_mode button p { font-size: 1rem !important;
+  font-weight: 600 !important; }
+.st-key-sf_mode button[kind="segmented_controlActive"] {
+  background: #0f766e !important; border-color: #0f766e !important;
+}
+.st-key-sf_mode button[kind="segmented_controlActive"] p { color: #fff !important; }
+/* La SORTIE retire du stock : elle s'affiche en ambre pour qu'on ne scanne
+   pas une entrée en croyant faire une sortie, ou l'inverse. */
+.st-key-sf_mode button:last-child[kind="segmented_controlActive"] {
+  background: #b45309 !important; border-color: #b45309 !important;
+}
+
+/* Séparateur d'espace : une barre de couleur propre à chaque module, pour
+   qu'on sache d'un coup d'œil dans lequel on travaille. */
+.espace { border-left: 5px solid #0f766e; padding: 2px 0 2px 14px;
+  margin: 4px 0 16px 0; }
+.espace.ferme { border-left-color: #7c3aed; }
+.espace .titre { font-size: 1.3rem; font-weight: 700; color: #0b0b0b; }
+.espace .sous  { font-size: .88rem; color: #6b6a66; margin-top: 2px; }
 
 .kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 14px 0; }
 .kpi { flex: 1 1 180px; max-width: 340px; background: #ffffff;
@@ -136,15 +189,19 @@ def _etape(numero: str, titre: str, sous_titre: str = "") -> None:
                 f'<span class="txt">{titre}{sous}</span></div>',
                 unsafe_allow_html=True)
 
+def _entete_espace(titre: str, sous_titre: str, variante: str = "") -> None:
+    """Bandeau d'espace : dit en clair dans quel module on travaille."""
+    st.markdown(f'<div class="espace {variante}">'
+                f'<div class="titre">{titre}</div>'
+                f'<div class="sous">{sous_titre}</div></div>',
+                unsafe_allow_html=True)
+
+
 st.markdown(f"""
 <div class="hero">
-  <h1>💊 Pilotage pharmacie — stock &amp; ruptures
-    <span class="version">v{VERSION_APP}</span></h1>
-  <p>Trois modules indépendants : le <b>stock en rotation</b> (stock min/max
-  par produit) et les <b>ruptures fournisseurs</b> (GPNC/UNIPHARMA → fichier
-  Excel de commande), tous deux issus du cadencier, plus le <b>stock fermé</b>
-  (inventaire scanné boîte par boîte, avec péremptions).</p>
-  <span class="badge">🔒 Application 100 % locale — vos données ne quittent pas ce poste</span>
+  <h1>💊 Pilotage pharmacie</h1>
+  <span class="version">v{VERSION_APP}</span>
+  <span class="local">🔒 100 % local — vos données ne quittent pas ce poste</span>
 </div>
 """, unsafe_allow_html=True)
 st.write("")
@@ -175,19 +232,33 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 # du parcours principal — et matérialise son indépendance.
 # ---------------------------------------------------------------------------
 
-ESPACE_CADENCIER = "📈 Stock en rotation & ruptures"
-ESPACE_STOCK_FERME = "🔒 Stock fermé (inventaire scanné)"
+ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
+ESPACE_STOCK_FERME = "🔒  Stock fermé — inventaire scanné"
 
-espace = st.radio(
+# Deux grands onglets plutôt qu'un choix discret : les deux espaces ne
+# partagent NI fichiers, NI données, NI exports. Savoir dans lequel on se
+# trouve est la première chose à voir en arrivant sur l'écran.
+espace = st.segmented_control(
     "Espace de travail", [ESPACE_CADENCIER, ESPACE_STOCK_FERME],
-    horizontal=True, label_visibility="collapsed", key="espace_travail",
-    captions=["À partir du cadencier et des fichiers de ruptures.",
-              "Inventaire à part, tenu à la douchette (boîte par boîte)."])
+    default=ESPACE_CADENCIER, label_visibility="collapsed",
+    key="espace_travail", width="stretch")
+if espace is None:  # le segmented control se déselectionne au second clic
+    espace = ESPACE_CADENCIER
 
 if espace == ESPACE_STOCK_FERME:
     import ui_stock_ferme
+    _entete_espace(
+        "🔒 Stock fermé",
+        "Inventaire tenu à part du stock officinal — armoire sécurisée, "
+        "dotation d'urgence, trousse, réserve de garde. Aucun fichier à "
+        "déposer : on scanne, on imprime.", variante="ferme")
     ui_stock_ferme.rendre(_etape, _tuile_kpi)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
+
+_entete_espace(
+    "📈 Cadencier — stock en rotation & ruptures",
+    "Deux modules à partir des mêmes fichiers : le stock min/max par produit, "
+    "et la commande de dépannage face aux ruptures fournisseurs.")
 
 # ---------------------------------------------------------------------------
 # Config (mémorisation du mapping des colonnes + des réglages des 2 modules)
