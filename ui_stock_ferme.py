@@ -15,17 +15,20 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 import stock_ferme
+import ui_commun
 
 _journal = logging.getLogger("pharmacie.stock_ferme.ui")
 
-INVENTAIRE_PATH = Path(__file__).parent / "stock_ferme.csv"
-REPERTOIRE_PATH = Path(__file__).parent / "stock_ferme_produits.csv"
+# Dossier des données de la pharmacie (déplaçable par PHARMACIE_DONNEES) :
+# ces chemins ne dépendent PAS du répertoire de lancement, sinon la suite de
+# tests écraserait l'inventaire réel.
+INVENTAIRE_PATH = ui_commun.dossier_donnees() / "stock_ferme.csv"
+REPERTOIRE_PATH = ui_commun.dossier_donnees() / "stock_ferme_produits.csv"
 
 _MIME_CSV = "text/csv"
 _MIME_PDF = "application/pdf"

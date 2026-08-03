@@ -11,6 +11,7 @@ Ils sont ignorés automatiquement si Streamlit ou Playwright manquent, pour
 que la suite reste exécutable sur un poste sans navigateur.
 """
 
+import os
 import socket
 import subprocess
 import sys
@@ -43,10 +44,13 @@ def _attendre(port: int, delai: float = DEMARRAGE_MAX_S) -> bool:
 
 @pytest.fixture(scope="module")
 def application(tmp_path_factory):
-    """Streamlit lancé sur un port libre, dans un dossier de travail à part.
+    """Streamlit lancé sur un port libre, sur des données JETABLES.
 
-    ``HOME`` et le dossier courant sont isolés : le test ne doit ni lire ni
-    écrire la configuration ou l'inventaire réels de la pharmacie.
+    ``PHARMACIE_DONNEES`` déplace la configuration, l'historique et
+    l'inventaire du stock fermé dans un dossier temporaire. Sans cette
+    variable, ces fichiers vivent à côté du programme (et non dans le
+    répertoire de lancement) : le test lirait — et écraserait — les données
+    réelles de la pharmacie.
     """
     pytest.importorskip("streamlit")
     pytest.importorskip("playwright")
@@ -55,11 +59,13 @@ def application(tmp_path_factory):
 
     port = _port_libre()
     travail = tmp_path_factory.mktemp("appli")
+    environnement = dict(os.environ, PHARMACIE_DONNEES=str(travail))
     processus = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", str(RACINE / "app.py"),
          "--server.headless", "true", "--server.port", str(port),
          "--browser.gatherUsageStats", "false"],
-        cwd=travail, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        cwd=travail, env=environnement,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         if not _attendre(port):
             processus.kill()
