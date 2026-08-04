@@ -162,8 +162,16 @@ class TestEspaceStockFerme:
         _sans_exception(page)
         contenu = page.content()
         for attendu in ("Scannez le produit", "Inventaire",
-                        "Imprimez ou exportez", "Entrée", "Sortie"):
+                        "Imprimez ou exportez", "Entrée", "Sortie",
+                        "Base publique des médicaments",
+                        "Pré-remplir les noms"):
             assert attendu in contenu, f"« {attendu} » absent de l'écran"
+
+    def test_base_absente_signalee_sans_bloquer(self, page):
+        """Le poste peut être hors ligne : l'absence de base publique se
+        signale, mais l'inventaire reste utilisable."""
+        _sans_exception(page)
+        assert "non installée" in page.content()
 
     def test_scan_d_un_produit_inconnu_ouvre_la_fiche(self, page):
         champ = page.get_by_placeholder("Douchez la boîte")

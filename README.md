@@ -357,15 +357,30 @@ code CIP), la **péremption**, le **n° de lot** et le **n° de série**. Un
 encadré « 🔎 Que contient exactement le code scanné ? » le montre champ par
 champ sur la boîte que l'on vient de scanner.
 
-Le nom vient donc d'une table « code CIP → libellé ». Deux façons de la
-remplir :
+Le nom vient donc d'une table « code CIP → libellé ». Trois façons de la
+remplir, de la plus automatique à la plus manuelle :
 
-1. **à la volée** — le nom est demandé au premier scan d'un produit, une
-   seule fois ; il est ensuite reconnu automatiquement ;
-2. **en bloc** — l'encadré « 📇 Pré-remplir les noms depuis un fichier »
-   avale un cadencier ou un catalogue (`.xlsx`, `.csv`, `.pdf`) et n'en
-   retient que les couples code + libellé. Plus rien n'est alors à saisir
-   pour les produits que vous détenez déjà.
+1. **la base publique des médicaments** (`base_medicaments.py`) — un bouton
+   télécharge les fichiers officiels de l'ANSM / ministère de la Santé
+   (`CIS_bdpm.txt` et `CIS_CIP_bdpm.txt`), les recoupe sur le code CIS et en
+   tire ~42 000 correspondances (CIP13 **et** CIP7). Le nom s'affiche alors
+   **au moment du scan**, sans rien saisir. La table est conservée sur le
+   poste : le téléchargement est explicite, et l'identification fonctionne
+   ensuite **hors ligne** ;
+2. **en bloc depuis votre catalogue** — l'encadré « 📇 Pré-remplir les noms
+   depuis un fichier » avale un cadencier (`.xlsx`, `.csv`, `.pdf`) et n'en
+   retient que les couples code + libellé. Utile pour ce que la base
+   publique ne couvre pas ;
+3. **à la volée** — le nom est demandé au premier scan d'un produit, une
+   seule fois ; il est ensuite reconnu automatiquement.
+
+Un nom trouvé dans la base publique est **recopié dans le répertoire de la
+pharmacie** : il devient modifiable, et l'identification ne dépend plus de
+la base ensuite.
+
+> Le CIP13 français est construit `34009` + CIP7 + clé de contrôle
+> (vérifié sur la base officielle) : une boîte lue en CIP7 retrouve donc sa
+> fiche, et réciproquement.
 
 > Le moteur ne reçoit que des couples déjà extraits : la lecture du fichier
 > appartient à l'interface, ce qui laisse `stock_ferme.py` indépendant de
@@ -422,6 +437,10 @@ moteur_ruptures.py    MODULE 2 — logique métier pure des ruptures.
 
 ui_commun.py          Règles PURES de l'interface (filtrage, empreintes,
   (aucun streamlit)    historique) — sorties d'app.py pour être testables.
+
+base_medicaments.py   Identification d'un CIP via la base publique des
+  (aucun autre module)  médicaments. Ne sait répondre qu'à « quel
+                        médicament porte ce code ? ».
 
 stock_ferme.py        MODULE 3 — logique métier pure du stock fermé.
   (n'importe RIEN     Lecture des codes scannés (Data Matrix GS1, CIP13,
@@ -540,12 +559,14 @@ pharmacie-ruptures/
 ├── stock_rotation.py        # Module 1 — stock min/max, pur, testable indépendamment
 ├── moteur_ruptures.py       # Module 2 — ruptures GPNC/UNIPHARMA, pur, testable
 ├── stock_ferme.py           # Module 3 — stock fermé (scan, lots, péremptions)
+├── base_medicaments.py      # identification d'un CIP via la base publique
 ├── ui_commun.py             # règles pures de l'interface (sans Streamlit)
 ├── ui_stock_ferme.py        # interface du Module 3 (Streamlit)
 ├── .streamlit/config.toml   # thème de l'interface (vert pharmacie)
 ├── config.yaml               # mapping + réglages mémorisés (créé au 1er lancement)
 ├── historique_commandes.csv  # historique des analyses de ruptures (créé à la 1re)
 ├── stock_ferme.csv           # inventaire du stock fermé (créé au 1er scan)
+├── base_medicaments.csv      # base publique téléchargée (créée à la demande)
 ├── stock_ferme_produits.csv  # produits mémorisés du stock fermé (CIP → nom)
 ├── requirements.txt          # dépendances Python
 ├── lancer.bat                 # double-clic Windows
@@ -556,6 +577,7 @@ pharmacie-ruptures/
     ├── test_stock_rotation.py # Module 1 : stock min/max, règle des 10 unités
     ├── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
     ├── test_stock_ferme.py    # Module 3 : Data Matrix, lots, péremptions, exports
+    ├── test_base_medicaments.py # identification par CIP (base publique)
     ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
     └── test_interface.py      # fumée : l'application démarre et répond
 ```
@@ -588,7 +610,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-384 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+414 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles
