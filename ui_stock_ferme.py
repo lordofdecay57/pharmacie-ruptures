@@ -19,6 +19,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+import base_medicaments
 import commun
 import stock_ferme
 import ui_commun
@@ -30,6 +31,13 @@ _journal = logging.getLogger("pharmacie.stock_ferme.ui")
 # tests écraserait l'inventaire réel.
 INVENTAIRE_PATH = ui_commun.dossier_donnees() / "stock_ferme.csv"
 REPERTOIRE_PATH = ui_commun.dossier_donnees() / "stock_ferme_produits.csv"
+#: Table « code CIP → dénomination » issue de la base publique des
+#: médicaments, conservée sur le poste pour fonctionner hors ligne.
+BASE_MEDICAMENTS_PATH = ui_commun.dossier_donnees() / "base_medicaments.csv"
+
+#: Au-delà, la base publique mérite d'être rafraîchie (nouvelles AMM,
+#: arrêts de commercialisation).
+ANCIENNETE_BASE_JOURS = 180
 
 _MIME_CSV = "text/csv"
 _MIME_PDF = "application/pdf"
@@ -55,6 +63,24 @@ def _etat():
         st.session_state["sf_repertoire"] = stock_ferme.charger_repertoire(
             REPERTOIRE_PATH)
     return st.session_state["sf_inventaire"], st.session_state["sf_repertoire"]
+
+
+def _index_base() -> dict:
+    """Index « code CIP → dénomination » de la base publique.
+
+    Relu une seule fois par session, et à nouveau si le fichier a changé
+    (mise à jour de la base) — 40 000 codes, inutile de les relire à chaque
+    interaction.
+    """
+    empreinte = (BASE_MEDICAMENTS_PATH.stat().st_mtime
+                 if BASE_MEDICAMENTS_PATH.exists() else 0)
+    if st.session_state.get("sf_base_empreinte") != empreinte:
+        st.session_state["sf_base_index"] = base_medicaments.index_par_cip(
+            base_medicaments.charger_table(BASE_MEDICAMENTS_PATH))
+        st.session_state["sf_base_empreinte"] = empreinte
+        _journal.info("Base des médicaments : %d code(s) chargé(s)",
+                      len(st.session_state["sf_base_index"]))
+    return st.session_state["sf_base_index"]
 
 
 def _enregistrer(inventaire=None, repertoire=None) -> None:
@@ -153,21 +179,40 @@ def _traiter_scan() -> None:
         _traiter_sortie(code, inventaire)
         return
 
+    # Qui est ce produit ? Le répertoire de la pharmacie d'abord — c'est sa
+    # propre vérité, éventuellement corrigée à la main. À défaut, la base
+    # publique des médicaments identifie le CIP : le nom arrive alors en même
+    # temps que le scan, sans rien demander.
     connu = stock_ferme.produit_connu(repertoire, code.cip)
+    depuis_base = False
+    if connu is None:
+        nom_officiel = base_medicaments.chercher(_index_base(), code.cip)
+        if nom_officiel:
+            connu = {"nom": nom_officiel, "dosage": "", "unites_par_boite": 0}
+            depuis_base = True
 
-    # Boîte entièrement identifiée (Data Matrix d'un produit déjà nommé) :
-    # elle entre au stock sans confirmation — c'est le geste du comptoir.
+    # Boîte entièrement identifiée : elle entre au stock sans confirmation —
+    # c'est le geste du comptoir.
     if (code.reconnu and code.peremption is not None and connu
             and st.session_state.get("sf_ajout_direct", True)):
         entree = stock_ferme.EntreeStock(
             cip=code.cip, nom=connu["nom"], dosage=connu["dosage"],
             boites=1, unites_par_boite=connu["unites_par_boite"],
             peremption=code.peremption, lot=code.lot)
-        _enregistrer(inventaire=stock_ferme.ajouter_entree(inventaire, entree))
+        nouveau_repertoire = None
+        if depuis_base:
+            # Le nom devient celui de la pharmacie : elle peut le corriger,
+            # et l'identification ne dépendra plus de la base ensuite.
+            nouveau_repertoire = stock_ferme.memoriser_produit(
+                repertoire, code.cip, connu["nom"])
+        _enregistrer(inventaire=stock_ferme.ajouter_entree(inventaire, entree),
+                     repertoire=nouveau_repertoire)
         st.session_state["sf_message"] = (
             "ok", f"➕ {connu['nom']} {connu['dosage']} — 1 boîte "
                   f"(péremption {code.peremption:%d/%m/%Y}"
-                  + (f", lot {code.lot}" if code.lot else "") + ")")
+                  + (f", lot {code.lot}" if code.lot else "") + ")"
+                  + (" · nom repris de la base publique des médicaments"
+                     if depuis_base else ""))
         st.session_state.pop("sf_en_attente", None)
         return
 
@@ -181,6 +226,9 @@ def _traiter_scan() -> None:
 
     st.session_state["sf_en_attente"] = {
         "cip": code.cip,
+        # Même quand la fiche s'ouvre (pas de péremption, ajout direct
+        # désactivé…), le nom trouvé dans la base est déjà là : il n'y a
+        # plus qu'à valider.
         "nom": (connu or {}).get("nom", ""),
         "dosage": (connu or {}).get("dosage", ""),
         "unites_par_boite": (connu or {}).get("unites_par_boite", 0),
@@ -363,6 +411,51 @@ def _bandeau_kpi(resume: dict, tuile) -> None:
               "serious" if resume["critiques"] else "",
               sous=f'{resume["vigilance"]} autre(s) sous 6 mois'),
     ]) + "</div>", unsafe_allow_html=True)
+
+
+def _base_publique() -> None:
+    """Installation et mise à jour de la base publique des médicaments.
+
+    C'est elle qui donne le nom au moment du scan, sans rien saisir. Le
+    téléchargement est explicite : l'application reste locale, et on choisit
+    quand la rafraîchir.
+    """
+    info = base_medicaments.info_base(BASE_MEDICAMENTS_PATH)
+    age = base_medicaments.anciennete_jours(info,
+                                            st.session_state.get("sf_date"))
+    if not info["existe"]:
+        etat, ouvert = "⚠️ non installée", True
+    elif age is not None and age > ANCIENNETE_BASE_JOURS:
+        etat, ouvert = f"🟡 {info['lignes']} codes · {age} jours", False
+    else:
+        etat, ouvert = f"🟢 {info['lignes']} codes · à jour", False
+
+    with st.expander(f"🌐 Base publique des médicaments — {etat}",
+                     expanded=ouvert):
+        st.caption(
+            "Un code-barres ne contient pas le nom du médicament, seulement "
+            "le code CIP. Cette base officielle (ANSM / ministère de la "
+            "Santé) fait la correspondance : une fois installée, le nom "
+            "s'affiche **au moment du scan**, sans rien taper. Elle est "
+            "conservée sur ce poste et fonctionne ensuite hors ligne.")
+        if info["existe"]:
+            st.caption(f"Dernière mise à jour : {info['date']:%d/%m/%Y}.")
+
+        if not st.button("⬇️ Télécharger / mettre à jour la base",
+                         use_container_width=True,
+                         type="primary" if not info["existe"] else "secondary"):
+            return
+        try:
+            with st.spinner("Téléchargement de la base officielle…"):
+                table = base_medicaments.telecharger_table()
+            base_medicaments.sauver_table(table, BASE_MEDICAMENTS_PATH)
+        except ValueError as e:
+            st.error(str(e))
+            return
+        st.session_state["sf_message"] = (
+            "ok", f"🌐 Base des médicaments installée — {len(table)} codes. "
+                  "Les prochains scans afficheront le nom tout seuls.")
+        st.rerun()
 
 
 def _import_repertoire(repertoire: pd.DataFrame) -> None:
@@ -591,6 +684,7 @@ def rendre(etape, tuile_kpi) -> None:
                    "qui sort.")
 
     if mode == MODE_ENTREE:
+        _base_publique()
         _import_repertoire(repertoire)
         inventaire, repertoire = _etat()
 
