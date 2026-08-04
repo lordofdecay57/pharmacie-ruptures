@@ -349,6 +349,28 @@ conditionnement renseigné, les boîtes ne sont **pas** converties : l'outil
 préfère afficher « conditionnement non renseigné » plutôt qu'inventer un
 total.
 
+### Le nom du médicament ne vient PAS du code-barres
+
+Aucun identifiant GS1 ne transporte le libellé d'un produit. Le Data Matrix
+d'une boîte contient exactement quatre choses : le **GTIN** (qui porte le
+code CIP), la **péremption**, le **n° de lot** et le **n° de série**. Un
+encadré « 🔎 Que contient exactement le code scanné ? » le montre champ par
+champ sur la boîte que l'on vient de scanner.
+
+Le nom vient donc d'une table « code CIP → libellé ». Deux façons de la
+remplir :
+
+1. **à la volée** — le nom est demandé au premier scan d'un produit, une
+   seule fois ; il est ensuite reconnu automatiquement ;
+2. **en bloc** — l'encadré « 📇 Pré-remplir les noms depuis un fichier »
+   avale un cadencier ou un catalogue (`.xlsx`, `.csv`, `.pdf`) et n'en
+   retient que les couples code + libellé. Plus rien n'est alors à saisir
+   pour les produits que vous détenez déjà.
+
+> Le moteur ne reçoit que des couples déjà extraits : la lecture du fichier
+> appartient à l'interface, ce qui laisse `stock_ferme.py` indépendant de
+> tout format de catalogue.
+
 ### Mémoire
 
 Deux fichiers, écrits à chaque modification et relus à l'ouverture :
@@ -566,7 +588,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-373 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+384 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles
