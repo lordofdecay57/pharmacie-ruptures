@@ -58,7 +58,7 @@ URL_VERSION_PUBLIEE = ("https://raw.githubusercontent.com/lordofdecay57/"
                        "pharmacie-ruptures/main/app.py")
 
 
-def version_publiee(delai_s: float = 4) -> Optional[str]:
+def version_publiee(delai_s: float = 2) -> Optional[str]:
     """Numéro de version actuellement publié, ou ``None`` si indisponible.
 
     Une mise à jour peut échouer sans bruit — typiquement quand une ancienne
@@ -69,6 +69,10 @@ def version_publiee(delai_s: float = 4) -> Optional[str]:
     Aucune donnée n'est transmise : c'est une simple lecture d'un fichier
     public. Toute erreur (poste hors ligne, réseau filtré) renvoie ``None``
     et l'application n'en dit rien — ce n'est qu'un confort.
+
+    Délai volontairement court : cette lecture se fait avant le premier
+    affichage. Mieux vaut renoncer au badge que retarder l'ouverture de
+    l'écran sur un réseau lent.
     """
     import re
     import urllib.request

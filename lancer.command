@@ -8,6 +8,11 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 python3 -m pip install -r requirements.txt --quiet
+
+# Mise à jour automatique avant lancement : l'application n'est pas encore
+# démarrée, c'est le seul moment où remplacer des fichiers est sans danger.
+python3 maj_auto.py --verbeux
+
 # Port fixe : voir lancer.bat — un basculement silencieux sur un
 # autre port ferait regarder l'ancienne version.
 python3 -m streamlit run app.py --server.port 8501
