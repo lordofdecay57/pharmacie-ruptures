@@ -775,6 +775,64 @@ def memoriser_produit(repertoire: pd.DataFrame, cip: str, nom: str,
     return pd.concat([repertoire, ligne], ignore_index=True)
 
 
+def importer_repertoire(repertoire: pd.DataFrame, lignes) -> tuple:
+    """Charge en bloc des identités produit dans le répertoire.
+
+    Un code-barres ne transporte PAS le nom du médicament : aucun
+    identifiant GS1 ne le prévoit. Le nom doit donc venir d'une table
+    « code CIP → libellé » — typiquement le catalogue de la pharmacie. Cette
+    fonction l'avale d'un coup, pour que les scans suivants n'aient plus
+    rien à demander.
+
+    ``lignes`` : itérable de dictionnaires ``{"cip", "nom", "dosage",
+    "unites_par_boite"}`` — la fonction ignore d'où ils viennent, ce qui la
+    laisse indépendante de tout format de fichier.
+
+    Renvoie ``(repertoire, nb_ajoutes, nb_ignores)``. Une ligne sans code ou
+    sans nom est ignorée : elle n'apprendrait rien.
+    """
+    if repertoire is None or repertoire.empty:
+        repertoire = repertoire_vide()
+    repertoire = repertoire.reindex(columns=COLONNES_REPERTOIRE).copy()
+    repertoire["Code CIP"] = repertoire["Code CIP"].map(
+        lambda v: re.sub(r"\D", "", _texte(v)))
+
+    existants = {c: i for i, c in zip(repertoire.index, repertoire["Code CIP"])}
+    nouvelles: dict = {}   # cip -> ligne, pour ne pas dupliquer un CIP répété
+    ignores = 0
+    for ligne in lignes or []:
+        cip = re.sub(r"\D", "", _texte(ligne.get("cip")))
+        nom = _texte(ligne.get("nom"))
+        if not cip or not nom:
+            ignores += 1
+            continue
+        dosage = _texte(ligne.get("dosage"))
+        unites = int(pd.to_numeric(pd.Series([ligne.get("unites_par_boite", 0)]),
+                                   errors="coerce").fillna(0).astype(int).iloc[0])
+        if cip in existants:  # déjà connu : le fichier met à jour l'existant
+            i = existants[cip]
+            repertoire.at[i, "Nom du produit"] = nom
+            if dosage:
+                repertoire.at[i, "Dosage"] = dosage
+            if unites:
+                repertoire.at[i, "Unités par boîte"] = unites
+            continue
+        # Un même CIP peut revenir plusieurs fois dans un catalogue : la
+        # dernière ligne lue fait foi, sans créer de doublon.
+        precedente = nouvelles.get(cip, {})
+        nouvelles[cip] = {
+            "Code CIP": cip, "Nom du produit": nom,
+            "Dosage": dosage or precedente.get("Dosage", ""),
+            "Unités par boîte": unites or precedente.get("Unités par boîte", 0)}
+
+    if nouvelles:
+        repertoire = pd.concat(
+            [repertoire, pd.DataFrame(list(nouvelles.values()),
+                                      columns=COLONNES_REPERTOIRE)],
+            ignore_index=True)
+    return repertoire.reset_index(drop=True), len(nouvelles), ignores
+
+
 def produit_connu(repertoire: pd.DataFrame, cip: str) -> Optional[dict]:
     """Identité mémorisée d'un CIP, ou ``None`` s'il est encore inconnu."""
     cip = re.sub(r"\D", "", str(cip or ""))

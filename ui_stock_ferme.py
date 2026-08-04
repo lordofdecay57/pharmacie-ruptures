@@ -19,6 +19,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+import commun
 import stock_ferme
 import ui_commun
 
@@ -209,6 +210,33 @@ def _saisie_manuelle_vierge() -> None:
     st.session_state["sf_message"] = None
 
 
+def _detail_code(brut: str) -> str:
+    """Décomposition lisible du code scanné, champ GS1 par champ GS1."""
+    code = stock_ferme.parser_code_scanne(brut)
+    visible = brut.replace("\x1d", "⟨sép⟩")
+    lignes = [f"Contenu transmis par la douchette ({len(brut)} caractères) :",
+              f"  {visible}", ""]
+    if code.format == "datamatrix":
+        lignes.append("Décodage GS1 :")
+        lignes.append(f"  01  GTIN / code produit ... {code.gtin} → CIP "
+                      f"{code.cip}")
+        lignes.append("  17  date de péremption .... "
+                      + (f"{code.peremption:%d/%m/%Y}" if code.peremption
+                         else "absente"))
+        lignes.append(f"  10  n° de lot ............ {code.lot or 'absent'}")
+        lignes.append(f"  21  n° de série .......... "
+                      f"{code.serie or 'absent'}")
+    elif code.reconnu:
+        lignes.append(f"Code-barres linéaire : CIP {code.cip} — il ne porte "
+                      "que l'identifiant du produit.")
+    else:
+        lignes.append("Contenu non reconnu comme un code produit.")
+    lignes += ["", "Aucun identifiant GS1 ne transporte le NOM du "
+                   "médicament : il n'est pas dans la boîte, il vient du "
+                   "répertoire."]
+    return "\n".join(lignes)
+
+
 def _formulaire_complement(inventaire: pd.DataFrame,
                            repertoire: pd.DataFrame) -> None:
     """Fiche d'ajout : ce que le code ne dit pas, l'opérateur le complète."""
@@ -225,7 +253,9 @@ def _formulaire_complement(inventaire: pd.DataFrame,
                 f"Le code **{attente['cip']}** n'a jamais été enregistré ici. "
                 "Un code-barres ne contient **pas** le nom du médicament : "
                 "saisissez-le une fois, et les prochains scans de ce produit "
-                "seront reconnus tout seuls.")
+                "seront reconnus tout seuls. Pour éviter toute saisie, "
+                "importez votre catalogue (encadré « Pré-remplir les noms » "
+                "ci-dessus).")
 
         col1, col2, col3 = st.columns([3, 2, 2])
         # Placeholders rédigés comme des CONSIGNES : un exemple réaliste
@@ -259,6 +289,14 @@ def _formulaire_complement(inventaire: pd.DataFrame,
             help="Obligatoire : c'est elle qui distingue deux boîtes du "
                  "même médicament.")
         lot = col8.text_input("N° de lot", value=attente["lot"])
+
+        # Vérifiable d'un coup d'œil : ce que la boîte a RÉELLEMENT transmis,
+        # champ par champ. C'est la seule façon de constater soi-même
+        # qu'aucun libellé n'y figure — et, si une douchette envoyait autre
+        # chose, de le voir immédiatement.
+        if attente["brut"]:
+            with st.expander("🔎 Que contient exactement le code scanné ?"):
+                st.code(_detail_code(attente["brut"]), language=None)
 
         col_ok, col_annule = st.columns([3, 1])
         valide = col_ok.form_submit_button("➕ Ajouter au stock",
@@ -325,6 +363,69 @@ def _bandeau_kpi(resume: dict, tuile) -> None:
               "serious" if resume["critiques"] else "",
               sous=f'{resume["vigilance"]} autre(s) sous 6 mois'),
     ]) + "</div>", unsafe_allow_html=True)
+
+
+def _import_repertoire(repertoire: pd.DataFrame) -> None:
+    """Pré-remplissage du répertoire depuis un fichier de la pharmacie.
+
+    Le nom du médicament ne peut PAS venir du code-barres. Il doit venir
+    d'une table « code CIP → libellé » : le cadencier de l'officine en est
+    une, et elle a l'avantage d'être déjà sur le poste et de ne contenir que
+    des produits réellement détenus.
+
+    Le fichier est lu ici, dans la couche d'affichage : `stock_ferme.py`
+    n'en connaît rien, il ne reçoit que des couples déjà extraits.
+    """
+    with st.expander("📇 Pré-remplir les noms depuis un fichier "
+                     "(cadencier, catalogue…)"):
+        st.caption(
+            "Un code-barres ne contient pas le nom du médicament. En "
+            "important une fois votre catalogue, les boîtes scannées seront "
+            "reconnues automatiquement, sans rien saisir.")
+        fichier = st.file_uploader(
+            "Fichier contenant au moins un code CIP et un libellé",
+            type=["xlsx", "xls", "csv", "pdf"], key="sf_import_fichier")
+        if fichier is None:
+            return
+
+        try:
+            tableau = commun.charger_fichier(fichier.getvalue(), fichier.name)
+        except ValueError as e:
+            st.error(str(e))
+            return
+        colonnes = list(tableau.columns)
+        st.success(f"{len(tableau)} ligne(s) lue(s).")
+
+        def _defaut(role, secours=None):
+            trouve = commun.detecter_colonne(colonnes, role)
+            return colonnes.index(trouve) if trouve in colonnes else (
+                colonnes.index(secours) if secours in colonnes else 0)
+
+        c1, c2, c3 = st.columns(3)
+        col_cip = c1.selectbox("Colonne du code CIP", colonnes,
+                               index=_defaut("cip"), key="sf_import_cip")
+        col_nom = c2.selectbox("Colonne du nom", colonnes,
+                               index=_defaut("libelle"), key="sf_import_nom")
+        col_dosage = c3.selectbox("Colonne du dosage (facultatif)",
+                                  ["(aucune)"] + colonnes,
+                                  key="sf_import_dosage")
+
+        if not st.button("📥 Importer dans le répertoire",
+                         use_container_width=True, type="primary"):
+            return
+        lignes = [{"cip": ligne[col_cip], "nom": ligne[col_nom],
+                   "dosage": (ligne[col_dosage]
+                              if col_dosage != "(aucune)" else "")}
+                  for _, ligne in tableau.iterrows()]
+        nouveau, ajoutes, ignores = stock_ferme.importer_repertoire(
+            repertoire, lignes)
+        _enregistrer(repertoire=nouveau)
+        st.session_state["sf_message"] = (
+            "ok", f"📇 {ajoutes} produit(s) ajouté(s) au répertoire"
+                  + (f" · {ignores} ligne(s) sans code ou sans nom ignorée(s)"
+                     if ignores else "")
+                  + f" · {len(nouveau)} produit(s) reconnus désormais.")
+        st.rerun()
 
 
 def _tableau_editable(inventaire: pd.DataFrame,
@@ -488,6 +589,10 @@ def rendre(etape, tuile_kpi) -> None:
                    "la boîte exacte ; un code-barres linéaire ne donne que le "
                    "produit, et c'est alors le lot qui **périme le plus tôt** "
                    "qui sort.")
+
+    if mode == MODE_ENTREE:
+        _import_repertoire(repertoire)
+        inventaire, repertoire = _etat()
 
     if "sf_en_attente" in st.session_state and mode == MODE_ENTREE:
         _formulaire_complement(inventaire, repertoire)

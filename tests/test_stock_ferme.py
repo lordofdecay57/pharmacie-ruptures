@@ -25,7 +25,8 @@ from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          charger_repertoire, cip_depuis_gtin, cle_lot,
                          exporter_csv, exporter_pdf, filtrer_inventaire,
                          inventaire_affichable,
-                         inventaire_vide, jours_avant_peremption,
+                         importer_repertoire, inventaire_vide,
+                         jours_avant_peremption,
                          lot_a_sortir,
                          memoriser_produit, nom_fichier_stock_ferme,
                          normaliser_tableau_edite,
@@ -613,6 +614,77 @@ class TestPersistanceInventaire:
         chemin = tmp_path / "vide.csv"
         sauver_inventaire(inventaire_vide(), chemin)
         assert charger_inventaire(chemin).empty
+
+
+class TestImportRepertoire:
+    """Pré-remplissage en bloc : c'est ce qui évite de taper les noms.
+
+    Un code-barres ne transporte pas le libellé du médicament ; il doit
+    venir d'une table « CIP → nom », typiquement le catalogue de l'officine.
+    """
+
+    def test_import_puis_reconnaissance_au_scan(self):
+        rep, ajoutes, ignores = importer_repertoire(repertoire_vide(), [
+            {"cip": "3400935955838", "nom": "DOLIPRANE 1000",
+             "dosage": "1000 mg", "unites_par_boite": 8},
+            {"cip": "3400937000013", "nom": "MORPHINE"},
+        ])
+        assert (ajoutes, ignores) == (2, 0)
+        assert produit_connu(rep, "3400935955838") == {
+            "nom": "DOLIPRANE 1000", "dosage": "1000 mg",
+            "unites_par_boite": 8}
+
+    def test_lignes_sans_code_ou_sans_nom_ignorees(self):
+        rep, ajoutes, ignores = importer_repertoire(repertoire_vide(), [
+            {"cip": "", "nom": "SANS CODE"},
+            {"cip": "3400930000000", "nom": ""},
+            {"cip": "3400930000017", "nom": "BON"},
+        ])
+        assert (ajoutes, ignores) == (1, 2)
+
+    def test_cip_repete_dans_le_fichier_ne_fait_qu_une_ligne(self):
+        """Un catalogue liste souvent plusieurs fois le même code."""
+        rep, ajoutes, _ = importer_repertoire(repertoire_vide(), [
+            {"cip": "340", "nom": "ANCIEN LIBELLÉ", "dosage": "1 g"},
+            {"cip": "340", "nom": "LIBELLÉ À JOUR"},
+        ])
+        assert ajoutes == 1 and len(rep) == 1
+        connu = produit_connu(rep, "340")
+        assert connu["nom"] == "LIBELLÉ À JOUR"
+        assert connu["dosage"] == "1 g"  # l'info déjà lue n'est pas perdue
+
+    def test_reimport_met_a_jour_sans_dupliquer(self):
+        rep = memoriser_produit(repertoire_vide(), "340", "ANCIEN NOM")
+        rep, ajoutes, _ = importer_repertoire(
+            rep, [{"cip": "340", "nom": "NOUVEAU NOM", "dosage": "500 mg"}])
+        assert ajoutes == 0 and len(rep) == 1
+        assert produit_connu(rep, "340")["nom"] == "NOUVEAU NOM"
+
+    def test_saisie_manuelle_prime_pas_ecrasee_par_le_vide(self):
+        """Un dosage saisi à la main ne doit pas être effacé par un fichier
+        qui ne renseigne pas cette colonne."""
+        rep = memoriser_produit(repertoire_vide(), "340", "X", "500 mg", 30)
+        rep, _, _ = importer_repertoire(rep, [{"cip": "340", "nom": "X"}])
+        connu = produit_connu(rep, "340")
+        assert connu["dosage"] == "500 mg" and connu["unites_par_boite"] == 30
+
+    def test_codes_ponctues_normalises(self):
+        rep, _, _ = importer_repertoire(
+            repertoire_vide(), [{"cip": "3400 935 955 838", "nom": "X"}])
+        assert produit_connu(rep, "3400935955838")["nom"] == "X"
+
+    def test_fichier_vide(self):
+        rep, ajoutes, ignores = importer_repertoire(repertoire_vide(), [])
+        assert rep.empty and (ajoutes, ignores) == (0, 0)
+
+    def test_le_moteur_ignore_d_ou_vient_le_fichier(self):
+        """Le moteur ne reçoit que des couples déjà extraits — pas un
+        tableau, pas un fichier. C'est ce qui le garde indépendant du format
+        du catalogue : la lecture du fichier appartient à l'interface."""
+        def _flux():                      # un simple générateur suffit
+            yield {"cip": "340", "nom": "X"}
+        rep, ajoutes, _ = importer_repertoire(repertoire_vide(), _flux())
+        assert ajoutes == 1 and produit_connu(rep, "340")["nom"] == "X"
 
 
 class TestRepertoire:
