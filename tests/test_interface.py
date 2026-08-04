@@ -87,11 +87,18 @@ def application(tmp_path_factory):
 
 
 def _ouvrir(page, url: str) -> list:
-    """Charge la page et renvoie les erreurs JavaScript observées."""
+    """Charge la page et renvoie les erreurs JavaScript observées.
+
+    On attend le bandeau lui-même plutôt qu'un délai fixe : le premier
+    rendu peut prendre plus longtemps que prévu (dépendances à charger,
+    vérification de version sur un réseau lent), et un test qui échoue au
+    chronomètre n'apprend rien sur l'application.
+    """
     erreurs: list = []
     page.on("pageerror", lambda e: erreurs.append(str(e)))
-    page.goto(url, wait_until="networkidle")
-    page.wait_for_timeout(4000)
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_selector(".hero", timeout=60000)
+    page.wait_for_timeout(2500)
     return erreurs
 
 

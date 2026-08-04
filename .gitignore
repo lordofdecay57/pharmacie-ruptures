@@ -11,6 +11,8 @@ stock_ferme.csv
 stock_ferme_produits.csv
 # Base publique des médicaments téléchargée sur le poste (2,6 Mo)
 base_medicaments.csv
+# Journal de la mise a jour automatique
+maj_auto.log
 
 # Application web (Next.js / Supabase)
 web/node_modules/

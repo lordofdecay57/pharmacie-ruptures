@@ -66,9 +66,10 @@ python -m pip install -r requirements.txt --quiet
 
 REM  Affiche la version qui vient d'etre installee : sans ce reperage, une
 REM  mise a jour qui n'a pas pris passe inapercue.
-for /f "tokens=2 delims==" %%v in ('findstr /b "VERSION_APP" app.py') do set "VER=%%v"
-set "VER=%VER: =%"
-set "VER=%VER:"=%"
+REM  L'espace fait partie des delimiteurs, et %%~v retire les guillemets :
+REM  « VERSION_APP = "3.4" » donne directement 3.4, sans les manipulations
+REM  de chaine a guillemets impairs qui trainaient ici.
+for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" app.py') do set "VER=%%~v"
 echo.
 echo  Version installee : v%VER%
 echo  ^(elle doit s'afficher a l'identique dans le bandeau de l'application^)

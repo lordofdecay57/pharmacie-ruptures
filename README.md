@@ -529,7 +529,36 @@ Trois garde-fous rendent désormais ce scénario impossible à subir :
 > transmet aucune donnée**. Poste hors ligne : rien ne s'affiche, rien ne
 > bloque.
 
-## Mise à jour (Windows, en un clic)
+## Mise à jour automatique
+
+L'utilitaire se met à jour **tout seul**, à deux moments :
+
+- **à chaque lancement** (`lancer.bat` / `lancer.command`) — c'est le seul
+  instant où remplacer des fichiers est sans danger, l'application n'étant
+  pas encore démarrée ;
+- **à l'ouverture de session Windows**, si vous activez la tâche planifiée :
+  double-cliquez **`maj-auto-activer.bat`** une fois. Aucune fenêtre ne
+  s'affiche, la vérification est discrète.
+  (`maj-auto-desactiver.bat` fait l'inverse.)
+
+Trois règles de prudence, appliquées par `maj_auto.py` :
+
+| Situation | Ce qui se passe |
+|---|---|
+| L'application est **ouverte** | rien n'est touché — remplacer un module sous une session en cours la casserait |
+| Le poste est **hors ligne** | rien n'est tenté, aucun message |
+| La version publiée est **identique ou plus ancienne** | aucun téléchargement (seul `app.py` est lu, quelques Ko) |
+
+Vos données — inventaire du stock fermé, historique, réglages, base des
+médicaments — ne sont **jamais** écrasées. Le déroulement est consigné dans
+`maj_auto.log`.
+
+> Une mise à jour automatique installe du code sans relecture préalable. Si
+> vous préférez garder la main, désactivez la tâche planifiée : le bandeau
+> continuera de signaler les nouvelles versions, et `mettre-a-jour.bat`
+> restera disponible à la demande.
+
+## Mise à jour manuelle (Windows, en un clic)
 
 Double-cliquez sur **`mettre-a-jour.bat`** : il télécharge la dernière
 version depuis GitHub, remplace les fichiers programme et relance l'app —
@@ -588,6 +617,9 @@ pharmacie-ruptures/
 ├── base_medicaments.csv      # base publique téléchargée (créée à la demande)
 ├── stock_ferme_produits.csv  # produits mémorisés du stock fermé (CIP → nom)
 ├── requirements.txt          # dépendances Python
+├── maj_auto.py              # mise à jour automatique (testable, sans Streamlit)
+├── maj-auto-activer.bat     # active la vérification au démarrage de Windows
+├── maj-auto-desactiver.bat  # la désactive
 ├── lancer.bat                 # double-clic Windows
 ├── lancer.command              # double-clic Mac
 ├── README.md
@@ -597,6 +629,7 @@ pharmacie-ruptures/
     ├── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
     ├── test_stock_ferme.py    # Module 3 : Data Matrix, lots, péremptions, exports
     ├── test_base_medicaments.py # identification par CIP (base publique)
+    ├── test_maj_auto.py       # mise à jour auto : données préservées, app ouverte
     ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
     └── test_interface.py      # fumée : l'application démarre et répond
 ```
@@ -629,7 +662,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-421 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+448 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles
