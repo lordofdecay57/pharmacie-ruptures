@@ -78,6 +78,19 @@ MODE_ENTREE = "➕ Entrée"
 MODE_SORTIE = "➖ Sortie"
 
 
+def _garder_mode() -> None:
+    """Empêche la déselection : recliquer le mode actif le laisse actif.
+
+    Sans cela, un second clic sur « Entrée » (ou « Sortie ») le
+    déselectionne et AUCUN des deux n'apparaît choisi — il faut cliquer sur
+    l'autre pour s'en sortir, alors qu'un scan a toujours un sens.
+    """
+    if st.session_state.get("sf_mode") is None:
+        st.session_state["sf_mode"] = st.session_state.get("sf_mode_choisi",
+                                                           MODE_ENTREE)
+    st.session_state["sf_mode_choisi"] = st.session_state["sf_mode"]
+
+
 def _traiter_sortie(code, inventaire) -> None:
     """Sortie de stock à la douchette : une boîte de moins, du bon lot.
 
@@ -203,13 +216,27 @@ def _formulaire_complement(inventaire: pd.DataFrame,
     with st.form("sf_form_ajout", clear_on_submit=False):
         st.markdown("**Fiche du produit à enregistrer**")
 
+        # Le code-barres donne le CIP, la péremption et le lot — JAMAIS le
+        # nom du médicament, qui ne figure dans aucun standard GS1. Sans
+        # cette explication, se voir réclamer le nom d'une boîte qu'on vient
+        # de scanner passe pour un bug.
+        if attente["cip"] and not attente["nom"]:
+            st.info(
+                f"Le code **{attente['cip']}** n'a jamais été enregistré ici. "
+                "Un code-barres ne contient **pas** le nom du médicament : "
+                "saisissez-le une fois, et les prochains scans de ce produit "
+                "seront reconnus tout seuls.")
+
         col1, col2, col3 = st.columns([3, 2, 2])
+        # Placeholders rédigés comme des CONSIGNES : un exemple réaliste
+        # (« DOLIPRANE » en gris) se confond avec une valeur déjà saisie, et
+        # l'on valide sans comprendre pourquoi le champ est refusé.
         nom = col1.text_input("Nom du médicament *", value=attente["nom"],
-                              placeholder="DOLIPRANE")
+                              placeholder="à recopier sur la boîte")
         dosage = col2.text_input("Dosage", value=attente["dosage"],
-                                 placeholder="1000 mg")
+                                 placeholder="facultatif")
         cip = col3.text_input("Code CIP", value=attente["cip"],
-                              placeholder="3400912345678")
+                              placeholder="facultatif")
 
         col4, col5, col6 = st.columns(3)
         boites = col4.number_input("Nombre de boîtes", min_value=0,
@@ -249,7 +276,10 @@ def _formulaire_complement(inventaire: pd.DataFrame,
 
     peremption = stock_ferme.parser_peremption_saisie(peremption_texte)
     if not nom.strip():
-        st.error("Le nom du médicament est obligatoire.")
+        st.error("**Nom du médicament manquant.** Le code-barres ne le "
+                 "contient pas : recopiez-le depuis la boîte dans le premier "
+                 "champ, puis validez. Une seule fois par produit — il sera "
+                 "reconnu aux scans suivants.")
         return
     if peremption is None:
         st.error("Date de péremption obligatoire et lisible "
@@ -434,8 +464,8 @@ def rendre(etape, tuile_kpi) -> None:
     mode = st.segmented_control(
         "Sens du mouvement", [MODE_ENTREE, MODE_SORTIE],
         default=st.session_state.get("sf_mode_choisi", MODE_ENTREE),
-        label_visibility="collapsed", key="sf_mode")
-    if mode is None:  # le contrôle se déselectionne au second clic
+        label_visibility="collapsed", key="sf_mode", on_change=_garder_mode)
+    if mode is None:  # premier rendu suivant une déselection
         mode = st.session_state.get("sf_mode_choisi", MODE_ENTREE)
     st.session_state["sf_mode_choisi"] = mode
     col_scan, col_manuel = st.columns([3, 1])
