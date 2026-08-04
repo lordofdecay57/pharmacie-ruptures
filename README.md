@@ -510,19 +510,24 @@ question sur tous les postes.
 cochant bien **« Add Python to PATH »**, puis rouvrez une nouvelle fenêtre
 avant de relancer.
 
-**La mise à jour semble n'avoir rien changé.** C'est presque toujours une
-**ancienne version restée ouverte**. Elle occupe l'adresse
-`localhost:8501` ; la nouvelle démarre alors sur `localhost:8502`, et
-l'onglet du navigateur continue d'afficher l'ancienne.
+**La mise à jour semble n'avoir rien changé.** C'était presque toujours une
+**ancienne version restée ouverte** : elle occupait l'adresse
+`localhost:8501`, la nouvelle démarrait alors sur `localhost:8502`, et
+l'onglet du navigateur continuait d'afficher l'ancienne.
 
-Le remède : **fermer la fenêtre noire** de l'application (et ses onglets)
-**avant** de lancer `mettre-a-jour.bat`. Depuis la version 3.3, le script
-le détecte et vous prévient, et l'application démarre toujours sur 8501 —
-si le port est pris, elle le dit au lieu de basculer en silence.
+Trois garde-fous rendent désormais ce scénario impossible à subir :
 
-Pour vérifier qu'une mise à jour a bien pris : `mettre-a-jour.bat` affiche
-**« Version installee : vX.Y »** à la fin, et ce numéro doit être le même
-que celui du bandeau de l'application.
+1. `mettre-a-jour.bat` **ferme lui-même** la version qui tourne avant de
+   relancer — plus rien à penser ;
+2. l'application démarre toujours sur **8501** : si le port reste pris,
+   elle le dit au lieu de basculer en silence ;
+3. le **bandeau signale une version périmée** (« ⬆️ v3.5 disponible »), et
+   `mettre-a-jour.bat` affiche « Version installee : vX.Y » à la fin. Les
+   deux numéros doivent concorder.
+
+> La vérification de version lit un fichier public du dépôt et **ne
+> transmet aucune donnée**. Poste hors ligne : rien ne s'affiche, rien ne
+> bloque.
 
 ## Mise à jour (Windows, en un clic)
 
@@ -624,7 +629,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-414 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+421 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles

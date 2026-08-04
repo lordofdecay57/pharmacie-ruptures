@@ -53,6 +53,53 @@ COLONNES_STOCK_SIMPLES = ["Alerte", "Code CIP", "Nom du produit",
 # Empreintes : distinguer deux fichiers, deux analyses
 # ---------------------------------------------------------------------------
 
+#: Où lire le numéro de version publié (branche principale du dépôt).
+URL_VERSION_PUBLIEE = ("https://raw.githubusercontent.com/lordofdecay57/"
+                       "pharmacie-ruptures/main/app.py")
+
+
+def version_publiee(delai_s: float = 4) -> Optional[str]:
+    """Numéro de version actuellement publié, ou ``None`` si indisponible.
+
+    Une mise à jour peut échouer sans bruit — typiquement quand une ancienne
+    instance occupe déjà le port et que la nouvelle démarre ailleurs. On
+    tournait alors sur une version périmée sans aucun moyen de s'en
+    apercevoir. Comparer au numéro publié rend la situation visible.
+
+    Aucune donnée n'est transmise : c'est une simple lecture d'un fichier
+    public. Toute erreur (poste hors ligne, réseau filtré) renvoie ``None``
+    et l'application n'en dit rien — ce n'est qu'un confort.
+    """
+    import re
+    import urllib.request
+    try:
+        with urllib.request.urlopen(URL_VERSION_PUBLIEE,
+                                    timeout=delai_s) as reponse:
+            texte = reponse.read(4000).decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    trouve = re.search(r'VERSION_APP\s*=\s*"([^"]+)"', texte)
+    return trouve.group(1) if trouve else None
+
+
+def _numero(version: str) -> tuple:
+    """Version « 3.10 » → (3, 10), pour comparer autre chose que du texte."""
+    return tuple(int(p) if p.isdigit() else 0
+                 for p in str(version or "").split("."))
+
+
+def mise_a_jour_disponible(version_locale: str,
+                           version_distante: Optional[str]) -> bool:
+    """Vrai si la version publiée est PLUS RÉCENTE que celle qui tourne.
+
+    Comparaison numérique : « 3.10 » vient après « 3.9 », ce qu'un simple
+    ordre alphabétique inverserait.
+    """
+    if not version_distante:
+        return False
+    return _numero(version_distante) > _numero(version_locale)
+
+
 def exporter_csv(tableau: pd.DataFrame) -> bytes:
     """Tableau → CSV français (« ; » + BOM : Excel l'ouvre sans réglage).
 

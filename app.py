@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "3.3"
+VERSION_APP = "3.4"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -104,6 +104,10 @@ st.markdown("""
   letter-spacing: .3px; }
 .hero .local { color: rgba(255,255,255,.85); font-size: .78rem;
   margin-left: auto; }
+/* Version périmée : signalé en ambre, impossible à confondre avec le reste
+   du bandeau — c'est la seule information du bandeau qui appelle une action. */
+.hero .maj { background: #b45309; color: #fff; font-size: .78rem;
+  font-weight: 600; border-radius: 999px; padding: 3px 12px; }
 
 /* Choix de l'espace de travail : deux grands onglets, impossibles à
    manquer. Ciblé par la clé du widget (st-key-espace_travail) pour ne pas
@@ -201,10 +205,26 @@ def _entete_espace(titre: str, sous_titre: str = "", variante: str = "") -> None
                 unsafe_allow_html=True)
 
 
+# Une mise à jour peut échouer sans bruit (ancienne instance encore ouverte
+# sur le port, nouvelle version démarrée ailleurs) : on tournait alors sur
+# une version périmée sans le savoir. Le bandeau le dit. Vérifié au plus une
+# fois par heure, sans jamais bloquer si le poste est hors ligne.
+@st.cache_data(ttl=3600, show_spinner=False)
+def _version_publiee_cache() -> str:
+    return ui_commun.version_publiee() or ""
+
+
+_maj = ""
+if st.session_state.get("verifier_version", True):
+    if ui_commun.mise_a_jour_disponible(VERSION_APP, _version_publiee_cache()):
+        _maj = (f'<span class="maj">⬆️ v{_version_publiee_cache()} disponible '
+                "— lancez <b>mettre-a-jour.bat</b></span>")
+
 st.markdown(f"""
 <div class="hero">
   <h1>💊 Pilotage pharmacie</h1>
   <span class="version">v{VERSION_APP}</span>
+  {_maj}
   <span class="local">🔒 100 % local — vos données ne quittent pas ce poste</span>
 </div>
 """, unsafe_allow_html=True)

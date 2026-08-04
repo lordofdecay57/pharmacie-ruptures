@@ -30,7 +30,7 @@ set "ZIP=%TEMP%\pharmacie-maj.zip"
 set "EXDIR=%TEMP%\pharmacie-maj"
 
 REM --- 1. Telechargement --------------------------------------
-echo  [1/4] Telechargement de la derniere version...
+echo  [1/5] Telechargement de la derniere version...
 powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%URL%' -OutFile '%ZIP%' -UseBasicParsing } catch { exit 1 }"
 if errorlevel 1 (
     echo  [ERREUR] Telechargement impossible - verifiez votre connexion Internet.
@@ -40,7 +40,7 @@ if errorlevel 1 (
 )
 
 REM --- 2. Extraction ------------------------------------------
-echo  [2/4] Extraction...
+echo  [2/5] Extraction...
 if exist "%EXDIR%" rmdir /s /q "%EXDIR%"
 powershell -NoProfile -Command "try { Expand-Archive -Path '%ZIP%' -DestinationPath '%EXDIR%' -Force } catch { exit 1 }"
 if errorlevel 1 (
@@ -54,7 +54,7 @@ REM --- 3. Installation des nouveaux fichiers ------------------
 REM  On ne remplace ni ce script, ni vos donnees personnelles
 REM  (mapping des colonnes, historique des analyses, etat du stock
 REM  min/max et inventaire du stock ferme).
-echo  [3/4] Installation des fichiers...
+echo  [3/5] Installation des fichiers...
 robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv base_medicaments.csv >nul
 if %ERRORLEVEL% GEQ 8 (
     echo  [ERREUR] Copie des fichiers impossible.
@@ -73,26 +73,34 @@ echo.
 echo  Version installee : v%VER%
 echo  ^(elle doit s'afficher a l'identique dans le bandeau de l'application^)
 
-REM --- 4. Lancement -------------------------------------------
+REM --- 4. Fermeture de l'ancienne version ----------------------
 REM  Une ancienne version encore ouverte occupe le port 8501 : la nouvelle
-REM  demarrerait alors sur 8502, et l'utilisateur continuerait de regarder
-REM  l'ANCIENNE dans son onglet localhost:8501 — en croyant que la mise a
-REM  jour n'a rien change. On le detecte et on l'explique.
-powershell -NoProfile -Command "exit (Test-NetConnection -ComputerName localhost -Port 8501 -InformationLevel Quiet) -eq $true"
+REM  demarrerait alors sur 8502, et l'onglet localhost:8501 continuerait
+REM  d'afficher l'ANCIENNE — la mise a jour semblerait sans effet. On ferme
+REM  donc nous-memes le processus qui ecoute sur 8501, plutot que de
+REM  demander a l'utilisateur d'y penser.
+echo  [4/5] Fermeture de la version precedente...
+REM  Une seule ligne, tout entre guillemets : cmd ne reinterprete alors ni
+REM  le | ni les parentheses. Le try/catch couvre les Windows depourvus de
+REM  Get-NetTCPConnection — la mise a jour ne doit jamais echouer ici.
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }" >nul 2>nul
+REM  Laisse le port se liberer avant de relancer.
+timeout /t 3 /nobreak >nul
+
+REM  Ceinture et bretelles : si quelque chose tient encore le port, mieux
+REM  vaut le dire que de laisser l'utilisateur devant une version fantome.
+REM  Le code de sortie vaut le NOMBRE de processus qui ecoutent (0 = libre).
+powershell -NoProfile -Command "try { exit ((Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count) } catch { exit 0 }"
 if errorlevel 1 (
     echo.
-    echo  ====================================================
-    echo    UNE VERSION EST DEJA OUVERTE
-    echo  ====================================================
-    echo.
-    echo  Une fenetre noire de l'application tourne deja.
-    echo  FERMEZ-LA maintenant ^(ainsi que les onglets du navigateur^),
-    echo  sinon vous continuerez a voir l'ANCIENNE version.
+    echo  [ATTENTION] Le port 8501 est toujours occupe.
+    echo  Fermez toutes les fenetres noires de l'application, puis
+    echo  relancez ce script.
     echo.
     pause
 )
 
-echo  [4/4] Lancement de l'application...
+echo  [5/5] Lancement de l'application...
 echo.
 echo  Mise a jour terminee. L'application va s'ouvrir dans le navigateur.
 echo  Gardez CETTE fenetre ouverte pendant l'utilisation.

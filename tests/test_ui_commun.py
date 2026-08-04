@@ -17,6 +17,7 @@ from ui_commun import (COLONNES_HISTORIQUE, COLONNES_STOCK_SIMPLES,
                        colonnes_stock_affichees, dossier_donnees,
                        filtrer_stock,
                        fusionner_historique, lignes_historique_analyse,
+                       mise_a_jour_disponible,
                        signature_colonnes, signature_tableau)
 
 JOUR = date(2026, 7, 31)
@@ -231,6 +232,30 @@ class TestHistorique:
              "Type": "commande"}])
         fusion = fusionner_historique(ancien, pd.DataFrame(), JOUR)
         assert list(fusion["Produit"]) == ["HIER"]
+
+
+class TestMiseAJourDisponible:
+    """Une mise à jour peut échouer sans bruit ; comparer les numéros est
+    ce qui rend la situation visible."""
+
+    @pytest.mark.parametrize("locale,distante,attendu", [
+        ("3.2", "3.3", True),
+        ("3.3", "3.3", False),
+        ("3.4", "3.3", False),      # version de développement, en avance
+        ("3.9", "3.10", True),      # 3.10 vient APRÈS 3.9…
+        ("3.10", "3.9", False),     # …ce qu'un tri alphabétique inverserait
+        ("3.3", "4.0", True),
+    ])
+    def test_comparaison_numerique(self, locale, distante, attendu):
+        assert mise_a_jour_disponible(locale, distante) is attendu
+
+    def test_version_distante_indisponible(self):
+        """Poste hors ligne : on ne signale rien plutôt que d'alarmer."""
+        assert mise_a_jour_disponible("3.3", None) is False
+        assert mise_a_jour_disponible("3.3", "") is False
+
+    def test_numero_inattendu_ne_leve_pas(self):
+        assert mise_a_jour_disponible("3.3", "inconnue") is False
 
 
 class TestDossierDonnees:
