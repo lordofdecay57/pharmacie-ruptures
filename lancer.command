@@ -8,4 +8,6 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 python3 -m pip install -r requirements.txt --quiet
-python3 -m streamlit run app.py
+# Port fixe : voir lancer.bat — un basculement silencieux sur un
+# autre port ferait regarder l'ancienne version.
+python3 -m streamlit run app.py --server.port 8501

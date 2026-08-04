@@ -510,6 +510,20 @@ question sur tous les postes.
 cochant bien **« Add Python to PATH »**, puis rouvrez une nouvelle fenêtre
 avant de relancer.
 
+**La mise à jour semble n'avoir rien changé.** C'est presque toujours une
+**ancienne version restée ouverte**. Elle occupe l'adresse
+`localhost:8501` ; la nouvelle démarre alors sur `localhost:8502`, et
+l'onglet du navigateur continue d'afficher l'ancienne.
+
+Le remède : **fermer la fenêtre noire** de l'application (et ses onglets)
+**avant** de lancer `mettre-a-jour.bat`. Depuis la version 3.3, le script
+le détecte et vous prévient, et l'application démarre toujours sur 8501 —
+si le port est pris, elle le dit au lieu de basculer en silence.
+
+Pour vérifier qu'une mise à jour a bien pris : `mettre-a-jour.bat` affiche
+**« Version installee : vX.Y »** à la fin, et ce numéro doit être le même
+que celui du bandeau de l'application.
+
 ## Mise à jour (Windows, en un clic)
 
 Double-cliquez sur **`mettre-a-jour.bat`** : il télécharge la dernière

@@ -64,12 +64,41 @@ if %ERRORLEVEL% GEQ 8 (
 )
 python -m pip install -r requirements.txt --quiet
 
+REM  Affiche la version qui vient d'etre installee : sans ce reperage, une
+REM  mise a jour qui n'a pas pris passe inapercue.
+for /f "tokens=2 delims==" %%v in ('findstr /b "VERSION_APP" app.py') do set "VER=%%v"
+set "VER=%VER: =%"
+set "VER=%VER:"=%"
+echo.
+echo  Version installee : v%VER%
+echo  ^(elle doit s'afficher a l'identique dans le bandeau de l'application^)
+
 REM --- 4. Lancement -------------------------------------------
+REM  Une ancienne version encore ouverte occupe le port 8501 : la nouvelle
+REM  demarrerait alors sur 8502, et l'utilisateur continuerait de regarder
+REM  l'ANCIENNE dans son onglet localhost:8501 — en croyant que la mise a
+REM  jour n'a rien change. On le detecte et on l'explique.
+powershell -NoProfile -Command "exit (Test-NetConnection -ComputerName localhost -Port 8501 -InformationLevel Quiet) -eq $true"
+if errorlevel 1 (
+    echo.
+    echo  ====================================================
+    echo    UNE VERSION EST DEJA OUVERTE
+    echo  ====================================================
+    echo.
+    echo  Une fenetre noire de l'application tourne deja.
+    echo  FERMEZ-LA maintenant ^(ainsi que les onglets du navigateur^),
+    echo  sinon vous continuerez a voir l'ANCIENNE version.
+    echo.
+    pause
+)
+
 echo  [4/4] Lancement de l'application...
 echo.
 echo  Mise a jour terminee. L'application va s'ouvrir dans le navigateur.
 echo  Gardez CETTE fenetre ouverte pendant l'utilisation.
 echo  Pour arreter l'application : fermez cette fenetre ou appuyez sur Ctrl+C.
 echo.
-python -m streamlit run app.py
+REM  Port fixe : si 8501 est occupe, Streamlit le DIT au lieu de basculer en
+REM  silence sur un autre port.
+python -m streamlit run app.py --server.port 8501
 pause

@@ -10,5 +10,8 @@ if errorlevel 1 (
     exit /b 1
 )
 python -m pip install -r requirements.txt --quiet
-python -m streamlit run app.py
+REM  Port fixe : si 8501 est deja occupe par une autre instance,
+REM  Streamlit le DIT au lieu de basculer en silence sur 8502 —
+REM  on regarderait sinon l'ancienne version sans le savoir.
+python -m streamlit run app.py --server.port 8501
 pause
