@@ -111,6 +111,18 @@ def _sans_exception(page) -> None:
         page.locator('[data-testid="stException"]').first.inner_text())
 
 
+def _onglet_actif(page, cle: str) -> str:
+    """Libellé de l'onglet sélectionné du groupe ``cle``, ou ``""``."""
+    return page.evaluate(
+        """(cle) => {
+            const bloc = document.querySelector('.st-key-' + cle);
+            if (!bloc) return '';
+            const actif = [...bloc.querySelectorAll('button')].find(
+                b => b.getAttribute('kind') === 'segmented_controlActive');
+            return actif ? actif.innerText.replace(/\\s+/g, ' ').trim() : '';
+        }""", cle)
+
+
 class TestDemarrage:
     def test_accueil_s_affiche(self, page, application):
         erreurs = _ouvrir(page, application)
@@ -128,6 +140,17 @@ class TestDemarrage:
         """Sans cadencier, le parcours principal invite à en déposer un
         plutôt que de planter."""
         assert "Déposez" in page.content()
+
+    def test_recliquer_l_onglet_actif_ne_le_deselectionne_pas(self, page):
+        """Un onglet n'est pas une case à cocher : il y a toujours un espace
+        affiché, donc toujours un onglet allumé. Sans ce garde-fou, un second
+        clic éteignait tout et il fallait cliquer sur l'AUTRE pour s'en
+        sortir."""
+        assert ESPACE_CADENCIER in _onglet_actif(page, "espace_travail")
+        page.get_by_text(ESPACE_CADENCIER).first.click()
+        page.wait_for_timeout(4000)
+        _sans_exception(page)
+        assert ESPACE_CADENCIER in _onglet_actif(page, "espace_travail")
 
 
 class TestEspaceStockFerme:
@@ -148,11 +171,35 @@ class TestEspaceStockFerme:
         champ.press("Enter")
         page.wait_for_timeout(5000)
         _sans_exception(page)
-        assert "Fiche du produit à enregistrer" in page.content()
+        contenu = page.content()
+        assert "Fiche du produit à enregistrer" in contenu
+        # Se voir réclamer le nom d'une boîte qu'on vient de scanner passe
+        # pour un bug si l'on n'explique pas qu'un code-barres ne le contient
+        # pas. L'explication fait partie du correctif, pas de la décoration.
+        assert "ne contient" in contenu and "nom du médicament" in contenu
+
+    def test_nom_manquant_explique_pourquoi(self, page):
+        """Valider sans le nom doit dire quoi faire, pas seulement refuser."""
+        page.get_by_role("button", name="Ajouter au stock").click()
+        page.wait_for_timeout(4000)
+        _sans_exception(page)
+        contenu = page.content()
+        assert "Nom du médicament manquant" in contenu
+        assert "recopiez-le depuis la boîte" in contenu
+
+    def test_recliquer_le_mode_actif_ne_le_deselectionne_pas(self, page):
+        """Même garde-fou pour Entrée / Sortie : un scan a toujours un sens,
+        aucun des deux ne doit pouvoir rester éteint."""
+        assert "Entrée" in _onglet_actif(page, "sf_mode")
+        page.get_by_text("Entrée", exact=False).first.click()
+        page.wait_for_timeout(4000)
+        _sans_exception(page)
+        assert "Entrée" in _onglet_actif(page, "sf_mode")
 
     def test_sortie_sur_inventaire_vide_est_refusee_proprement(self, page):
         page.get_by_text("Sortie", exact=False).first.click()
         page.wait_for_timeout(3000)
+        assert "Sortie" in _onglet_actif(page, "sf_mode")
         champ = page.get_by_placeholder("Douchez la boîte")
         champ.fill("3400937000013")
         champ.press("Enter")

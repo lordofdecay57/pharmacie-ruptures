@@ -189,11 +189,15 @@ def _etape(numero: str, titre: str, sous_titre: str = "") -> None:
                 f'<span class="txt">{titre}{sous}</span></div>',
                 unsafe_allow_html=True)
 
-def _entete_espace(titre: str, sous_titre: str, variante: str = "") -> None:
-    """Bandeau d'espace : dit en clair dans quel module on travaille."""
+def _entete_espace(titre: str, sous_titre: str = "", variante: str = "") -> None:
+    """Bandeau d'espace : dit en clair dans quel module on travaille.
+
+    Le sous-titre est facultatif : quand l'écran explique déjà de quoi il
+    s'agit, le répéter ici ne fait qu'ajouter une ligne à lire.
+    """
+    sous = f'<div class="sous">{sous_titre}</div>' if sous_titre else ""
     st.markdown(f'<div class="espace {variante}">'
-                f'<div class="titre">{titre}</div>'
-                f'<div class="sous">{sous_titre}</div></div>',
+                f'<div class="titre">{titre}</div>{sous}</div>',
                 unsafe_allow_html=True)
 
 
@@ -238,20 +242,32 @@ ESPACE_STOCK_FERME = "🔒  Stock fermé — inventaire scanné"
 # Deux grands onglets plutôt qu'un choix discret : les deux espaces ne
 # partagent NI fichiers, NI données, NI exports. Savoir dans lequel on se
 # trouve est la première chose à voir en arrivant sur l'écran.
+def _garder_espace() -> None:
+    """Empêche la déselection : recliquer l'onglet actif le laisse actif.
+
+    Sans cela, un second clic sur l'onglet courant le déselectionne et
+    PLUS AUCUN onglet n'apparaît choisi — il faut alors cliquer sur l'autre
+    pour s'en sortir. Un onglet n'est pas une case à cocher : il y a
+    toujours un espace de travail affiché, donc toujours un onglet actif.
+    """
+    if st.session_state.get("espace_travail") is None:
+        st.session_state["espace_travail"] = st.session_state.get(
+            "espace_retenu", ESPACE_CADENCIER)
+    st.session_state["espace_retenu"] = st.session_state["espace_travail"]
+
+
 espace = st.segmented_control(
     "Espace de travail", [ESPACE_CADENCIER, ESPACE_STOCK_FERME],
     default=ESPACE_CADENCIER, label_visibility="collapsed",
-    key="espace_travail", width="stretch")
-if espace is None:  # le segmented control se déselectionne au second clic
-    espace = ESPACE_CADENCIER
+    key="espace_travail", width="stretch", on_change=_garder_espace)
+if espace is None:  # premier rendu suivant une déselection
+    espace = st.session_state.get("espace_retenu", ESPACE_CADENCIER)
 
 if espace == ESPACE_STOCK_FERME:
     import ui_stock_ferme
-    _entete_espace(
-        "🔒 Stock fermé",
-        "Inventaire tenu à part du stock officinal — armoire sécurisée, "
-        "dotation d'urgence, trousse, réserve de garde. Aucun fichier à "
-        "déposer : on scanne, on imprime.", variante="ferme")
+    # Sans sous-titre : la barre latérale décrit déjà ce qu'est ce stock, et
+    # l'étape 1 dit quoi faire. Le répéter ici n'ajoutait qu'une ligne.
+    _entete_espace("🔒 Stock fermé", variante="ferme")
     ui_stock_ferme.rendre(_etape, _tuile_kpi)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
