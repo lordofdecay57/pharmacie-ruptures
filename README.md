@@ -453,8 +453,21 @@ pip install -r requirements.txt
 
 Le navigateur s'ouvre sur `http://localhost:8501`. Pour arrêter l'app :
 fermez la fenêtre noire (ou Ctrl+C dedans). Le **numéro de version** est
-affiché dans le bandeau (ex. `v2.1`) : il permet de vérifier d'un coup
+affiché dans le bandeau (ex. `v3.2`) : il permet de vérifier d'un coup
 d'œil que la dernière version tourne bien.
+
+### Si l'application ne s'ouvre pas
+
+**La fenêtre noire affiche `Email:` et rien ne se passe.** C'est le
+questionnaire de bienvenue de Streamlit : il attend une réponse et bloque le
+démarrage. Appuyez sur **Entrée** (sans rien taper) et l'application
+s'ouvre. Cela n'arrive plus depuis la version 3.2 : le réglage
+`server.showEmailPrompt = false` de `.streamlit/config.toml` supprime cette
+question sur tous les postes.
+
+**« Python n'est pas installé ».** Réinstallez Python depuis python.org en
+cochant bien **« Add Python to PATH »**, puis rouvrez une nouvelle fenêtre
+avant de relancer.
 
 ## Mise à jour (Windows, en un clic)
 

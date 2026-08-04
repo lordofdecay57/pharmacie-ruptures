@@ -8,3 +8,14 @@ textColor = "#0b0b0b"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+# Au TOUT premier lancement sur un poste, Streamlit demande une adresse
+# e-mail dans la fenêtre noire et ATTEND la réponse : l'application ne
+# s'ouvre jamais, l'utilisateur ne voit qu'un « Email: » clignotant et croit
+# à un problème d'installation.
+#
+# Le réglage vit ici, dans le dossier du programme, plutôt que dans un
+# fichier du profil Windows : il suit l'application sur chaque poste où on
+# la copie, sans rien écrire en dehors de son dossier.
+showEmailPrompt = false
