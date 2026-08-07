@@ -56,7 +56,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "3.5"
+VERSION_APP = "3.6"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -122,11 +122,18 @@ st.markdown("""
   font-size: 1.05rem !important; font-weight: 600 !important;
 }
 /* L'onglet ACTIF est plein : la couleur seule ne suffirait pas à le
-   distinguer d'un survol, un fond franc le rend évident. */
+   distinguer d'un survol, un fond franc le rend évident.
+   DEUX sélecteurs : « aria-checked » est l'attribut standard, stable d'une
+   version de Streamlit à l'autre ; « kind » était l'attribut interne des
+   versions ≤ 1.58, disparu depuis. S'appuyer sur le seul attribut interne
+   faisait perdre le remplissage — et les onglets redevenaient indistincts —
+   au premier Streamlit un peu récent. */
+.st-key-espace_travail button[aria-checked="true"],
 .st-key-espace_travail button[kind="segmented_controlActive"] {
   background: #0f766e !important; border-color: #0f766e !important;
   box-shadow: 0 2px 6px rgba(15,118,110,.30) !important;
 }
+.st-key-espace_travail button[aria-checked="true"] p,
 .st-key-espace_travail button[kind="segmented_controlActive"] p {
   color: #ffffff !important;
 }
@@ -140,12 +147,15 @@ st.markdown("""
 }
 .st-key-sf_mode button p { font-size: 1rem !important;
   font-weight: 600 !important; }
+.st-key-sf_mode button[aria-checked="true"],
 .st-key-sf_mode button[kind="segmented_controlActive"] {
   background: #0f766e !important; border-color: #0f766e !important;
 }
+.st-key-sf_mode button[aria-checked="true"] p,
 .st-key-sf_mode button[kind="segmented_controlActive"] p { color: #fff !important; }
 /* La SORTIE retire du stock : elle s'affiche en ambre pour qu'on ne scanne
    pas une entrée en croyant faire une sortie, ou l'inverse. */
+.st-key-sf_mode button:last-child[aria-checked="true"],
 .st-key-sf_mode button:last-child[kind="segmented_controlActive"] {
   background: #b45309 !important; border-color: #b45309 !important;
 }

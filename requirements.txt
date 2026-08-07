@@ -1,5 +1,5 @@
 # Outil de gestion des ruptures de stock (pharmacie)
-streamlit>=1.32
+streamlit>=1.32,<2   # borne haute : une majeure changerait l'interface
 pandas>=2.0
 openpyxl>=3.1        # lecture/écriture .xlsx
 xlrd>=2.0.1          # lecture des vieux .xls
