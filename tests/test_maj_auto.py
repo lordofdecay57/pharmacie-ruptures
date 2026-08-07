@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 
 import maj_auto
-from maj_auto import (APPLICATION_EN_COURS, DEJA_A_JOUR, ECHEC, FICHIERS_PROTEGES,
+from maj_auto import (APPLICATION_EN_COURS, CODE_DEJA_OUVERTE, DEJA_A_JOUR,
+                      ECHEC, FICHIERS_PROTEGES,
                       INJOIGNABLE, MISE_A_JOUR, application_en_cours,
                       executer, installer_archive, lire_version,
                       plus_recente)
@@ -202,11 +203,30 @@ class TestExecuter:
         resultat, _ = executer(dossier, forcer=True)
         assert resultat == MISE_A_JOUR and (dossier / "neuf.py").exists()
 
-    def test_code_de_sortie_toujours_nul(self, tmp_path, monkeypatch):
-        """Un échec de mise à jour ne doit pas empêcher le lancement de
-        l'application qui suit dans le script."""
+    def test_un_echec_ne_bloque_pas_le_lancement(self, tmp_path, monkeypatch):
+        """Le lanceur enchaîne sur le démarrage de l'application : une mise
+        à jour ratée ne doit pas l'en empêcher."""
         monkeypatch.setattr(maj_auto, "application_en_cours", lambda *a: False)
         monkeypatch.setattr(maj_auto, "version_publiee", lambda *a, **k: "")
+        dossier = _installation(tmp_path, "3.0")
+        assert maj_auto.main(["--dossier", str(dossier)]) == 0
+
+    def test_application_ouverte_signalee_au_lanceur(self, tmp_path,
+                                                     monkeypatch):
+        """Code 10 : le lanceur doit ouvrir le navigateur sur l'instance en
+        cours. Sans ce signal, il tentait un second démarrage, échouait sur
+        le port occupé et laissait l'utilisateur devant « Port 8501 is not
+        available » alors qu'il voulait juste voir son écran."""
+        monkeypatch.setattr(maj_auto, "application_en_cours", lambda *a: True)
+        dossier = _installation(tmp_path, "3.0")
+        assert maj_auto.main(["--dossier", str(dossier)]) == CODE_DEJA_OUVERTE
+
+    def test_mise_a_jour_reussie_laisse_le_lanceur_demarrer(self, tmp_path,
+                                                            monkeypatch):
+        monkeypatch.setattr(maj_auto, "application_en_cours", lambda *a: False)
+        monkeypatch.setattr(maj_auto, "version_publiee", lambda *a, **k: "3.4")
+        monkeypatch.setattr(maj_auto, "_telecharger", lambda *a: _archive(
+            {"app.py": 'VERSION_APP = "3.4"\n'}))
         dossier = _installation(tmp_path, "3.0")
         assert maj_auto.main(["--dossier", str(dossier)]) == 0
 

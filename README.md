@@ -510,6 +510,11 @@ question sur tous les postes.
 cochant bien **« Add Python to PATH »**, puis rouvrez une nouvelle fenêtre
 avant de relancer.
 
+**Double-cliquer `lancer.bat` affiche « Port 8501 is not available ».**
+L'application était déjà ouverte. Depuis la version 3.6, le lanceur le
+détecte et **ouvre simplement le navigateur** sur la session en cours au
+lieu d'échouer.
+
 **La mise à jour semble n'avoir rien changé.** C'était presque toujours une
 **ancienne version restée ouverte** : elle occupait l'adresse
 `localhost:8501`, la nouvelle démarrait alors sur `localhost:8502`, et
@@ -662,7 +667,7 @@ cd pharmacie-ruptures
 python -m pytest tests/ -q
 ```
 
-448 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
+450 tests. Cas de référence Module Ruptures : Titanoréine (réappro 16 j,
 stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 modéré,
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles

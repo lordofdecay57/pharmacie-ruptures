@@ -68,6 +68,10 @@ INJOIGNABLE = "injoignable"
 MISE_A_JOUR = "mise_a_jour"
 ECHEC = "echec"
 
+#: Code de sortie signalant au lanceur que l'application répond déjà — il
+#: doit alors ouvrir le navigateur au lieu de démarrer un second serveur.
+CODE_DEJA_OUVERTE = 10
+
 
 def lire_version(chemin_app: Path) -> str:
     """Version inscrite dans un ``app.py`` (chaîne vide si introuvable)."""
@@ -227,8 +231,13 @@ def main(argv=None) -> int:
     _journal.info("[%s] %s", resultat, message)
     if options.verbeux:
         print(f"{datetime.now():%d/%m/%Y %H:%M} — {message}")
-    # Toujours 0 : un échec de mise à jour ne doit pas empêcher le
-    # lancement de l'application qui suit.
+    # L'application tourne déjà : le lanceur doit ouvrir le navigateur
+    # plutôt que de tenter un second démarrage, qui echouerait sur un port
+    # occupe et laisserait l'utilisateur devant une erreur.
+    if resultat == APPLICATION_EN_COURS:
+        return CODE_DEJA_OUVERTE
+    # Sinon toujours 0, y compris en cas d'echec : une mise a jour ratee ne
+    # doit pas empecher le lancement de l'application qui suit.
     return 0
 
 

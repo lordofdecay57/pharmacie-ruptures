@@ -119,13 +119,21 @@ def _sans_exception(page) -> None:
 
 
 def _onglet_actif(page, cle: str) -> str:
-    """Libellé de l'onglet sélectionné du groupe ``cle``, ou ``""``."""
+    """Libellé de l'onglet sélectionné du groupe ``cle``, ou ``""``.
+
+    Deux façons de reconnaître l'onglet actif, pour suivre Streamlit sans
+    dépendre d'une version : « aria-checked » est l'attribut standard,
+    « kind » l'attribut interne des versions ≤ 1.58. Le style de
+    l'application s'appuie sur les deux — ce test vérifie donc exactement
+    ce que voit l'utilisateur.
+    """
     return page.evaluate(
         """(cle) => {
             const bloc = document.querySelector('.st-key-' + cle);
             if (!bloc) return '';
             const actif = [...bloc.querySelectorAll('button')].find(
-                b => b.getAttribute('kind') === 'segmented_controlActive');
+                b => b.getAttribute('aria-checked') === 'true'
+                  || b.getAttribute('kind') === 'segmented_controlActive');
             return actif ? actif.innerText.replace(/\\s+/g, ' ').trim() : '';
         }""", cle)
 

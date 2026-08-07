@@ -17,6 +17,18 @@ REM  demarree. Le script ne fait rien s'il n'y a pas de nouvelle version,
 REM  si le poste est hors ligne, ou si une instance tourne deja.
 python maj_auto.py --verbeux
 
+REM  Code 10 : l'application repond deja. Tenter un second demarrage
+REM  echouerait sur le port occupe et laisserait l'utilisateur devant une
+REM  erreur, alors qu'il voulait simplement voir son ecran. On ouvre donc
+REM  le navigateur sur l'instance en cours.
+if errorlevel 10 (
+    echo.
+    echo  L'application est deja ouverte : affichage dans le navigateur.
+    echo  Pour l'arreter, fermez sa fenetre noire.
+    start "" http://localhost:8501
+    exit /b 0
+)
+
 REM  Port fixe : si 8501 est deja occupe par une autre instance,
 REM  Streamlit le DIT au lieu de basculer en silence sur 8502 —
 REM  on regarderait sinon l'ancienne version sans le savoir.
