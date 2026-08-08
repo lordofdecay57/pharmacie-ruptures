@@ -11,6 +11,16 @@ if errorlevel 1 (
 )
 python -m pip install -r requirements.txt --quiet
 
+REM  Icone du Bureau : creee UNE SEULE FOIS, au tout premier lancement.
+REM  Sans le temoin, une icone supprimee volontairement reviendrait a
+REM  chaque demarrage. Un echec (poste verrouille, PowerShell bloque) ne
+REM  laisse pas de temoin : la tentative sera refaite au lancement suivant,
+REM  et n'empeche jamais l'application de demarrer.
+if not exist "%~dp0.raccourci-bureau" (
+    call "%~dp0creer-raccourci.bat" /silencieux
+    if not errorlevel 1 echo cree > "%~dp0.raccourci-bureau"
+)
+
 REM  Mise a jour automatique AVANT de lancer : c'est le seul moment ou
 REM  remplacer des fichiers est sans danger, l'application n'est pas encore
 REM  demarree. Le script ne fait rien s'il n'y a pas de nouvelle version,

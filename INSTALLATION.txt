@@ -61,9 +61,15 @@ ETAPE 2 - Lancer l'utilitaire pour la premiere fois
    un bandeau vert "Pilotage pharmacie - stock & ruptures" avec un
    numero de version a cote du titre (par exemple v2.3).
 
-Astuce : vous pouvez creer un raccourci sur le Bureau pour la
-prochaine fois - clic droit sur lancer.bat, puis
-"Envoyer vers" > "Bureau (creer un raccourci)".
+5. Regardez votre Bureau : une icone en forme de gelule, nommee
+   "Pharmacie", vient d'y etre creee automatiquement. C'est elle
+   que vous utiliserez desormais - plus besoin de revenir dans ce
+   dossier.
+
+Si l'icone n'apparait pas (poste verrouille par l'informatique,
+par exemple), double-cliquez sur "creer-raccourci.bat" dans ce
+dossier. En dernier recours, faites-la a la main : clic droit sur
+lancer.bat, puis "Envoyer vers" > "Bureau (creer un raccourci)".
 
 
 ---------------------------------------------------------------
@@ -77,8 +83,8 @@ travaillez.
 
 Pour arreter l'utilitaire : fermez simplement cette fenetre noire.
 
-Pour le relancer un autre jour : double-cliquez a nouveau sur
-lancer.bat (ou son raccourci Bureau).
+Pour le relancer un autre jour : double-cliquez sur l'icone
+"Pharmacie" du Bureau (ou, a defaut, sur lancer.bat).
 
 
 ---------------------------------------------------------------

@@ -13,6 +13,8 @@ stock_ferme_produits.csv
 base_medicaments.csv
 # Journal de la mise a jour automatique
 maj_auto.log
+# Temoin « icone du Bureau deja creee » (propre a chaque poste)
+.raccourci-bureau
 
 # Application web (Next.js / Supabase)
 web/node_modules/

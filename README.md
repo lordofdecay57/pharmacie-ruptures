@@ -487,10 +487,34 @@ pip install -r requirements.txt
 
 ## Lancement
 
-- **Windows** : double-cliquez sur `lancer.bat`.
+- **Windows** : double-cliquez sur l'icône 💊 **Pharmacie** du Bureau. Elle
+  est créée automatiquement au premier lancement (voir ci-dessous) ; sinon,
+  double-cliquez sur `lancer.bat` dans le dossier.
 - **Mac** : double-cliquez sur `lancer.command` (la première fois : clic droit
   → Ouvrir, pour passer l'avertissement de sécurité).
 - **À la main** : `streamlit run app.py`
+
+### 💊 L'icône du Bureau
+
+Au **tout premier** lancement, `lancer.bat` pose sur le Bureau une icône
+**Pharmacie** — la même gélule que dans l'onglet du navigateur, sur le
+turquoise de l'application. Un double-clic dessus ouvre l'utilitaire : plus
+besoin de retrouver le dossier.
+
+- L'icône a été supprimée par erreur ? Double-cliquez sur
+  **`creer-raccourci.bat`**, elle revient.
+- Elle n'est **pas** recréée toute seule à chaque démarrage : un témoin
+  local (`.raccourci-bureau`) mémorise qu'elle a déjà été posée, pour
+  qu'une suppression volontaire soit respectée.
+- Le Bureau est résolu par Windows lui-même, ce qui couvre les postes où il
+  est redirigé (OneDrive, profil itinérant).
+
+Le fichier `pharmacie.ico` est **livré tout fait** dans le dépôt : le poste
+de la pharmacie n'a besoin d'aucune bibliothèque graphique. Il contient
+sept tailles (16 → 256 px) pour rester net partout, de la barre des tâches
+aux grandes icônes de l'explorateur. Pour le régénérer après une retouche
+du visuel : `python outils/creer_icone.py` (nécessite Pillow ; un test
+vérifie que le fichier livré et le générateur ne divergent pas).
 
 Le navigateur s'ouvre sur `http://localhost:8501`. Pour arrêter l'app :
 fermez la fenêtre noire (ou Ctrl+C dedans). Le **numéro de version** est
@@ -627,6 +651,10 @@ pharmacie-ruptures/
 ├── maj-auto-desactiver.bat  # la désactive
 ├── lancer.bat                 # double-clic Windows
 ├── lancer.command              # double-clic Mac
+├── creer-raccourci.bat       # pose l'icône 💊 « Pharmacie » sur le Bureau
+├── pharmacie.ico            # icône du raccourci (16 → 256 px)
+├── pharmacie.png            # même visuel en 1024 px (Mac, documentation)
+├── outils/creer_icone.py    # régénère l'icône (outil de développement)
 ├── README.md
 └── tests/
     ├── test_commun.py        # fonctions partagées (parsing, fichiers, statistiques)
@@ -636,6 +664,7 @@ pharmacie-ruptures/
     ├── test_base_medicaments.py # identification par CIP (base publique)
     ├── test_maj_auto.py       # mise à jour auto : données préservées, app ouverte
     ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
+    ├── test_icone.py          # icône du Bureau : tailles, script de raccourci
     └── test_interface.py      # fumée : l'application démarre et répond
 ```
 
