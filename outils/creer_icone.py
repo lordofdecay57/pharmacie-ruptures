@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Fabrique l'icône de l'application (💊 sur fond turquoise).
+"""Fabrique l'icône de l'application : une gélule blanche sur turquoise.
 
 Outil de développement : le résultat (``pharmacie.ico`` et ``pharmacie.png``)
 est versionné dans le dépôt, de sorte que le poste de la pharmacie n'a
@@ -10,6 +10,11 @@ Le motif est **dessiné**, pas copié d'une police emoji : une police couleur
 (NotoColorEmoji) n'existe qu'en une seule taille de bitmap, et la réduction à
 16 px — la taille utilisée dans la barre des tâches Windows — donne une bouillie
 illisible. Un tracé vectoriel reste net à toutes les tailles.
+
+Parti pris graphique : **monochrome**. Un seul motif blanc sur l'aplat
+turquoise de l'application, sans contour noir ni seconde couleur, et du vide
+autour. Le relief vient d'une ombre portée très douce, pas d'un trait — c'est
+ce qui distingue une icône d'un pictogramme de dessin animé.
 
 Usage :
 
@@ -23,19 +28,21 @@ import struct
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 RACINE = Path(__file__).resolve().parent.parent
 
 #: Turquoise de l'application (bandeau et onglet actif) : le raccourci du
 #: bureau doit se reconnaître d'un coup d'œil comme « la même chose » que
-#: l'écran qui s'ouvre.
-FOND_HAUT = (17, 138, 125)
-FOND_BAS = (13, 90, 84)
+#: l'écran qui s'ouvre. Léger dégradé vertical, juste assez pour que la
+#: tuile ne soit pas plate.
+FOND_HAUT = (17, 132, 120)
+FOND_BAS = (11, 84, 78)
 
 BLANC = (255, 255, 255)
-AMBRE = (249, 146, 47)
-CONTOUR = (8, 61, 57)
+#: Séparation des deux demi-coques : un trait dans le ton du fond, jamais du
+#: noir — un liseré sombre sur une forme blanche fait aussitôt « autocollant ».
+SEPARATION = (13, 108, 99)
 
 #: Tailles inscrites dans le .ico. Windows pioche celle qui lui convient :
 #: 16 dans la barre des tâches, 32 dans l'explorateur, 256 en grandes
@@ -66,7 +73,7 @@ def _fond(cote: int) -> Image.Image:
 
     masque = Image.new("L", (cote, cote), 0)
     ImageDraw.Draw(masque).rounded_rectangle(
-        (0, 0, cote - 1, cote - 1), radius=round(cote * 0.22), fill=255)
+        (0, 0, cote - 1, cote - 1), radius=round(cote * 0.225), fill=255)
 
     image = Image.new("RGBA", (cote, cote), (0, 0, 0, 0))
     image.paste(degrade, (0, 0), masque)
@@ -74,48 +81,54 @@ def _fond(cote: int) -> Image.Image:
 
 
 def _gelule(longueur: int, epaisseur: int) -> Image.Image:
-    """Gélule horizontale : moitié blanche, moitié ambre, sur fond transparent.
+    """Gélule horizontale, blanche, sur fond transparent.
 
     Dessinée à plat puis tournée par l'appelant — une rotation de l'image
     entière est bien plus simple (et plus propre) qu'un tracé oblique.
     """
-    marge = round(epaisseur * 0.12)      # place pour le contour, non rogné
+    marge = 4                       # évite que la rotation rogne les bords
     taille = (longueur + 2 * marge, epaisseur + 2 * marge)
     boite = (marge, marge, marge + longueur - 1, marge + epaisseur - 1)
-    rayon = epaisseur // 2
-    milieu = marge + longueur // 2
-
-    # Les deux demi-coques sont découpées dans UNE seule silhouette, par
-    # masque : dessiner deux rectangles arrondis mitoyens laisserait un
-    # liseré transparent au raccord, visible dès la réduction en 32 px.
-    silhouette = Image.new("L", taille, 0)
-    ImageDraw.Draw(silhouette).rounded_rectangle(boite, radius=rayon, fill=255)
-    demi_droite = silhouette.copy()
-    ImageDraw.Draw(demi_droite).rectangle((0, 0, milieu, taille[1]), fill=0)
 
     image = Image.new("RGBA", taille, (0, 0, 0, 0))
-    image.paste(BLANC, mask=silhouette)
-    image.paste(AMBRE, mask=demi_droite)
-
-    # Le trait de séparation des deux demi-coques, puis le contour général :
-    # sans eux, la gélule blanche se fond dans les fortes réductions.
     trace = ImageDraw.Draw(image)
-    trace.line((milieu, boite[1], milieu, boite[3]),
-               fill=CONTOUR, width=round(epaisseur * 0.05))
-    trace.rounded_rectangle(boite, radius=rayon, outline=CONTOUR,
-                            width=round(epaisseur * 0.07))
+    trace.rounded_rectangle(boite, radius=epaisseur // 2, fill=BLANC)
+
+    # Le seul détail intérieur : la jonction des deux demi-coques. Un trait
+    # fin, dans le ton du fond — il disparaît de lui-même en 16 px, où la
+    # gélule doit de toute façon se lire comme une seule forme.
+    milieu = marge + longueur // 2
+    trace.line((milieu, boite[1] + 1, milieu, boite[3] - 1),
+               fill=SEPARATION, width=max(2, round(epaisseur * 0.035)))
     return image
+
+
+def _ombre(motif: Image.Image, cote: int) -> tuple:
+    """Ombre portée très douce du motif, et son décalage vertical.
+
+    Elle détache la gélule du fond sans ajouter le moindre trait : c'est ce
+    qui remplace le contour noir de la première version.
+    """
+    ombre = Image.new("RGBA", motif.size, (0, 0, 0, 0))
+    ombre.paste((0, 0, 0, 70), mask=motif.split()[3])
+    return (ombre.filter(ImageFilter.GaussianBlur(cote * 0.012)),
+            round(cote * 0.012))
 
 
 def construire(cote: int = COTE) -> Image.Image:
     """Icône complète, en RGBA, au côté demandé."""
     grand = cote * SUR_ECHANTILLON
-    image = _fond(grand)
 
-    gelule = _gelule(round(grand * 0.62), round(grand * 0.30))
+    gelule = _gelule(round(grand * 0.60), round(grand * 0.245))
     gelule = gelule.rotate(45, resample=Image.BICUBIC, expand=True)
-    image.alpha_composite(gelule, (
-        (grand - gelule.width) // 2, (grand - gelule.height) // 2))
+    motif = Image.new("RGBA", (grand, grand), (0, 0, 0, 0))
+    motif.alpha_composite(gelule, ((grand - gelule.width) // 2,
+                                   (grand - gelule.height) // 2))
+
+    image = _fond(grand)
+    ombre, decalage = _ombre(motif, grand)
+    image.alpha_composite(ombre, (0, decalage))
+    image.alpha_composite(motif)
 
     return image.resize((cote, cote), Image.LANCZOS)
 

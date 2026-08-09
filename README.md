@@ -501,6 +501,11 @@ Au **tout premier** lancement, `lancer.bat` pose sur le Bureau une icône
 turquoise de l'application. Un double-clic dessus ouvre l'utilitaire : plus
 besoin de retrouver le dossier.
 
+Le visuel est **monochrome** : un seul motif blanc sur l'aplat turquoise,
+sans contour ni seconde couleur, et du vide autour. Le relief vient d'une
+ombre portée très douce, pas d'un trait — un liseré sombre sur une forme
+blanche fait aussitôt « autocollant ».
+
 - L'icône a été supprimée par erreur ? Double-cliquez sur
   **`creer-raccourci.bat`**, elle revient.
 - Elle n'est **pas** recréée toute seule à chaque démarrage : un témoin
