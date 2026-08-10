@@ -26,6 +26,7 @@ import csv
 import io
 import logging
 import re
+import unicodedata
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -62,6 +63,14 @@ STATUT_CRITIQUE = "🟠 < 3 mois"
 STATUT_VIGILANCE = "🟡 < 6 mois"
 STATUT_OK = "🟢 OK"
 STATUT_INCONNU = "⚪ Sans date"
+
+#: Ordres d'affichage de l'inventaire. Les deux répondent à deux gestes
+#: différents : la péremption pour décider ce qu'on retire, le nom pour
+#: retrouver un produit — sur l'écran comme sur la liste papier que l'on
+#: parcourt devant l'armoire.
+TRI_PEREMPTION = "Péremption (au plus proche)"
+TRI_NOM = "Nom (A → Z)"
+TRIS = (TRI_PEREMPTION, TRI_NOM)
 
 #: Préfixes de symbologie ajoutés par certaines douchettes avant le contenu
 #: réel : ``]d2`` (Data Matrix GS1), ``]C1`` (GS1-128), ``]e0`` (GS1 DataBar),
@@ -592,12 +601,28 @@ def statut_peremption(peremption, aujourdhui: Optional[date] = None) -> str:
     return STATUT_OK
 
 
-def inventaire_affichable(inventaire: pd.DataFrame,
-                          aujourdhui: Optional[date] = None) -> pd.DataFrame:
-    """Inventaire prêt à lire : statut, jours restants, tri par urgence.
+def _cle_alphabetique(valeur) -> str:
+    """Clé de tri d'un libellé : sans accent, sans casse, sans espaces doubles.
 
-    Les lots qui expirent le plus tôt remontent en tête — c'est l'ordre dans
-    lequel on veut les traiter, et celui de la liste imprimée.
+    Sans elle, « ÉLAVIL » se range après « ZOLPIDEM » et « doliprane » après
+    « ZYRTEC » : un classement alphabétique qui ne suit pas l'ordre du
+    dictionnaire ne sert à rien pour retrouver une boîte dans l'armoire.
+    """
+    texte = " ".join(_texte(valeur).split()).upper()
+    return "".join(c for c in unicodedata.normalize("NFKD", texte)
+                   if not unicodedata.combining(c))
+
+
+def inventaire_affichable(inventaire: pd.DataFrame,
+                          aujourdhui: Optional[date] = None,
+                          tri: str = TRI_PEREMPTION) -> pd.DataFrame:
+    """Inventaire prêt à lire : statut, jours restants, et ordre au choix.
+
+    Par défaut les lots qui expirent le plus tôt remontent en tête — c'est
+    l'ordre dans lequel on veut les traiter. ``TRI_NOM`` range plutôt par
+    libellé, pour parcourir l'inventaire produit par produit devant
+    l'armoire ; à nom égal, la boîte qui périme la première reste en tête,
+    car c'est celle qu'on prend.
     """
     aujourdhui = aujourdhui or date.today()
     if inventaire is None or inventaire.empty:
@@ -619,8 +644,13 @@ def inventaire_affichable(inventaire: pd.DataFrame,
     # Les lots sans date passent en dernier : rien ne presse à leur sujet.
     tableau["_ordre"] = tableau["Jours restants"].map(
         lambda j: 10 ** 6 if j is None else j)
-    tableau = (tableau.sort_values(["_ordre", "Nom du produit"])
-               .drop(columns=["_ordre"]).reset_index(drop=True))
+    tableau["_nom"] = tableau["Nom du produit"].map(_cle_alphabetique)
+    tableau["_dosage"] = tableau["Dosage"].map(_cle_alphabetique)
+    cles = (["_nom", "_dosage", "_ordre"] if tri == TRI_NOM
+            else ["_ordre", "_nom", "_dosage"])
+    tableau = (tableau.sort_values(cles)
+               .drop(columns=["_ordre", "_nom", "_dosage"])
+               .reset_index(drop=True))
     return tableau.reindex(
         columns=["Statut"] + COLONNES_STOCK_FERME + ["Jours restants"])
 
@@ -887,7 +917,8 @@ STATUTS_A_TRAITER = (STATUT_PERIME, STATUT_IMMINENT)
 
 def filtrer_inventaire(inventaire: pd.DataFrame, recherche: str = "",
                        statuts: Optional[Sequence[str]] = None,
-                       aujourdhui: Optional[date] = None) -> pd.DataFrame:
+                       aujourdhui: Optional[date] = None,
+                       tri: str = TRI_PEREMPTION) -> pd.DataFrame:
     """Vue filtrée de l'inventaire : recherche libre et paliers retenus.
 
     La recherche porte sur le nom, le dosage, le code CIP et le n° de lot —
@@ -900,8 +931,10 @@ def filtrer_inventaire(inventaire: pd.DataFrame, recherche: str = "",
 
     Le résultat a la forme d'un INVENTAIRE (mêmes colonnes qu'en entrée) :
     il se réinjecte donc aussi bien dans l'affichage que dans les exports.
+    L'ordre demandé est conservé — un filtre ne doit pas rebattre les
+    lignes sous les yeux de qui vient de choisir son classement.
     """
-    tableau = inventaire_affichable(inventaire, aujourdhui)
+    tableau = inventaire_affichable(inventaire, aujourdhui, tri)
     if tableau.empty:
         return inventaire_vide()
     terme = " ".join(str(recherche or "").split()).upper()
@@ -919,8 +952,9 @@ def filtrer_inventaire(inventaire: pd.DataFrame, recherche: str = "",
 
 
 def _tableau_impression(inventaire: pd.DataFrame,
-                        aujourdhui: Optional[date] = None) -> pd.DataFrame:
-    tableau = inventaire_affichable(inventaire, aujourdhui)
+                        aujourdhui: Optional[date] = None,
+                        tri: str = TRI_PEREMPTION) -> pd.DataFrame:
+    tableau = inventaire_affichable(inventaire, aujourdhui, tri)
     if tableau.empty:
         return pd.DataFrame(columns=COLONNES_IMPRESSION)
     sortie = pd.DataFrame({
@@ -938,10 +972,11 @@ def _tableau_impression(inventaire: pd.DataFrame,
 
 
 def exporter_csv(inventaire: pd.DataFrame,
-                 aujourdhui: Optional[date] = None) -> bytes:
+                 aujourdhui: Optional[date] = None,
+                 tri: str = TRI_PEREMPTION) -> bytes:
     """Liste de stock en CSV (``;`` et BOM : Excel l'ouvre sans réglage)."""
     tampon = io.StringIO()
-    _tableau_impression(inventaire, aujourdhui).to_csv(
+    _tableau_impression(inventaire, aujourdhui, tri).to_csv(
         tampon, index=False, sep=";", quoting=csv.QUOTE_MINIMAL)
     return tampon.getvalue().encode("utf-8-sig")
 
@@ -967,9 +1002,15 @@ _STATUT_PDF = {
     STATUT_INCONNU: "sans date",
 }
 
+#: Même raison pour le classement : la flèche « → » de ``TRI_NOM`` n'existe
+#: pas dans les polices PDF standard et s'imprimerait en pavé noir.
+_TRI_PDF = {TRI_PEREMPTION: "péremption la plus proche",
+            TRI_NOM: "nom du produit (A-Z)"}
+
 
 def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
-                 aujourdhui: Optional[date] = None) -> bytes:
+                 aujourdhui: Optional[date] = None,
+                 tri: str = TRI_PEREMPTION) -> bytes:
     """Liste de stock en PDF, prête à imprimer pour le contrôle physique.
 
     Format paysage, en-tête répété à chaque page, lignes teintées selon
@@ -989,7 +1030,7 @@ def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
                          "« pip install reportlab » puis réessayez.")
 
     aujourdhui = aujourdhui or date.today()
-    tableau = _tableau_impression(inventaire, aujourdhui)
+    tableau = _tableau_impression(inventaire, aujourdhui, tri)
     resume = resume_inventaire(inventaire, aujourdhui)
 
     tampon = io.BytesIO()
@@ -1005,7 +1046,10 @@ def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
             f"{resume['references']} référence(s), {resume['boites']} boîte(s), "
             f"{resume['unites']} unité(s) · périmés : {resume['perimes']} · "
             f"moins d'un mois : {resume['imminents']} · "
-            f"moins de 3 mois : {resume['critiques']}",
+            f"moins de 3 mois : {resume['critiques']}<br/>"
+            # La liste papier se parcourt devant l'armoire : savoir dans
+            # quel ordre elle est rangée évite de la relire en entier.
+            f"Classement : {_TRI_PDF.get(tri, _TRI_PDF[TRI_PEREMPTION])}",
             styles["Normal"]),
         Spacer(1, 6 * mm),
     ]

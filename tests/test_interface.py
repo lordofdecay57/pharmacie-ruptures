@@ -179,8 +179,31 @@ class TestEspaceStockFerme:
         for attendu in ("Scannez le produit", "Inventaire",
                         "Imprimez ou exportez", "Entrée", "Sortie",
                         "Base publique des médicaments",
-                        "Pré-remplir les noms"):
+                        "Pré-remplir les noms", "Classer par"):
             assert attendu in contenu, f"« {attendu} » absent de l'écran"
+
+    def test_classer_par_nom_est_selectionnable(self, page):
+        """Le choix de l'ordre est sur l'écran, pas dans la barre latérale :
+        c'est un geste qu'on fait en regardant la liste. Le test le change
+        vraiment — c'est le rerendu complet qui vaut d'être vérifié."""
+        selecteur = page.locator(".st-key-sf_tri")
+        assert selecteur.count() == 1, "le sélecteur de classement est absent"
+        champ = selecteur.locator("input").first
+        # L'ordre par péremption reste le défaut : ce qui périme demain doit
+        # sauter aux yeux sans qu'on ait rien à régler.
+        assert "Péremption" in champ.input_value()
+
+        champ.click()
+        page.wait_for_timeout(800)
+        champ.press("ArrowDown")
+        page.wait_for_timeout(400)
+        champ.press("Enter")
+        page.wait_for_timeout(3000)
+        _sans_exception(page)
+        assert champ.input_value() == "Nom (A → Z)"
+        # Le document imprimé suit l'écran : une liste papier qui contredit
+        # le tableau se relit en entier pour rien.
+        assert "nom (a → z)" in page.content().lower()
 
     def test_base_absente_signalee_sans_bloquer(self, page):
         """Le poste peut être hors ligne : l'absence de base publique se

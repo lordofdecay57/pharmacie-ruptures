@@ -521,22 +521,25 @@ def _import_repertoire(repertoire: pd.DataFrame) -> None:
         st.rerun()
 
 
-def _tableau_editable(inventaire: pd.DataFrame,
-                      aujourdhui: date) -> pd.DataFrame | None:
+def _tableau_editable(inventaire: pd.DataFrame, aujourdhui: date,
+                      tri: str) -> pd.DataFrame | None:
     """Inventaire modifiable ; renvoie le tableau corrigé s'il a changé."""
-    vue = stock_ferme.inventaire_affichable(inventaire, aujourdhui)
+    vue = stock_ferme.inventaire_affichable(inventaire, aujourdhui, tri)
     if vue.empty:
         st.info("Inventaire vide — scannez une première boîte ci-dessus.")
         return None
 
     # L'éditeur mémorise ses corrections en cours dans l'état de session, sous
-    # sa clé. Après un enregistrement, l'inventaire a changé de forme (lignes
-    # supprimées, ordre revu par échéance) : réutiliser la même clé
-    # réappliquerait les anciennes corrections aux NOUVELLES lignes. On repart
-    # donc d'un éditeur neuf à chaque enregistrement.
+    # sa clé, et les repère par POSITION de ligne. Après un enregistrement,
+    # l'inventaire a changé de forme (lignes supprimées, ordre revu par
+    # échéance) ; changer de classement rebat les lignes tout autant.
+    # Réutiliser la même clé réappliquerait les anciennes corrections aux
+    # NOUVELLES lignes — un comptage recopié sur le mauvais médicament. La
+    # clé porte donc à la fois la génération et l'ordre affiché.
     edite = st.data_editor(
         vue, hide_index=True, use_container_width=True, num_rows="dynamic",
-        key=f"sf_editeur_{st.session_state.get('sf_generation', 0)}",
+        key=f"sf_editeur_{st.session_state.get('sf_generation', 0)}"
+            f"_{stock_ferme.TRIS.index(tri)}",
         disabled=["Statut", "Code CIP", "Total unités", "Jours restants",
                   "Enregistré le"],
         column_config={
@@ -567,10 +570,12 @@ def _tableau_editable(inventaire: pd.DataFrame,
     return stock_ferme.normaliser_tableau_edite(edite)
 
 
-def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date) -> None:
+def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date,
+                     tri: str) -> None:
     st.markdown("**Imprimer la liste de stock**")
     st.caption("Nom du médicament, dosage, code CIP, nombre de boîtes et "
-               "d'unités, et date de péremption de chaque lot.")
+               "d'unités, et date de péremption de chaque lot. Le document "
+               f"reprend le classement choisi ci-dessus ({tri.lower()}).")
 
     # Le besoin le plus fréquent n'est pas la liste complète mais la liste de
     # RETRAIT : ce qui est périmé ou ne passera pas le mois.
@@ -579,20 +584,20 @@ def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date) -> None:
         key="sf_impression_retrait")
     a_imprimer = (stock_ferme.filtrer_inventaire(
         inventaire, statuts=stock_ferme.STATUTS_A_TRAITER,
-        aujourdhui=aujourdhui) if retrait_seul else inventaire)
+        aujourdhui=aujourdhui, tri=tri) if retrait_seul else inventaire)
     titre = "Stock fermé — lots à retirer" if retrait_seul else "Stock fermé"
     prefixe = "stock_ferme_retrait" if retrait_seul else "stock_ferme"
-    nombre = len(stock_ferme.inventaire_affichable(a_imprimer, aujourdhui))
+    nombre = len(stock_ferme.inventaire_affichable(a_imprimer, aujourdhui, tri))
     st.caption(f"{nombre} lot(s) dans le document.")
 
     col_csv, col_pdf = st.columns(2)
     col_csv.download_button(
         "📄 Télécharger en CSV",
-        data=stock_ferme.exporter_csv(a_imprimer, aujourdhui),
+        data=stock_ferme.exporter_csv(a_imprimer, aujourdhui, tri),
         file_name=f"{prefixe}_{aujourdhui:%Y-%m-%d}.csv",
         mime=_MIME_CSV, use_container_width=True)
     try:
-        pdf = stock_ferme.exporter_pdf(a_imprimer, titre, aujourdhui)
+        pdf = stock_ferme.exporter_pdf(a_imprimer, titre, aujourdhui, tri)
         col_pdf.download_button(
             "🖨️ Télécharger en PDF",
             data=pdf,
@@ -699,16 +704,20 @@ def rendre(etape, tuile_kpi) -> None:
     _bandeau_kpi(stock_ferme.resume_inventaire(inventaire, aujourdhui),
                  tuile_kpi)
 
-    col_rech, col_filtre = st.columns([3, 2])
+    col_rech, col_tri, col_filtre = st.columns([3, 2, 2])
     recherche = col_rech.text_input(
         "🔎 Rechercher (nom, dosage, code CIP ou n° de lot)",
         key="sf_recherche", placeholder="ex. MORPHINE, 3400937… ou LOT-A")
+    # Deux gestes distincts : décider ce qu'on retire (péremption) et
+    # retrouver un produit dans l'armoire (nom). Le classement suit jusqu'au
+    # CSV et au PDF — sinon la liste papier contredirait l'écran.
+    tri = col_tri.selectbox("↕️ Classer par", stock_ferme.TRIS, key="sf_tri")
     a_traiter = col_filtre.checkbox(
         "⚠️ N'afficher que les lots à traiter", key="sf_filtre_traiter",
         help="Périmés et lots de moins d'un mois.")
     vue_filtree = stock_ferme.filtrer_inventaire(
         inventaire, recherche,
-        stock_ferme.STATUTS_A_TRAITER if a_traiter else None, aujourdhui)
+        stock_ferme.STATUTS_A_TRAITER if a_traiter else None, aujourdhui, tri)
     filtre_actif = bool(recherche) or a_traiter
     if filtre_actif and vue_filtree.empty:
         st.info("Aucun lot ne correspond à ce filtre.")
@@ -716,13 +725,14 @@ def rendre(etape, tuile_kpi) -> None:
     # Le tableau ne devient modifiable que sur l'inventaire ENTIER : corriger
     # une vue filtrée réécrirait le stock en perdant les lignes masquées.
     if filtre_actif:
-        st.dataframe(stock_ferme.inventaire_affichable(vue_filtree, aujourdhui),
-                     use_container_width=True, hide_index=True)
+        st.dataframe(
+            stock_ferme.inventaire_affichable(vue_filtree, aujourdhui, tri),
+            use_container_width=True, hide_index=True)
         st.caption(f"{len(vue_filtree)} lot(s) affiché(s). Videz la recherche "
                    "et décochez le filtre pour corriger l'inventaire.")
         corrige = None
     else:
-        corrige = _tableau_editable(inventaire, aujourdhui)
+        corrige = _tableau_editable(inventaire, aujourdhui, tri)
     if corrige is not None:
         _enregistrer(inventaire=corrige)
         st.rerun()
@@ -730,4 +740,4 @@ def rendre(etape, tuile_kpi) -> None:
     # --- Impression --------------------------------------------------------
     st.divider()
     etape("3", "Imprimez ou exportez", "Liste de contrôle du stock physique.")
-    _zone_impression(inventaire, aujourdhui)
+    _zone_impression(inventaire, aujourdhui, tri)
