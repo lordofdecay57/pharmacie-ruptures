@@ -66,34 +66,34 @@ def _etat():
 
 
 def _base_chargee() -> tuple:
-    """Les deux index de la base publique : par code CIP, et par nom.
+    """Les vues de la base publique : par code CIP, par nom, et le catalogue.
 
-    Relus une seule fois par session, et à nouveau si le fichier a changé
+    Relues une seule fois par session, et à nouveau si le fichier a changé
     (mise à jour de la base) — 40 000 codes, inutile de les relire à chaque
-    interaction. Les deux sont construits ensemble : ils viennent du même
-    fichier, le lire deux fois serait payer deux fois.
+    interaction. Toutes sont construites ensemble : elles viennent du même
+    fichier, le lire trois fois serait payer trois fois.
     """
     empreinte = (BASE_MEDICAMENTS_PATH.stat().st_mtime
                  if BASE_MEDICAMENTS_PATH.exists() else 0)
     if st.session_state.get("sf_base_empreinte") != empreinte:
         table = base_medicaments.charger_table(BASE_MEDICAMENTS_PATH)
-        table = base_medicaments.charger_table(BASE_MEDICAMENTS_PATH)
         index_noms = base_medicaments.index_par_nom(table)
+        # Catalogue figé une fois pour toutes : c'est lui qui part dans le
+        # navigateur pour la saisie assistée. Le recalculer à chaque
+        # interaction le rendrait « nouveau » aux yeux de Streamlit, qui le
+        # renverrait en entier au lieu d'une simple référence.
+        catalogue = base_medicaments.catalogue(index_noms)
         st.session_state["sf_base_index"] = base_medicaments.index_par_cip(
             table)
         st.session_state["sf_base_noms"] = index_noms
-        # Liste figée une fois pour toutes : c'est elle qui part dans le
-        # navigateur pour la saisie assistée. La recalculer à chaque
-        # interaction la rendrait « nouvelle » aux yeux de Streamlit, qui la
-        # renverrait en entier au lieu d'une simple référence.
-        st.session_state["sf_base_denominations"] = (
-            base_medicaments.noms_distincts(index_noms))
+        st.session_state["sf_base_catalogue"] = catalogue
+        st.session_state["sf_base_par_libelle"] = {
+            m["libelle"]: m for m in catalogue}
         st.session_state["sf_base_empreinte"] = empreinte
         _journal.info("Base des médicaments : %d code(s), %d présentation(s), "
-                      "%d dénomination(s)",
+                      "%d boîte(s) au catalogue",
                       len(st.session_state["sf_base_index"]),
-                      len(index_noms),
-                      len(st.session_state["sf_base_denominations"]))
+                      len(index_noms), len(catalogue))
     return (st.session_state["sf_base_index"],
             st.session_state["sf_base_noms"])
 
@@ -106,9 +106,14 @@ def _index_noms() -> list:
     return _base_chargee()[1]
 
 
-def _denominations() -> list:
+def _catalogue() -> list:
     _base_chargee()
-    return st.session_state["sf_base_denominations"]
+    return st.session_state["sf_base_catalogue"]
+
+
+def _catalogue_par_libelle() -> dict:
+    _base_chargee()
+    return st.session_state["sf_base_par_libelle"]
 
 
 def _enregistrer(inventaire=None, repertoire=None) -> None:
@@ -254,20 +259,12 @@ def _traiter_scan() -> None:
                   != (code.cip, code.brut))
 
     # Ce n'est pas un code : c'est très probablement un NOM tapé au clavier.
-    # La base publique sait alors proposer les présentations correspondantes
-    # — avec leur dosage, leur conditionnement et leur code CIP, qu'il n'y a
-    # plus qu'à choisir plutôt qu'à ressaisir.
+    # Si la base ne connaît qu'UNE boîte portant ce nom, il n'y a rien à
+    # choisir — on remplit. Sinon on renvoie vers la liste 🔎, qui montre
+    # les dosages et les conditionnements côte à côte.
     index_noms = [] if code.reconnu else _index_noms()
-    trouvaille = (base_medicaments.preselectionner(index_noms, brut)
-                  if index_noms else
-                  {"resultats": [], "terme": "", "elargi": False})
-    propositions = trouvaille["resultats"]
-    if propositions:
-        st.session_state["sf_propositions"] = {
-            "saisi": str(brut).strip(), "terme": trouvaille["terme"],
-            "elargi": trouvaille["elargi"], "resultats": propositions}
-    else:
-        st.session_state.pop("sf_propositions", None)
+    propositions = (base_medicaments.preselectionner(index_noms, brut)
+                    ["resultats"] if index_noms else [])
 
     st.session_state["sf_en_attente"] = {
         "cip": code.cip,
@@ -286,11 +283,19 @@ def _traiter_scan() -> None:
     }
     rappel = (" La fiche précédente, non validée, a été abandonnée."
               if abandonnee else "")
-    if propositions:
+    if len(propositions) == 1:
+        # Une seule boîte porte ce nom : faire choisir entre une seule
+        # proposition n'aurait aucun sens.
+        _choisir_medicament(propositions[0])
+        if rappel:
+            niveau, texte = st.session_state["sf_message"]
+            st.session_state["sf_message"] = (niveau, texte + rappel)
+    elif propositions:
         st.session_state["sf_message"] = (
-            "ok", f"{len(propositions)} médicament(s) trouvé(s) pour "
-                  f"« {str(brut).strip()} » — choisissez la présentation "
-                  "ci-dessous." + rappel)
+            "ok", f"{len(propositions)} boîte(s) portent le nom "
+                  f"« {str(brut).strip()} » — choisissez la vôtre dans la "
+                  "liste 🔎 ci-dessous : le dosage et le conditionnement y "
+                  "figurent." + rappel)
     elif not code.reconnu and not index_noms:
         # Rien à proposer parce qu'il n'y a rien à chercher DEDANS : le dire,
         # plutôt que de laisser croire que le nom tapé est en cause.
@@ -319,141 +324,67 @@ def _saisie_manuelle_vierge() -> None:
     st.session_state["sf_en_attente"] = {
         "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
         "peremption": None, "lot": "", "brut": "", "reconnu": True}
-    st.session_state.pop("sf_propositions", None)
     st.session_state["sf_message"] = None
 
 
-def libelle_proposition(medicament: dict) -> str:
-    """Une ligne de la présélection : dénomination, conditionnement, unités.
-
-    Deux boîtes du même médicament au même dosage ne se distinguent que par
-    leur conditionnement — 8 comprimés ou 100. L'omettre rendrait le choix
-    aveugle, et c'est justement ce nombre qui remplit « unités par boîte ».
-    """
-    ligne = medicament["nom"]
-    if medicament.get("presentation"):
-        ligne += f" — {medicament['presentation']}"
-    if medicament.get("unites_par_boite"):
-        ligne += f" · {medicament['unites_par_boite']} unités/boîte"
-    return ligne
-
-
-def _choisir_proposition(medicament: dict) -> None:
-    """Reprend un médicament de la présélection dans la fiche d'ajout."""
+def _choisir_medicament(medicament: dict) -> None:
+    """Reprend un médicament du catalogue dans la fiche d'ajout."""
     attente = dict(st.session_state.get("sf_en_attente") or {})
     attente.update({
         "cip": medicament["cip"],
         # La dénomination officielle porte déjà le dosage (« DOLIPRANE
-        # 1000 mg, comprimé ») : le scinder en deux champs reviendrait à
+        # 1000 mg, comprimé ») : la scinder en deux champs reviendrait à
         # deviner où couper.
         "nom": medicament["nom"],
         "unites_par_boite": medicament.get("unites_par_boite", 0),
     })
-    attente.setdefault("dosage", "")
-    attente.setdefault("peremption", None)
-    attente.setdefault("lot", "")
-    attente.setdefault("brut", "")
-    attente.setdefault("reconnu", True)
+    for champ, defaut in (("dosage", ""), ("peremption", None), ("lot", ""),
+                          ("brut", ""), ("reconnu", True)):
+        attente.setdefault(champ, defaut)
     st.session_state["sf_en_attente"] = attente
-    st.session_state.pop("sf_propositions", None)
     st.session_state["sf_message"] = (
-        "ok", f"{medicament['nom']} — il ne reste que la date de péremption "
-              "à saisir.")
+        "ok", f"{medicament.get('libelle') or medicament['nom']} — il ne "
+              "reste que la date de péremption à saisir.")
 
 
-def _nom_choisi_dans_la_liste() -> None:
-    """Un médicament vient d'être choisi dans la saisie assistée.
+def _medicament_choisi_dans_la_liste() -> None:
+    """Une boîte vient d'être choisie dans la liste : la fiche est remplie.
 
-    Une seule présentation : inutile de faire choisir entre une seule
-    proposition, on remplit directement la fiche. Plusieurs : on les
-    propose, c'est le conditionnement qui les distingue.
+    En un seul geste — le nom, le dosage et le conditionnement sont dans la
+    même ligne. C'est ce qui remplace l'ancien parcours en deux temps
+    (choisir un nom, puis une présentation, puis valider).
     """
-    nom = st.session_state.get("sf_auto_nom")
-    # Remis à zéro tout de suite : sans cela, rechoisir le MÊME médicament
-    # après coup ne déclencherait rien, la valeur du menu n'ayant pas changé.
+    libelle = st.session_state.get("sf_auto_nom")
+    # Remis à zéro tout de suite : sans cela, rechoisir la MÊME boîte après
+    # coup ne déclencherait rien, la valeur du menu n'ayant pas changé.
     st.session_state["sf_auto_nom"] = None
-    if not nom:
-        return
-    presentations = base_medicaments.presentations_du_nom(_index_noms(), nom)
-    if not presentations:
-        return
-    st.session_state.setdefault("sf_en_attente", {
-        "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
-        "peremption": None, "lot": "", "brut": "", "reconnu": True})
-    if len(presentations) == 1:
-        _choisir_proposition(presentations[0])
-        return
-    # Le nom est acquis dès maintenant : le laisser vide pendant qu'on
-    # choisit le conditionnement donnerait l'impression que le clic n'a rien
-    # fait. Seuls le code CIP et les unités attendent la présentation.
-    st.session_state["sf_en_attente"]["nom"] = nom
-    st.session_state["sf_propositions"] = {
-        "saisi": nom, "terme": nom, "elargi": False,
-        "resultats": presentations}
-    st.session_state["sf_message"] = (
-        "ok", f"{nom} — {len(presentations)} conditionnements possibles, "
-              "choisissez le vôtre ci-dessous.")
+    medicament = _catalogue_par_libelle().get(libelle)
+    if medicament:
+        _choisir_medicament(medicament)
 
 
 def _saisie_assistee() -> None:
     """Liste déroulante cherchable : les propositions viennent à la frappe.
 
-    C'est le navigateur qui filtre, pas le serveur : les dénominations lui
-    sont envoyées une fois, et la liste se réduit **dès les premières
-    lettres**, sans validation ni aller-retour. Un champ texte ordinaire ne
-    peut pas le faire — Streamlit n'y réagit qu'à la validation, et l'écran
-    semblait alors ne rien faire.
+    C'est le navigateur qui filtre, pas le serveur : le catalogue lui est
+    envoyé une fois, et la liste se réduit **dès les premières lettres**,
+    sans validation ni aller-retour. Un champ texte ordinaire ne peut pas le
+    faire — Streamlit n'y réagit qu'à la validation, et l'écran semblait
+    alors ne rien faire.
 
-    Seules les dénominations sont envoyées (~14 000), pas les présentations
-    (~20 700) : trois fois moins de texte à filtrer à chaque frappe, pour la
-    même information tant que le médicament n'est pas choisi.
+    Chaque ligne porte le nom, le dosage ET la taille de la boîte : taper
+    « doliprane 1000 » puis choisir suffit à tout renseigner, sans second
+    écran de confirmation.
     """
-    denominations = _denominations()
-    if not denominations:
+    catalogue = _catalogue()
+    if not catalogue:
         return          # base absente : l'encadré ci-dessous le dit déjà
     st.selectbox(
-        "Nom du médicament", denominations, index=None,
-        key="sf_auto_nom", on_change=_nom_choisi_dans_la_liste,
+        "Médicament", [m["libelle"] for m in catalogue], index=None,
+        key="sf_auto_nom", on_change=_medicament_choisi_dans_la_liste,
         label_visibility="collapsed",
-        placeholder=f"🔎 Ou tapez les premières lettres du médicament "
-                    f"({len(denominations)} référencés) — les propositions "
-                    f"s'affichent aussitôt")
-
-
-def _preselection_par_nom() -> None:
-    """Liste des médicaments correspondant au nom tapé au clavier."""
-    proposition = st.session_state.get("sf_propositions")
-    if not proposition:
-        return
-    resultats = proposition["resultats"]
-    saisi = proposition.get("saisi", "")
-    with st.container(border=True):
-        st.markdown(f"**Médicaments trouvés pour « {saisi} »**")
-        if proposition.get("elargi"):
-            # Dire ce qui a réellement servi : sinon la liste paraît hors
-            # sujet, alors qu'elle répond à une recherche volontairement
-            # élargie faute de correspondance exacte.
-            st.caption(f"Aucune correspondance exacte : recherche élargie à "
-                       f"« {proposition['terme']} ».")
-        st.caption("Choisissez la présentation exacte : c'est elle qui donne "
-                   "le code CIP et le nombre d'unités par boîte. La date de "
-                   "péremption reste à saisir — elle n'appartient qu'à la "
-                   "boîte que vous avez en main.")
-        choix = st.selectbox(
-            "Médicament", range(len(resultats)),
-            format_func=lambda i: libelle_proposition(resultats[i]),
-            key="sf_proposition_choix", label_visibility="collapsed")
-        colonne_ok, colonne_non = st.columns([3, 1])
-        colonne_ok.button("✅ Utiliser ce médicament", type="primary",
-                          use_container_width=True,
-                          on_click=_choisir_proposition,
-                          args=(resultats[choix],))
-        colonne_non.button("Aucun", use_container_width=True,
-                           help="Saisir le produit à la main.",
-                           on_click=lambda: st.session_state.pop(
-                               "sf_propositions", None))
-
-
+        placeholder=f"🔎 Tapez le nom du médicament, puis le dosage pour "
+                    f"affiner ({len(catalogue)} boîtes référencées)")
 def _basculer_sortie_manuelle() -> None:
     """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
     st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
@@ -1010,9 +941,6 @@ def rendre(etape, tuile_kpi) -> None:
             _panneau_sortie_manuelle(inventaire, aujourdhui, tri_courant)
 
     if mode == MODE_ENTREE:
-        # Juste sous le champ : la présélection répond à ce qui vient d'être
-        # tapé, la reléguer sous les panneaux repliés la ferait manquer.
-        _preselection_par_nom()
         _base_publique()
         _import_repertoire(repertoire)
         inventaire, repertoire = _etat()

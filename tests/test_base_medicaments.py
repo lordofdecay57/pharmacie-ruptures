@@ -19,8 +19,8 @@ from base_medicaments import (COLONNES_BASE, anciennete_jours, charger_table,
                               chercher, chercher_par_nom, cip7_depuis_cip13,
                               construire_table, decoder, index_par_cip,
                               index_par_nom, info_base,
-                              noms_distincts, preselectionner,
-                              presentations_du_nom, sauver_table,
+                              catalogue, libelle_court,
+                              preselectionner, sauver_table,
                               unites_par_boite)
 
 # Extraits authentiques des fichiers officiels (colonnes séparées par des
@@ -243,44 +243,40 @@ class TestRechercheParNom:
         assert chercher_par_nom([], "doliprane") == []
 
 
-class TestSaisieAssistee:
+class TestCatalogue:
     """Ce qui part dans le navigateur pour les propositions à la frappe.
 
-    Le filtrage se fait côté navigateur : la liste doit donc être aussi
-    courte que possible, et surtout STABLE d'un rendu à l'autre — une liste
-    reconstruite différemment serait renvoyée en entier à chaque
-    interaction.
+    Une entrée par BOÎTE, pas par médicament : le dosage et le
+    conditionnement figurent sur la même ligne, ce qui permet de tout
+    choisir d'un seul geste au lieu d'un nom puis d'une présentation.
     """
 
     def _index(self):
         return index_par_nom(construire_table(CIS, CIP))
 
-    def test_une_seule_entree_par_denomination(self):
-        """Les présentations d'un même médicament portent le même nom : les
-        envoyer toutes tripleraient la liste sans rien apprendre."""
-        table = pd.DataFrame(
-            [{"Code CIP": "3400900000017", "Nom du produit": "DOLIX 1 mg",
-              "Présentation": "plaquette de 10 comprimés"},
-             {"Code CIP": "3400900000024", "Nom du produit": "DOLIX 1 mg",
-              "Présentation": "plaquette de 30 comprimés"}],
-            columns=COLONNES_BASE)
-        assert noms_distincts(index_par_nom(table)) == ["DOLIX 1 mg"]
+    def test_une_entree_par_boite(self):
+        entrees = catalogue(self._index())
+        assert len(entrees) == 2
+        assert all("libelle" in e and e["cip"] for e in entrees)
 
-    def test_ordre_alphabetique_stable(self):
-        noms = noms_distincts(self._index())
-        assert noms == sorted(noms)
-        assert noms == noms_distincts(self._index())
+    def test_le_libelle_dit_le_contenu_pas_l_emballage(self):
+        """« plaquette(s) thermoformée(s) PVC-aluminium de 8 comprimé(s) »
+        n'apprend rien de plus que « boîte de 8 », et allonge une liste qui
+        se parcourt à l'œil."""
+        entree = [e for e in catalogue(self._index())
+                  if e["nom"].startswith("DOLIPRANE")][0]
+        assert entree["libelle"] == "DOLIPRANE 1000 mg, comprimé — boîte de 8"
 
-    def test_base_absente(self):
-        assert noms_distincts([]) == []
+    def test_le_libelle_retombe_sur_la_presentation_sans_compte_fiable(self):
+        assert libelle_court(
+            {"nom": "X", "presentation": "1 flacon de 500 ml",
+             "unites_par_boite": 0}) == "X — 1 flacon de 500 ml"
 
-    def test_presentations_d_un_nom(self):
-        presentations = presentations_du_nom(
-            self._index(), "DOLIPRANE 1000 mg, comprimé")
-        assert len(presentations) == 1
-        assert presentations[0]["cip"] == "3400935955838"
+    def test_sans_presentation_le_nom_suffit(self):
+        assert libelle_court({"nom": "X", "presentation": "",
+                              "unites_par_boite": 0}) == "X"
 
-    def test_presentations_de_la_plus_petite_boite_a_la_plus_grande(self):
+    def test_petites_boites_avant_les_grandes(self):
         """C'est l'ordre du rayon : on cherche « la boîte de 8 » avant « la
         boîte de 100 »."""
         table = pd.DataFrame(
@@ -289,13 +285,29 @@ class TestSaisieAssistee:
              {"Code CIP": "3400900000024", "Nom du produit": "DOLIX 1 mg",
               "Présentation": "plaquette de 8 comprimés"}],
             columns=COLONNES_BASE)
-        tailles = [p["unites_par_boite"]
-                   for p in presentations_du_nom(index_par_nom(table),
-                                                 "DOLIX 1 mg")]
+        tailles = [e["unites_par_boite"] for e in catalogue(index_par_nom(table))]
         assert tailles == [8, 100]
 
-    def test_nom_inconnu(self):
-        assert presentations_du_nom(self._index(), "INEXISTANT") == []
+    def test_deux_boites_indiscernables_sont_fondues(self):
+        """Même nom, même contenu, matière d'emballage différente : personne
+        ne saurait les distinguer dans une liste, et le choix serait un
+        tirage au sort."""
+        table = pd.DataFrame(
+            [{"Code CIP": "3400900000017", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette PVC de 8 comprimés"},
+             {"Code CIP": "3400900000024", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette aluminium de 8 comprimés"}],
+            columns=COLONNES_BASE)
+        assert len(catalogue(index_par_nom(table))) == 1
+
+    def test_ordre_stable(self):
+        """Un catalogue reconstruit différemment serait renvoyé en entier au
+        navigateur à chaque interaction."""
+        assert ([e["libelle"] for e in catalogue(self._index())]
+                == [e["libelle"] for e in catalogue(self._index())])
+
+    def test_base_absente(self):
+        assert catalogue([]) == []
 
 
 class TestDosesEquivalentes:

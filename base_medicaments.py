@@ -276,25 +276,57 @@ def index_par_nom(table: pd.DataFrame) -> list:
     return list(retenus.values())
 
 
-def noms_distincts(index: list) -> list:
-    """Dénominations, sans doublon, dans l'ordre alphabétique.
+#: Au-delà, le libellé du conditionnement est tronqué : une liste où l'on
+#: cherche à l'œil ne se lit pas sur trois lignes.
+LONGUEUR_PRESENTATION_MAX = 48
 
-    Destinée à la **saisie assistée** : la liste part telle quelle dans le
-    navigateur, qui la filtre à chaque frappe. Les présentations d'un même
-    médicament portent la même dénomination — les envoyer toutes
-    tripleraient la liste sans rien apprendre tant que le nom n'est pas
-    choisi.
+
+def libelle_court(medicament: dict) -> str:
+    """Une ligne de la liste : dénomination, dosage, taille de la boîte.
+
+    La dénomination officielle porte déjà le dosage et la forme
+    (« DOLIPRANE 1000 mg, comprimé ») ; il ne manque que le contenu de la
+    boîte. Quand il est connu, on l'écrit tel qu'on le dit au comptoir —
+    « boîte de 8 » — plutôt que de recopier « plaquette(s) thermoformée(s)
+    PVC-aluminium de 8 comprimé(s) » : la matière de la plaquette
+    n'apprend rien et allonge une liste qui se parcourt à l'œil.
     """
-    return sorted({e["nom"] for e in (index or []) if e.get("nom")})
+    nom = medicament.get("nom", "")
+    if medicament.get("unites_par_boite"):
+        return f"{nom} — boîte de {medicament['unites_par_boite']}"
+    presentation = medicament.get("presentation", "")
+    if not presentation:
+        return nom
+    return f"{nom} — {presentation[:LONGUEUR_PRESENTATION_MAX]}"
 
 
-def presentations_du_nom(index: list, nom: str) -> list:
-    """Présentations d'une dénomination donnée, de la plus petite boîte à la
-    plus grande — c'est l'ordre du rayon."""
-    exactes = [e for e in (index or []) if e.get("nom") == nom]
-    exactes.sort(key=lambda e: (e["unites_par_boite"] or 10 ** 6,
-                                e["presentation"]))
-    return exactes
+def catalogue(index: list) -> list:
+    """Une entrée par boîte réellement distincte, prête pour la liste.
+
+    C'est ce catalogue qui part dans le navigateur : chaque frappe le
+    filtre en local, sans aller-retour ni validation. Il porte le
+    conditionnement, et non seulement le nom — c'est ce qui permet de tout
+    choisir d'un seul geste, au lieu d'un nom puis d'une boîte.
+
+    Les boîtes sont classées de la plus petite à la plus grande à
+    l'intérieur d'un même médicament : c'est l'ordre du rayon. Deux
+    présentations qui se liraient à l'identique (même nom, même contenu,
+    matière d'emballage différente) sont fondues en une : personne ne
+    saurait les distinguer dans une liste, et le choix serait un tirage au
+    sort.
+    """
+    entrees = sorted(
+        (e for e in (index or []) if e.get("nom")),
+        key=lambda e: (e["nom"], e["unites_par_boite"] or 10 ** 6,
+                       e["presentation"]))
+    catalogue_, vus = [], set()
+    for entree in entrees:
+        libelle = libelle_court(entree)
+        if libelle in vus:
+            continue
+        vus.add(libelle)
+        catalogue_.append(dict(entree, libelle=libelle))
+    return catalogue_
 
 
 #: En dessous, la recherche ramènerait la moitié de la base : on attend que

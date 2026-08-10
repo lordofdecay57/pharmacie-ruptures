@@ -422,38 +422,44 @@ défiler l'inventaire.
 
 **Saisie assistée** — un code illisible, une boîte reconditionnée, et il
 n'y a plus qu'à **taper les premières lettres** dans le menu sous le champ
-de scan : les médicaments correspondants s'affichent **aussitôt**, sans
-rien valider.
+de scan : les boîtes correspondantes s'affichent **aussitôt**, sans rien
+valider. On précise le dosage pour affiner, on clique — la fiche est
+remplie.
+
+```
+doliprane 1000
+   DOLIPRANE 1000 mg, gélule — boîte de 8
+   DOLIPRANE 1000 mg, comprimé — boîte de 8
+   DOLIPRANE 1000 mg, comprimé — boîte de 100
+   DOLIPRANE 1000 mg, comprimé effervescent sécable — boîte de 8
+```
+
+Une entrée par **boîte**, pas par médicament : le nom, le dosage et le
+conditionnement tiennent sur la même ligne, donc **un seul geste** suffit —
+il n'y a pas de second écran à confirmer. Un clic renseigne la
+dénomination, le **code CIP** et les **unités par boîte** ; ne reste que la
+péremption, la seule chose que la base ne peut pas savoir.
+
+Le libellé dit `boîte de 8` plutôt que « plaquette(s) thermoformée(s)
+PVC-aluminium de 8 comprimé(s) » : la matière de l'emballage n'apprend rien
+et allonge une liste qui se parcourt à l'œil. Deux boîtes qui se liraient à
+l'identique sont fondues en une — personne ne saurait les distinguer, et le
+choix serait un tirage au sort.
 
 Le filtrage se fait dans le **navigateur**, pas sur le serveur : les
-~14 400 dénominations lui sont envoyées une fois, puis chaque frappe filtre
-localement. Mesuré sur la base officielle complète : **218 ms** au premier
-caractère, **35 ms** au neuvième. Un champ texte ordinaire ne peut pas le
-faire — Streamlit n'y réagit qu'à la validation, et l'écran semble alors ne
-rien faire.
-
-Seules les **dénominations** partent dans le navigateur (~14 400), pas les
-présentations (~20 700) : trois fois moins de texte à filtrer à chaque
-frappe, pour la même information tant que le médicament n'est pas choisi.
-Une fois le nom retenu, ses conditionnements sont proposés — et s'il n'y en
-a qu'un, la fiche se remplit directement.
+~19 600 boîtes lui sont envoyées une fois, puis chaque frappe filtre
+localement. Mesuré sur la base officielle complète : « doliprane » puis
+« 1000 » aboutissent en **3,6 s** puis **0,8 s**, et une interaction
+ordinaire de l'écran reste à **0,19 s**. Un champ texte ordinaire ne peut
+pas le faire — Streamlit n'y réagit qu'à la validation, et l'écran semble
+alors ne rien faire.
 
 Le champ de scan accepte aussi un nom tapé au clavier, suivi d'**Entrée**
-(ou du bouton « 🔎 Chercher »). La base publique répond alors par la liste
-des présentations correspondantes :
+(ou du bouton « 🔎 Chercher ») : si une seule boîte porte ce nom, la fiche
+se remplit directement ; sinon on est renvoyé vers la liste, où les dosages
+se départagent.
 
-```
-DOLIPRANE 1000 mg, comprimé — plaquette(s) PVC-aluminium de 8 comprimé(s) · 8 unités/boîte
-DOLIPRANE 1000 mg, comprimé — plaquette(s) PVC-aluminium de 100 comprimé(s) · 100 unités/boîte
-```
-
-C'est la **présentation** qui distingue deux boîtes du même médicament au
-même dosage — et c'est elle qui donne le code CIP et le nombre d'unités par
-boîte, lus dans le libellé officiel du conditionnement. En choisir une
-remplit la fiche : il ne reste que la date de péremption, qui n'appartient
-qu'à la boîte qu'on a en main.
-
-La recherche accepte plusieurs mots dans le désordre (« 1000 doliprane »),
+Cette recherche par nom accepte plusieurs mots dans le désordre (« 1000 doliprane »),
 ignore accents et casse, et fait remonter d'abord les noms qui
 **commencent** par le terme tapé.
 
