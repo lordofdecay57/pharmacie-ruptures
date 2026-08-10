@@ -246,11 +246,30 @@ class TestEspaceStockFerme:
             "textbox", name="Nom du médicament").input_value() == \
             "DOLIPRANE 1000 mg"
 
+    def test_le_bouton_chercher_vaut_la_touche_entree(self, page):
+        """La douchette valide toute seule ; un nom tapé au clavier, non.
+        Sans ce bouton, le champ restait plein et il ne se passait
+        strictement rien — c'est le blocage rencontré en officine."""
+        champ = page.get_by_placeholder("Douchez la boîte")
+        champ.fill("AMOXICILLINE 1 g")
+        page.get_by_role("button", name="Chercher").click()
+        page.wait_for_timeout(5000)
+        _sans_exception(page)
+        # Le champ se vide : la saisie a bien été prise en compte.
+        assert champ.input_value() == ""
+        assert page.get_by_role(
+            "textbox", name="Nom du médicament").input_value() == \
+            "AMOXICILLINE 1 g"
+
     def test_le_champ_invite_a_taper_un_nom(self, page):
         """La présélection ne sert à rien si personne ne sait qu'on peut
         taper autre chose qu'un code."""
         champ = page.get_by_placeholder("Douchez la boîte")
-        assert "nom de médicament" in champ.get_attribute("placeholder")
+        indication = champ.get_attribute("placeholder")
+        assert "nom de médicament" in indication
+        # Dire qu'on peut taper un nom ne suffit pas : il faut dire que ça
+        # ne part qu'une fois validé.
+        assert "Entrée" in indication
 
     def test_recliquer_le_mode_actif_ne_le_deselectionne_pas(self, page):
         """Même garde-fou pour Entrée / Sortie : un scan a toujours un sens,
