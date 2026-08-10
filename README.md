@@ -282,6 +282,14 @@ l'unité d'enregistrement est donc le **lot**, identifié par
 L'inventaire est toujours trié par péremption la plus proche : c'est l'ordre
 dans lequel on veut traiter les boîtes, et celui de la liste imprimée.
 
+**Pas de colonne « Dosage ».** Il fait partie de la dénomination
+(« DOLIPRANE 1000 mg, comprimé ») ; une colonne pour le répéter poussait la
+péremption — la seule qui compte vraiment ici — hors de l'écran. Un dosage
+saisi séparément rejoint le nom **dès l'enregistrement**, et les
+inventaires écrits avant sont repliés à la relecture : l'identité d'un lot
+sans code CIP repose sur son nom, l'afficher sous une forme et le stocker
+sous une autre ferait échouer sa sortie en silence.
+
 **Les barres obliques sont facultatives.** Une date par boîte, deux frappes
 de `/` par date : sur un inventaire complet, cela fait des centaines de
 frappes pour rien. Les chiffres seuls suffisent — c'est d'ailleurs ce qui

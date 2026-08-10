@@ -57,7 +57,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "4.8"
+VERSION_APP = "4.9"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -137,26 +137,43 @@ st.markdown("""
   color: #ffffff !important;
 }
 
-/* Entrée / Sortie du stock fermé : même traitement, avec un code couleur —
-   ajouter et retirer du stock ne se confondent pas. */
-.st-key-sf_mode [data-testid="stButtonGroup"] { gap: 10px; }
+/* Entrée / Sortie du stock fermé : les DEUX boutons les plus cliqués de
+   toute l'application — chaque boîte scannée passe par l'un ou l'autre.
+   Ils sont donc traités en grand, et chacun garde sa couleur MÊME éteint :
+   savoir dans quel sens on travaille ne doit pas demander à lire. */
+.st-key-sf_mode { margin: 6px 0 12px 0; }
+.st-key-sf_mode [data-testid="stButtonGroup"] { gap: 14px; }
 .st-key-sf_mode button {
-  padding: 12px 30px !important; border-radius: 10px !important;
-  border: 1px solid rgba(11,11,11,.14) !important;
+  padding: 18px 46px !important; border-radius: 12px !important;
+  border: 2px solid #0f766e !important; background: #ecfdf5 !important;
 }
-.st-key-sf_mode button p { font-size: 1rem !important;
-  font-weight: 600 !important; }
+.st-key-sf_mode button p { font-size: 1.25rem !important;
+  font-weight: 700 !important; color: #0f766e !important; }
+/* La SORTIE retire du stock : ambre, pour qu'on ne scanne pas une entrée en
+   croyant faire une sortie, ou l'inverse. */
+.st-key-sf_mode button:last-child { border-color: #b45309 !important;
+  background: #fff7ed !important; }
+.st-key-sf_mode button:last-child p { color: #b45309 !important; }
+/* Le bouton ACTIF est plein : un simple contour se confondrait avec le
+   survol du bouton voisin.
+   DEUX sélecteurs : « aria-checked » est l'attribut standard, stable d'une
+   version de Streamlit à l'autre ; « kind » était l'attribut interne des
+   versions ≤ 1.58, disparu depuis. */
 .st-key-sf_mode button[aria-checked="true"],
 .st-key-sf_mode button[kind="segmented_controlActive"] {
-  background: #0f766e !important; border-color: #0f766e !important;
+  background: #0f766e !important;
+  box-shadow: 0 3px 10px rgba(15,118,110,.35) !important;
 }
-.st-key-sf_mode button[aria-checked="true"] p,
-.st-key-sf_mode button[kind="segmented_controlActive"] p { color: #fff !important; }
-/* La SORTIE retire du stock : elle s'affiche en ambre pour qu'on ne scanne
-   pas une entrée en croyant faire une sortie, ou l'inverse. */
 .st-key-sf_mode button:last-child[aria-checked="true"],
 .st-key-sf_mode button:last-child[kind="segmented_controlActive"] {
-  background: #b45309 !important; border-color: #b45309 !important;
+  background: #b45309 !important;
+  box-shadow: 0 3px 10px rgba(180,83,9,.35) !important;
+}
+.st-key-sf_mode button[aria-checked="true"] p,
+.st-key-sf_mode button[kind="segmented_controlActive"] p,
+.st-key-sf_mode button:last-child[aria-checked="true"] p,
+.st-key-sf_mode button:last-child[kind="segmented_controlActive"] p {
+  color: #ffffff !important;
 }
 
 /* Séparateur d'espace : une barre de couleur propre à chaque module, pour

@@ -43,7 +43,7 @@ _MIME_CSV = "text/csv"
 _MIME_PDF = "application/pdf"
 
 #: Colonnes modifiables directement dans le tableau.
-_COLONNES_EDITABLES = ("Nom du produit", "Dosage", "Boîtes",
+_COLONNES_EDITABLES = ("Nom du produit", "Boîtes",
                        "Unités par boîte", "Unités en vrac", "Péremption",
                        "Lot")
 
@@ -501,8 +501,14 @@ def _formulaire_complement(inventaire: pd.DataFrame,
         # l'on valide sans comprendre pourquoi le champ est refusé.
         nom = col1.text_input("Nom du médicament *", value=attente["nom"],
                               placeholder="à recopier sur la boîte")
+        # Le dosage n'a plus de colonne à lui : il rejoint le nom dès
+        # l'enregistrement. Le champ reste, pour les produits saisis à la
+        # main dont le nom ne le porte pas.
         dosage = col2.text_input("Dosage", value=attente["dosage"],
-                                 placeholder="facultatif")
+                                 placeholder="facultatif",
+                                 help="Ajouté au nom du produit : les "
+                                      "dénominations officielles le "
+                                      "contiennent déjà.")
         cip = col3.text_input("Code CIP", value=attente["cip"],
                               placeholder="facultatif")
 
