@@ -363,10 +363,12 @@ remplir, de la plus automatique à la plus manuelle :
 1. **la base publique des médicaments** (`base_medicaments.py`) — un bouton
    télécharge les fichiers officiels de l'ANSM / ministère de la Santé
    (`CIS_bdpm.txt` et `CIS_CIP_bdpm.txt`), les recoupe sur le code CIS et en
-   tire ~42 000 correspondances (CIP13 **et** CIP7). Le nom s'affiche alors
-   **au moment du scan**, sans rien saisir. La table est conservée sur le
-   poste : le téléchargement est explicite, et l'identification fonctionne
-   ensuite **hors ligne** ;
+   tire ~42 000 correspondances (CIP13 **et** CIP7) et ~20 700
+   présentations. Le nom s'affiche alors **au moment du scan**, sans rien
+   saisir — et elle sert aussi **dans l'autre sens** : taper un nom propose
+   les présentations correspondantes (voir « Présélection par le nom »).
+   La table est conservée sur le poste : le téléchargement est explicite,
+   et l'identification fonctionne ensuite **hors ligne** ;
 2. **en bloc depuis votre catalogue** — l'encadré « 📇 Pré-remplir les noms
    depuis un fichier » avale un cadencier (`.xlsx`, `.csv`, `.pdf`) et n'en
    retient que les couples code + libellé. Utile pour ce que la base
@@ -401,6 +403,29 @@ une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
 (nom, dosage, code CIP ou n° de lot) et un filtre **« lots à traiter »**
 (périmés et moins d'un mois) permettent de retrouver une boîte sans faire
 défiler l'inventaire.
+
+**Présélection par le nom** — un code illisible, une boîte reconditionnée,
+et il n'y a plus qu'à **taper le nom** dans le champ de scan. La base
+publique répond par la liste des présentations correspondantes :
+
+```
+DOLIPRANE 1000 mg, comprimé — plaquette(s) PVC-aluminium de 8 comprimé(s) · 8 unités/boîte
+DOLIPRANE 1000 mg, comprimé — plaquette(s) PVC-aluminium de 100 comprimé(s) · 100 unités/boîte
+```
+
+C'est la **présentation** qui distingue deux boîtes du même médicament au
+même dosage — et c'est elle qui donne le code CIP et le nombre d'unités par
+boîte, lus dans le libellé officiel du conditionnement. En choisir une
+remplit la fiche : il ne reste que la date de péremption, qui n'appartient
+qu'à la boîte qu'on a en main.
+
+La recherche accepte plusieurs mots dans le désordre (« 1000 doliprane »),
+ignore accents et casse, et fait remonter d'abord les noms qui
+**commencent** par le terme tapé. Le nombre d'unités n'est déduit que
+lorsqu'il est certain : forme dénombrable (comprimés, gélules, sachets…),
+un seul nombre possible, multiplicateur de tête pris en compte
+(« 3 piluliers de 30 comprimés » = 90). Dans le doute, la case reste à 0 —
+une quantité fausse sur un stock fermé ne se remarque pas.
 
 **Sortie manuelle** — la douchette ne lit pas tout : étiquette abîmée,
 boîte reconditionnée, produit sans code-barres. En mode **Sortie**, le

@@ -65,22 +65,36 @@ def _etat():
     return st.session_state["sf_inventaire"], st.session_state["sf_repertoire"]
 
 
-def _index_base() -> dict:
-    """Index « code CIP → dénomination » de la base publique.
+def _base_chargee() -> tuple:
+    """Les deux index de la base publique : par code CIP, et par nom.
 
-    Relu une seule fois par session, et à nouveau si le fichier a changé
+    Relus une seule fois par session, et à nouveau si le fichier a changé
     (mise à jour de la base) — 40 000 codes, inutile de les relire à chaque
-    interaction.
+    interaction. Les deux sont construits ensemble : ils viennent du même
+    fichier, le lire deux fois serait payer deux fois.
     """
     empreinte = (BASE_MEDICAMENTS_PATH.stat().st_mtime
                  if BASE_MEDICAMENTS_PATH.exists() else 0)
     if st.session_state.get("sf_base_empreinte") != empreinte:
+        table = base_medicaments.charger_table(BASE_MEDICAMENTS_PATH)
         st.session_state["sf_base_index"] = base_medicaments.index_par_cip(
-            base_medicaments.charger_table(BASE_MEDICAMENTS_PATH))
+            table)
+        st.session_state["sf_base_noms"] = base_medicaments.index_par_nom(
+            table)
         st.session_state["sf_base_empreinte"] = empreinte
-        _journal.info("Base des médicaments : %d code(s) chargé(s)",
-                      len(st.session_state["sf_base_index"]))
-    return st.session_state["sf_base_index"]
+        _journal.info("Base des médicaments : %d code(s), %d présentation(s)",
+                      len(st.session_state["sf_base_index"]),
+                      len(st.session_state["sf_base_noms"]))
+    return (st.session_state["sf_base_index"],
+            st.session_state["sf_base_noms"])
+
+
+def _index_base() -> dict:
+    return _base_chargee()[0]
+
+
+def _index_noms() -> list:
+    return _base_chargee()[1]
 
 
 def _enregistrer(inventaire=None, repertoire=None) -> None:
@@ -225,12 +239,26 @@ def _traiter_scan() -> None:
                   and (precedente.get("cip"), precedente.get("brut"))
                   != (code.cip, code.brut))
 
+    # Ce n'est pas un code : c'est très probablement un NOM tapé au clavier.
+    # La base publique sait alors proposer les présentations correspondantes
+    # — avec leur dosage, leur conditionnement et leur code CIP, qu'il n'y a
+    # plus qu'à choisir plutôt qu'à ressaisir.
+    propositions = ([] if code.reconnu
+                    else base_medicaments.chercher_par_nom(_index_noms(), brut))
+    if propositions:
+        st.session_state["sf_propositions"] = {"terme": str(brut).strip(),
+                                               "resultats": propositions}
+    else:
+        st.session_state.pop("sf_propositions", None)
+
     st.session_state["sf_en_attente"] = {
         "cip": code.cip,
         # Même quand la fiche s'ouvre (pas de péremption, ajout direct
         # désactivé…), le nom trouvé dans la base est déjà là : il n'y a
-        # plus qu'à valider.
-        "nom": (connu or {}).get("nom", ""),
+        # plus qu'à valider. Et ce qui a été tapé à la main sert de nom :
+        # le retaper dans la fiche juste en dessous n'aurait aucun sens.
+        "nom": ((connu or {}).get("nom", "")
+                or ("" if code.reconnu else str(brut).strip())),
         "dosage": (connu or {}).get("dosage", ""),
         "unites_par_boite": (connu or {}).get("unites_par_boite", 0),
         "peremption": code.peremption,
@@ -240,7 +268,12 @@ def _traiter_scan() -> None:
     }
     rappel = (" La fiche précédente, non validée, a été abandonnée."
               if abandonnee else "")
-    if not code.reconnu:
+    if propositions:
+        st.session_state["sf_message"] = (
+            "ok", f"{len(propositions)} médicament(s) trouvé(s) pour "
+                  f"« {str(brut).strip()} » — choisissez la présentation "
+                  "ci-dessous." + rappel)
+    elif not code.reconnu:
         st.session_state["sf_message"] = (
             "avertissement",
             f"Code non reconnu : « {code.brut} ». Complétez la fiche "
@@ -256,7 +289,73 @@ def _saisie_manuelle_vierge() -> None:
     st.session_state["sf_en_attente"] = {
         "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
         "peremption": None, "lot": "", "brut": "", "reconnu": True}
+    st.session_state.pop("sf_propositions", None)
     st.session_state["sf_message"] = None
+
+
+def libelle_proposition(medicament: dict) -> str:
+    """Une ligne de la présélection : dénomination, conditionnement, unités.
+
+    Deux boîtes du même médicament au même dosage ne se distinguent que par
+    leur conditionnement — 8 comprimés ou 100. L'omettre rendrait le choix
+    aveugle, et c'est justement ce nombre qui remplit « unités par boîte ».
+    """
+    ligne = medicament["nom"]
+    if medicament.get("presentation"):
+        ligne += f" — {medicament['presentation']}"
+    if medicament.get("unites_par_boite"):
+        ligne += f" · {medicament['unites_par_boite']} unités/boîte"
+    return ligne
+
+
+def _choisir_proposition(medicament: dict) -> None:
+    """Reprend un médicament de la présélection dans la fiche d'ajout."""
+    attente = dict(st.session_state.get("sf_en_attente") or {})
+    attente.update({
+        "cip": medicament["cip"],
+        # La dénomination officielle porte déjà le dosage (« DOLIPRANE
+        # 1000 mg, comprimé ») : le scinder en deux champs reviendrait à
+        # deviner où couper.
+        "nom": medicament["nom"],
+        "unites_par_boite": medicament.get("unites_par_boite", 0),
+    })
+    attente.setdefault("dosage", "")
+    attente.setdefault("peremption", None)
+    attente.setdefault("lot", "")
+    attente.setdefault("brut", "")
+    attente.setdefault("reconnu", True)
+    st.session_state["sf_en_attente"] = attente
+    st.session_state.pop("sf_propositions", None)
+    st.session_state["sf_message"] = (
+        "ok", f"{medicament['nom']} — il ne reste que la date de péremption "
+              "à saisir.")
+
+
+def _preselection_par_nom() -> None:
+    """Liste des médicaments correspondant au nom tapé au clavier."""
+    proposition = st.session_state.get("sf_propositions")
+    if not proposition:
+        return
+    resultats = proposition["resultats"]
+    with st.container(border=True):
+        st.markdown(f"**Médicaments trouvés pour « {proposition['terme']} »**")
+        st.caption("Choisissez la présentation exacte : c'est elle qui donne "
+                   "le code CIP et le nombre d'unités par boîte. La date de "
+                   "péremption reste à saisir — elle n'appartient qu'à la "
+                   "boîte que vous avez en main.")
+        choix = st.selectbox(
+            "Médicament", range(len(resultats)),
+            format_func=lambda i: libelle_proposition(resultats[i]),
+            key="sf_proposition_choix", label_visibility="collapsed")
+        colonne_ok, colonne_non = st.columns([3, 1])
+        colonne_ok.button("✅ Utiliser ce médicament", type="primary",
+                          use_container_width=True,
+                          on_click=_choisir_proposition,
+                          args=(resultats[choix],))
+        colonne_non.button("Aucun", use_container_width=True,
+                           help="Saisir le produit à la main.",
+                           on_click=lambda: st.session_state.pop(
+                               "sf_propositions", None))
 
 
 def _basculer_sortie_manuelle() -> None:
@@ -487,8 +586,15 @@ def _base_publique() -> None:
     info = base_medicaments.info_base(BASE_MEDICAMENTS_PATH)
     age = base_medicaments.anciennete_jours(info,
                                             st.session_state.get("sf_date"))
+    # Une base installée avant l'ajout du conditionnement n'a pas de
+    # présentations : la recherche par nom marche, mais sans « 30
+    # comprimés » ni unités par boîte. Autant le dire que de laisser
+    # chercher pourquoi la colonne reste vide.
+    incomplete = info["existe"] and not info.get("presentations")
     if not info["existe"]:
         etat, ouvert = "⚠️ non installée", True
+    elif incomplete:
+        etat, ouvert = f"🟡 {info['lignes']} codes · sans conditionnement", True
     elif age is not None and age > ANCIENNETE_BASE_JOURS:
         etat, ouvert = f"🟡 {info['lignes']} codes · {age} jours", False
     else:
@@ -502,8 +608,18 @@ def _base_publique() -> None:
             "Santé) fait la correspondance : une fois installée, le nom "
             "s'affiche **au moment du scan**, sans rien taper. Elle est "
             "conservée sur ce poste et fonctionne ensuite hors ligne.")
+        st.caption(
+            "Elle sert aussi dans l'autre sens : **tapez un nom** dans le "
+            "champ de scan et elle propose les présentations correspondantes, "
+            "avec leur dosage, leur conditionnement et leur code CIP.")
         if info["existe"]:
             st.caption(f"Dernière mise à jour : {info['date']:%d/%m/%Y}.")
+        if incomplete:
+            st.warning("Cette base a été installée avant l'ajout du "
+                       "conditionnement : elle identifie bien les codes, mais "
+                       "ne connaît ni « plaquette de 30 comprimés » ni le "
+                       "nombre d'unités par boîte. Retéléchargez-la pour en "
+                       "profiter.")
 
         if not st.button("⬇️ Télécharger / mettre à jour la base",
                          use_container_width=True,
@@ -698,7 +814,6 @@ def _barre_laterale(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
                 _enregistrer(inventaire=stock_ferme.inventaire_vide())
                 st.session_state.pop("sf_en_attente", None)
                 st.rerun()
-        st.caption("🔒 100 % local : l'inventaire ne quitte pas ce poste.")
     return aujourdhui
 
 
@@ -734,7 +849,8 @@ def rendre(etape, tuile_kpi) -> None:
     col_scan, col_manuel = st.columns([3, 1])
     col_scan.text_input(
         "Code scanné", key="sf_scan", on_change=_traiter_scan,
-        placeholder=("Douchez la boîte à ajouter" if mode == MODE_ENTREE
+        placeholder=("Douchez la boîte à ajouter — ou tapez un nom de "
+                     "médicament" if mode == MODE_ENTREE
                      else "Douchez la boîte à sortir")
                     + " (le champ se vide tout seul)",
         label_visibility="collapsed")
@@ -749,7 +865,9 @@ def rendre(etape, tuile_kpi) -> None:
         st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le "
                    "code CIP, la date de péremption et le n° de lot. Un "
                    "code-barres linéaire ne donne que le CIP : la péremption "
-                   "reste à saisir.")
+                   "reste à saisir. Sans code lisible, **tapez le nom du "
+                   "médicament** : la base publique propose les "
+                   "présentations correspondantes.")
     else:
         col_manuel.button(
             "⌨️ Sortie manuelle", use_container_width=True,
@@ -773,6 +891,9 @@ def rendre(etape, tuile_kpi) -> None:
             _panneau_sortie_manuelle(inventaire, aujourdhui, tri_courant)
 
     if mode == MODE_ENTREE:
+        # Juste sous le champ : la présélection répond à ce qui vient d'être
+        # tapé, la reléguer sous les panneaux repliés la ferait manquer.
+        _preselection_par_nom()
         _base_publique()
         _import_repertoire(repertoire)
         inventaire, repertoire = _etat()

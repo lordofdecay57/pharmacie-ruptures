@@ -24,6 +24,8 @@ porte ce code ? ».
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 import urllib.error
 import urllib.request
 from datetime import date, datetime
@@ -41,15 +43,64 @@ URL_PRESENTATIONS = ("https://base-donnees-publique.medicaments.gouv.fr"
                      "/download/file/CIS_CIP_bdpm.txt")
 
 #: Colonnes de la table enregistrée sur le poste.
-COLONNES_BASE = ["Code CIP", "Nom du produit"]
+#:
+#: « Présentation » est le libellé officiel du conditionnement — « plaquette
+#: de 30 comprimé(s) », « flacon de 90 gélule(s) ». C'est ce qui distingue
+#: deux boîtes du même médicament au même dosage, et ce qui donne le nombre
+#: d'unités par boîte.
+COLONNES_BASE = ["Code CIP", "Nom du produit", "Présentation"]
 
 #: Position des champs utiles dans les fichiers officiels (séparés par des
 #: tabulations, sans ligne d'en-tête).
 _COL_CIS_DENOMINATION = 1      # dans CIS_bdpm.txt
 _COL_CIP7 = 1                  # dans CIS_CIP_bdpm.txt
+_COL_PRESENTATION = 2          # idem
 _COL_CIP13 = 6                 # idem
 
 _DELAI_RESEAU_S = 60
+
+#: Formes **dénombrables** : celles dont on peut dire « il en reste 12 ».
+#: Les millilitres, grammes et unités internationales en sont exclus — ils
+#: mesurent un contenu, ils ne le comptent pas.
+_FORMES_DENOMBRABLES = (
+    "comprime", "gelule", "capsule", "sachet", "suppositoire", "ovule",
+    "pastille", "gomme", "lyophilisat", "dose", "implant", "film",
+    "emplatre", "anneau", "pilule", "granule", "unite",
+)
+_MOTIF_UNITES = re.compile(
+    r"\bde\s+(\d+)\s*(?:" + "|".join(_FORMES_DENOMBRABLES) + r")s?\b")
+#: « 3 pilulier(s) … de 30 comprimé(s) » : la boîte en contient 90. Sans ce
+#: multiplicateur de tête, on lirait 30 — et « 100 plaquettes de 1 gélule »
+#: donnerait 1 au lieu de 100.
+_MOTIF_MULTIPLICATEUR = re.compile(r"^(\d+)\s+\D")
+#: Garde-fou : au-delà, c'est que la lecture a dérapé.
+_UNITES_MAX = 5000
+
+
+def _aplatir(texte) -> str:
+    """Minuscules sans accent : « ÉLAVIL » et « elavil » doivent se trouver."""
+    plat = unicodedata.normalize("NFKD", str(texte or "").lower())
+    return " ".join("".join(c for c in plat
+                            if not unicodedata.combining(c)).split())
+
+
+def unites_par_boite(presentation: str) -> int:
+    """Nombre d'unités que contient une boîte, ou ``0`` si indécidable.
+
+    Lu dans le libellé officiel du conditionnement. En cas de doute — deux
+    nombres possibles, forme non dénombrable, libellé alambiqué — on rend
+    ``0`` plutôt qu'une valeur inventée : une quantité fausse sur un stock
+    fermé est pire qu'une case vide, elle ne se remarque pas.
+    """
+    texte = _aplatir(presentation)
+    valeurs = {int(m.group(1)) for m in _MOTIF_UNITES.finditer(texte)}
+    if len(valeurs) != 1:
+        return 0
+    total = valeurs.pop()
+    debut = _MOTIF_MULTIPLICATEUR.match(texte)
+    if debut:
+        total *= int(debut.group(1))
+    return total if 0 < total <= _UNITES_MAX else 0
 
 
 def decoder(donnees: bytes) -> str:
@@ -90,11 +141,13 @@ def construire_table(texte_denominations: str,
         nom = noms.get(champs[0].strip())
         if not nom:
             continue
+        presentation = " ".join(champs[_COL_PRESENTATION].split())
         for position in (_COL_CIP13, _COL_CIP7):
             code = "".join(c for c in champs[position] if c.isdigit())
             if code and code not in vus:
                 vus.add(code)
-                lignes.append({"Code CIP": code, "Nom du produit": nom})
+                lignes.append({"Code CIP": code, "Nom du produit": nom,
+                               "Présentation": presentation})
     return pd.DataFrame(lignes, columns=COLONNES_BASE)
 
 
@@ -161,6 +214,66 @@ def index_par_cip(table: pd.DataFrame) -> dict:
             if str(c).strip() and str(n).strip()}
 
 
+def index_par_nom(table: pd.DataFrame) -> list:
+    """Table → liste cherchable par nom, une entrée par présentation.
+
+    Chaque médicament figure deux fois dans la table (son CIP13 et son
+    ancien CIP7) : on n'en garde qu'une entrée, en préférant le code le plus
+    long — c'est le CIP13, celui que portent les boîtes d'aujourd'hui.
+
+    La clé de recherche est calculée une fois pour toutes : la refaire à
+    chaque frappe sur 40 000 lignes se sentirait à l'écran.
+    """
+    if table is None or table.empty:
+        return []
+    table = table.reindex(columns=COLONNES_BASE).fillna("")
+    retenus: dict = {}
+    for cip, nom, presentation in zip(table["Code CIP"],
+                                      table["Nom du produit"],
+                                      table["Présentation"]):
+        nom, presentation = str(nom).strip(), str(presentation).strip()
+        code = str(cip).strip()
+        if not nom or not code:
+            continue
+        cle = (nom, presentation)
+        if cle in retenus and len(retenus[cle]["cip"]) >= len(code):
+            continue
+        retenus[cle] = {
+            "cip": code, "nom": nom, "presentation": presentation,
+            "unites_par_boite": unites_par_boite(presentation),
+            "_recherche": _aplatir(nom),
+        }
+    return list(retenus.values())
+
+
+#: En dessous, la recherche ramènerait la moitié de la base : on attend que
+#: le terme soit assez discriminant pour valoir une liste.
+LONGUEUR_RECHERCHE_MINIMALE = 3
+
+
+def chercher_par_nom(index: list, terme: str, limite: int = 25) -> list:
+    """Médicaments dont la dénomination contient TOUS les mots cherchés.
+
+    « doliprane 1000 » doit trouver « DOLIPRANE 1000 mg, comprimé » sans
+    exiger l'ordre ni la ponctuation exacts — on tape ce dont on se
+    souvient, pas la dénomination officielle.
+
+    Les correspondances qui **commencent** par le premier mot passent
+    devant : qui tape « doli » cherche DOLIPRANE, pas un générique dont le
+    nom le contient au milieu.
+    """
+    mots = _aplatir(terme).split()
+    if not index or not mots:
+        return []
+    if len("".join(mots)) < LONGUEUR_RECHERCHE_MINIMALE:
+        return []
+    trouves = [e for e in index
+               if all(mot in e["_recherche"] for mot in mots)]
+    trouves.sort(key=lambda e: (not e["_recherche"].startswith(mots[0]),
+                                e["nom"], e["presentation"]))
+    return trouves[:limite]
+
+
 def cip7_depuis_cip13(cip13: str) -> str:
     """CIP7 contenu dans un CIP13 français, ou ``""``.
 
@@ -196,8 +309,13 @@ def info_base(chemin: Path) -> dict:
         return {"existe": False, "lignes": 0, "date": None}
     table = charger_table(chemin)
     horodatage = datetime.fromtimestamp(chemin.stat().st_mtime)
+    # Les bases installées avant l'ajout du conditionnement n'ont que deux
+    # colonnes : la recherche par nom marche, mais sans présentation ni
+    # nombre d'unités. Il faut pouvoir le dire et proposer de la refaire.
+    presentations = int((table["Présentation"].astype(str).str.strip() != ""
+                         ).sum()) if not table.empty else 0
     return {"existe": True, "lignes": len(table),
-            "date": horodatage.date()}
+            "presentations": presentations, "date": horodatage.date()}
 
 
 def anciennete_jours(info: dict, aujourdhui: Optional[date] = None
