@@ -243,11 +243,15 @@ def _traiter_scan() -> None:
     # La base publique sait alors proposer les présentations correspondantes
     # — avec leur dosage, leur conditionnement et leur code CIP, qu'il n'y a
     # plus qu'à choisir plutôt qu'à ressaisir.
-    propositions = ([] if code.reconnu
-                    else base_medicaments.chercher_par_nom(_index_noms(), brut))
+    index_noms = [] if code.reconnu else _index_noms()
+    trouvaille = (base_medicaments.preselectionner(index_noms, brut)
+                  if index_noms else
+                  {"resultats": [], "terme": "", "elargi": False})
+    propositions = trouvaille["resultats"]
     if propositions:
-        st.session_state["sf_propositions"] = {"terme": str(brut).strip(),
-                                               "resultats": propositions}
+        st.session_state["sf_propositions"] = {
+            "saisi": str(brut).strip(), "terme": trouvaille["terme"],
+            "elargi": trouvaille["elargi"], "resultats": propositions}
     else:
         st.session_state.pop("sf_propositions", None)
 
@@ -273,12 +277,24 @@ def _traiter_scan() -> None:
             "ok", f"{len(propositions)} médicament(s) trouvé(s) pour "
                   f"« {str(brut).strip()} » — choisissez la présentation "
                   "ci-dessous." + rappel)
-    elif not code.reconnu:
+    elif not code.reconnu and not index_noms:
+        # Rien à proposer parce qu'il n'y a rien à chercher DEDANS : le dire,
+        # plutôt que de laisser croire que le nom tapé est en cause.
         st.session_state["sf_message"] = (
             "avertissement",
-            f"Code non reconnu : « {code.brut} ». Complétez la fiche "
-            "ci-dessous — elle sera mémorisée pour les prochains scans."
-            + rappel)
+            f"« {code.brut} » n'est pas un code-barres, et la base publique "
+            "des médicaments n'est pas installée sur ce poste — il n'y a donc "
+            "rien à proposer. Installez-la (encadré ci-dessous) ou complétez "
+            "la fiche à la main." + rappel)
+    elif not code.reconnu:
+        # La base est là et ne connaît pas ce nom : ne JAMAIS rester muet,
+        # c'est ce qui fait croire que l'application ne réagit pas.
+        st.session_state["sf_message"] = (
+            "avertissement",
+            f"Aucun médicament trouvé pour « {code.brut} » dans la base "
+            "publique. Vérifiez l'orthographe, essayez le seul nom de marque "
+            "— ou complétez la fiche ci-dessous, elle sera mémorisée pour les "
+            "prochains scans." + rappel)
     elif abandonnee:
         st.session_state["sf_message"] = ("avertissement", rappel.strip())
     else:
@@ -337,8 +353,15 @@ def _preselection_par_nom() -> None:
     if not proposition:
         return
     resultats = proposition["resultats"]
+    saisi = proposition.get("saisi", "")
     with st.container(border=True):
-        st.markdown(f"**Médicaments trouvés pour « {proposition['terme']} »**")
+        st.markdown(f"**Médicaments trouvés pour « {saisi} »**")
+        if proposition.get("elargi"):
+            # Dire ce qui a réellement servi : sinon la liste paraît hors
+            # sujet, alors qu'elle répond à une recherche volontairement
+            # élargie faute de correspondance exacte.
+            st.caption(f"Aucune correspondance exacte : recherche élargie à "
+                       f"« {proposition['terme']} ».")
         st.caption("Choisissez la présentation exacte : c'est elle qui donne "
                    "le code CIP et le nombre d'unités par boîte. La date de "
                    "péremption reste à saisir — elle n'appartient qu'à la "

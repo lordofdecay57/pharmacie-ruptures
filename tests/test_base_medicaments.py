@@ -18,7 +18,8 @@ import pytest
 from base_medicaments import (COLONNES_BASE, anciennete_jours, charger_table,
                               chercher, chercher_par_nom, cip7_depuis_cip13,
                               construire_table, decoder, index_par_cip,
-                              index_par_nom, info_base, sauver_table,
+                              index_par_nom, info_base,
+                              preselectionner, sauver_table,
                               unites_par_boite)
 
 # Extraits authentiques des fichiers officiels (colonnes séparées par des
@@ -239,6 +240,72 @@ class TestRechercheParNom:
     def test_base_absente(self):
         assert index_par_nom(pd.DataFrame(columns=COLONNES_BASE)) == []
         assert chercher_par_nom([], "doliprane") == []
+
+
+class TestDosesEquivalentes:
+    """« Doliprane 1 g » doit trouver « DOLIPRANE 1000 mg ».
+
+    La base officielle écrit tout en milligrammes ; à l'officine on dit
+    « 1 g ». Sans conversion, la recherche ne rend rien — et rien n'est plus
+    déroutant qu'un écran qui ne réagit pas à un nom parfaitement exact.
+    C'est le bug qu'a rencontré la pharmacie.
+    """
+
+    def _index(self):
+        return index_par_nom(construire_table(CIS, CIP))
+
+    @pytest.mark.parametrize("saisie", [
+        "doliprane 1 g", "doliprane 1g", "DOLIPRANE 1G",
+        "doliprane 1000 mg", "doliprane 1000mg",
+        "doliprane 1 gramme", "doliprane 1000 milligrammes",
+    ])
+    def test_toutes_les_facons_de_dire_un_gramme(self, saisie):
+        trouves = chercher_par_nom(self._index(), saisie)
+        assert len(trouves) == 1, saisie
+        assert trouves[0]["cip"] == "3400935955838"
+
+    @pytest.mark.parametrize("saisie", ["500 microgrammes", "500 mcg",
+                                        "0,5 mg", "0.5 mg"])
+    def test_microgrammes_et_milligrammes_se_rejoignent(self, saisie):
+        table = pd.DataFrame(
+            [{"Code CIP": "3400900000017",
+              "Nom du produit": "BRICANYL 500 microgrammes/dose",
+              "Présentation": "1 récipient"}], columns=COLONNES_BASE)
+        assert chercher_par_nom(index_par_nom(table), f"bricanyl {saisie}")
+
+    def test_un_dosage_different_ne_correspond_pas(self):
+        """La conversion ne doit pas tout confondre : 1 g n'est pas 500 mg."""
+        assert chercher_par_nom(self._index(), "doliprane 500 mg") == []
+
+
+class TestPreselectionner:
+    """Ne jamais rendre une liste vide quand un mot de trop suffit à la
+    vider : à l'écran, cela ressemble à une application qui ne réagit pas."""
+
+    def _index(self):
+        return index_par_nom(construire_table(CIS, CIP))
+
+    def test_correspondance_exacte(self):
+        trouvaille = preselectionner(self._index(), "doliprane 1 g")
+        assert len(trouvaille["resultats"]) == 1
+        assert trouvaille["elargi"] is False
+
+    def test_les_mots_en_trop_sont_abandonnes_par_la_fin(self):
+        trouvaille = preselectionner(self._index(),
+                                     "doliprane 1 g boîte bleue")
+        assert trouvaille["resultats"], "la recherche devait s'élargir"
+        assert trouvaille["elargi"] is True
+        # Ce qui a réellement servi doit pouvoir être affiché : une liste
+        # sans explication paraît hors sujet.
+        assert "doliprane" in trouvaille["terme"]
+
+    def test_terme_totalement_inconnu(self):
+        trouvaille = preselectionner(self._index(), "medicamentinexistant")
+        assert trouvaille["resultats"] == []
+        assert trouvaille["elargi"] is False
+
+    def test_base_absente(self):
+        assert preselectionner([], "doliprane")["resultats"] == []
 
 
 class TestPersistance:

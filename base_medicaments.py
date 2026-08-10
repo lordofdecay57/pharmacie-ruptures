@@ -84,6 +84,36 @@ def _aplatir(texte) -> str:
                             if not unicodedata.combining(c)).split())
 
 
+#: Toutes les doses ramenées au milligramme. La base officielle écrit
+#: « DOLIPRANE 1000 mg » ; à l'officine on dit « Doliprane 1 g ». Sans cette
+#: conversion, la recherche ne rend rien — et rien n'est plus déroutant
+#: qu'un écran qui ne réagit pas à un nom parfaitement exact.
+_UNITES_DOSE = {
+    "g": 1000.0, "gramme": 1000.0, "grammes": 1000.0,
+    "mg": 1.0, "milligramme": 1.0, "milligrammes": 1.0,
+    "µg": 0.001, "μg": 0.001, "ug": 0.001, "mcg": 0.001,
+    "microgramme": 0.001, "microgrammes": 0.001,
+}
+_MOTIF_DOSE = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*"
+    r"(microgrammes?|milligrammes?|grammes?|mcg|[µμ]g|ug|mg|g)\b")
+
+
+def _en_milligrammes(trouve) -> str:
+    valeur = float(trouve.group(1).replace(",", "."))
+    return f"{valeur * _UNITES_DOSE[trouve.group(2)]:g}mg"
+
+
+def _cle_recherche(texte) -> str:
+    """Forme comparable d'un libellé : sans accent, sans casse, doses en mg.
+
+    Appliquée des DEUX côtés — à la base comme à ce qui est tapé — pour que
+    « 1 g » et « 1000 mg » se rencontrent. Idempotente : « 1000mg » repasse
+    par la fonction sans changer.
+    """
+    return _MOTIF_DOSE.sub(_en_milligrammes, _aplatir(texte))
+
+
 def unites_par_boite(presentation: str) -> int:
     """Nombre d'unités que contient une boîte, ou ``0`` si indécidable.
 
@@ -241,7 +271,7 @@ def index_par_nom(table: pd.DataFrame) -> list:
         retenus[cle] = {
             "cip": code, "nom": nom, "presentation": presentation,
             "unites_par_boite": unites_par_boite(presentation),
-            "_recherche": _aplatir(nom),
+            "_recherche": _cle_recherche(nom),
         }
     return list(retenus.values())
 
@@ -262,7 +292,7 @@ def chercher_par_nom(index: list, terme: str, limite: int = 25) -> list:
     devant : qui tape « doli » cherche DOLIPRANE, pas un générique dont le
     nom le contient au milieu.
     """
-    mots = _aplatir(terme).split()
+    mots = _cle_recherche(terme).split()
     if not index or not mots:
         return []
     if len("".join(mots)) < LONGUEUR_RECHERCHE_MINIMALE:
@@ -272,6 +302,28 @@ def chercher_par_nom(index: list, terme: str, limite: int = 25) -> list:
     trouves.sort(key=lambda e: (not e["_recherche"].startswith(mots[0]),
                                 e["nom"], e["presentation"]))
     return trouves[:limite]
+
+
+def preselectionner(index: list, terme: str, limite: int = 25) -> dict:
+    """Recherche par nom, en relâchant les mots tant que rien ne sort.
+
+    « Doliprane 1 g effervescent » ne correspond à aucune dénomination
+    officielle exacte ; « Doliprane 1 g » en donne quinze. Plutôt que de
+    rendre une liste vide — ce qui, à l'écran, ressemble à une application
+    qui ne réagit pas — on abandonne les mots par la fin jusqu'à trouver, et
+    on dit ce qui a réellement servi.
+
+    Renvoie ``{"resultats", "terme", "elargi"}``.
+    """
+    mots = _cle_recherche(terme).split()
+    complet = list(mots)
+    while mots:
+        trouves = chercher_par_nom(index, " ".join(mots), limite)
+        if trouves:
+            return {"resultats": trouves, "terme": " ".join(mots),
+                    "elargi": len(mots) < len(complet)}
+        mots = mots[:-1]
+    return {"resultats": [], "terme": "", "elargi": False}
 
 
 def cip7_depuis_cip13(cip13: str) -> str:
