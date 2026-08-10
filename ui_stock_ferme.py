@@ -42,6 +42,13 @@ ANCIENNETE_BASE_JOURS = 180
 _MIME_CSV = "text/csv"
 _MIME_PDF = "application/pdf"
 
+#: La péremption s'affiche en MOIS/ANNÉE : c'est ce qui est imprimé sur les
+#: cartons, et le jour prenait une place que la colonne n'a pas. Rien n'est
+#: perdu — la date complète reste enregistrée, et « Jours restants », juste
+#: à côté, donne le compte exact à la journée près.
+_COLONNE_PEREMPTION = st.column_config.DateColumn(
+    "Péremption", format="MM/YYYY", width="small")
+
 #: Colonnes modifiables directement dans le tableau.
 _COLONNES_EDITABLES = ("Nom du produit", "Boîtes",
                        "Unités par boîte", "Unités en vrac", "Péremption",
@@ -765,8 +772,7 @@ def _tableau_editable(inventaire: pd.DataFrame, aujourdhui: date,
                   "Enregistré le"],
         column_config={
             "Statut": st.column_config.TextColumn("Statut", width="small"),
-            "Péremption": st.column_config.DateColumn(
-                "Péremption", format="DD/MM/YYYY", width="small"),
+            "Péremption": _COLONNE_PEREMPTION,
             "Boîtes": st.column_config.NumberColumn(
                 "Boîtes", min_value=0, step=1, width="small"),
             "Unités par boîte": st.column_config.NumberColumn(
@@ -985,7 +991,8 @@ def rendre(etape, tuile_kpi) -> None:
     if filtre_actif:
         st.dataframe(
             stock_ferme.inventaire_affichable(vue_filtree, aujourdhui, tri),
-            use_container_width=True, hide_index=True)
+            use_container_width=True, hide_index=True,
+            column_config={"Péremption": _COLONNE_PEREMPTION})
         st.caption(f"{len(vue_filtree)} lot(s) affiché(s). Videz la recherche "
                    "et décochez le filtre pour corriger l'inventaire.")
         corrige = None

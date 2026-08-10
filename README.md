@@ -282,6 +282,14 @@ l'unité d'enregistrement est donc le **lot**, identifié par
 L'inventaire est toujours trié par péremption la plus proche : c'est l'ordre
 dans lequel on veut traiter les boîtes, et celui de la liste imprimée.
 
+**La péremption s'affiche en MOIS/ANNÉE** (`03/2028`) : c'est ce qui est
+imprimé sur les cartons, et le jour prenait une place que la colonne n'a
+pas. La date **complète reste enregistrée** — seul l'affichage est
+raccourci — et la colonne « Jours restants », juste à côté, donne le compte
+exact à la journée près. La liste **imprimée**, elle, garde la date
+complète : sur le papier il n'y a pas de « jours restants » pour rattraper
+un jour masqué.
+
 **Pas de colonne « Dosage ».** Il fait partie de la dénomination
 (« DOLIPRANE 1000 mg, comprimé ») ; une colonne pour le répéter poussait la
 péremption — la seule qui compte vraiment ici — hors de l'écran. Un dosage

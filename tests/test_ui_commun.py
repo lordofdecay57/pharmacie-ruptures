@@ -294,3 +294,39 @@ class TestIsolation:
         source = (pytest.importorskip("pathlib").Path(__file__).parent.parent
                   / "ui_commun.py").read_text(encoding="utf-8")
         assert "import streamlit" not in source
+
+
+class TestColonnePeremption:
+    """La péremption s'affiche en MOIS/ANNÉE.
+
+    C'est ce qui est imprimé sur les cartons, et le jour prenait une place
+    que la colonne n'a pas. Le point à vérifier : la date **complète** reste
+    enregistrée — seul l'affichage est raccourci.
+    """
+
+    def _colonne(self):
+        pytest.importorskip("streamlit")
+        import ui_stock_ferme
+        return ui_stock_ferme._COLONNE_PEREMPTION
+
+    def test_format_sans_le_jour(self):
+        configuration = self._colonne()["type_config"]
+        assert configuration["format"] == "MM/YYYY"
+        assert configuration["type"] == "date"
+
+    def test_la_meme_colonne_sert_aux_deux_tableaux(self):
+        """Le tableau modifiable et la vue filtrée doivent s'afficher pareil :
+        deux réglages séparés finiraient par diverger."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "ui_stock_ferme.py").read_text(encoding="utf-8")
+        assert source.count("_COLONNE_PEREMPTION") == 3   # défini + 2 usages
+        # Une seule colonne de date déclarée : le « DD/MM/YYYY » restant est
+        # celui de la date du jour, un champ de saisie, pas une colonne.
+        assert source.count("column_config.DateColumn") == 1
+
+    def test_l_impression_garde_la_date_complete(self):
+        """Sur le papier, il n'y a pas de colonne « Jours restants » pour
+        rattraper un jour masqué : la liste de contrôle reste précise."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "stock_ferme.py").read_text(encoding="utf-8")
+        assert "%d/%m/%Y" in source
