@@ -922,14 +922,11 @@ def rendre(etape, tuile_kpi) -> None:
             "⌨️ Saisie manuelle", use_container_width=True,
             on_click=_saisie_manuelle_vierge,
             help="Enregistrer une boîte dont le code ne se lit pas.")
-        # La saisie assistée AVANT l'explication : c'est le geste, le reste
-        # n'est que du commentaire.
+        # Rien sous les deux champs : ce qu'expliquait le paragraphe retiré
+        # (Data Matrix contre code linéaire, et « cherchez par le nom »)
+        # est déjà dit par les invites des champs eux-mêmes. Répété à chaque
+        # boîte scannée, il n'était plus lu — seulement contourné du regard.
         _saisie_assistee()
-        st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le "
-                   "code CIP, la date de péremption et le n° de lot. Un "
-                   "code-barres linéaire ne donne que le CIP : la péremption "
-                   "reste à saisir. Sans code lisible, cherchez le médicament "
-                   "par son nom dans la liste ci-dessus.")
     else:
         col_manuel.button(
             "⌨️ Sortie manuelle", use_container_width=True,
