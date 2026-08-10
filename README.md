@@ -314,6 +314,12 @@ mois vaut au plus 12, une année tient entre 1900 et 2199. Ce qui ne fait
 pas une date (un code CIP tapé dans la mauvaise case, par exemple) est
 refusé plutôt que deviné.
 
+L'année doit rester **entre 1990 et 2099**. Au-delà, c'est une faute de
+frappe : une boîte qui périme en l'an 9999 s'afficherait « 🟢 OK » pour
+toujours, tout en bas de la liste, invisible. Mieux vaut faire retaper la
+date. Les bornes sont **absolues** et non relatives au jour — la lecture
+d'un inventaire ne doit pas dépendre de la date à laquelle on l'ouvre.
+
 | Statut | Seuil | Signification |
 |---|---|---|
 | ⛔ Périmé | date dépassée | à retirer du stock |
@@ -816,6 +822,7 @@ pharmacie-ruptures/
     ├── test_base_medicaments.py # identification par CIP (base publique)
     ├── test_maj_auto.py       # mise à jour auto : données préservées, app ouverte
     ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
+    ├── test_invariants.py     # propriétés vraies quelles que soient les données
     ├── test_icone.py          # icône du Bureau : tailles, script de raccourci
     ├── test_raccourci.py      # pose du raccourci : Bureau redirigé, replis
     └── test_interface.py      # fumée : l'application démarre et répond

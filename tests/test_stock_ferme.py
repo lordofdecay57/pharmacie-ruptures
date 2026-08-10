@@ -206,6 +206,22 @@ class TestPeremptionSaisie:
     def test_mois_invalide_refuse(self):
         assert parser_peremption_saisie("13/2027") is None
 
+    @pytest.mark.parametrize("saisie", [
+        "31129999", "31/12/9999", "082207", "00019999", "01/2100", "01/1989",
+    ])
+    def test_annee_invraisemblable_refusee(self, saisie):
+        """Une faute de frappe sur l'année passait sans un mot, et la boîte
+        s'affichait « OK » pour toujours — invisible en bas de la liste.
+        Mieux vaut faire retaper la date."""
+        assert parser_peremption_saisie(saisie) is None
+
+    @pytest.mark.parametrize("saisie,attendu", [
+        ("01/1990", date(1990, 1, 31)),     # une boîte périmée depuis
+        ("01/2099", date(2099, 1, 31)),     # longtemps reste enregistrable
+    ])
+    def test_les_bornes_elles_memes_restent_acceptees(self, saisie, attendu):
+        assert parser_peremption_saisie(saisie) == attendu
+
     def test_date_deja_typee_conservee(self):
         assert parser_peremption_saisie(date(2027, 5, 4)) == date(2027, 5, 4)
 
