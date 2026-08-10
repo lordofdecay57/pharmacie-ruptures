@@ -32,6 +32,7 @@ import yaml
 
 import commun
 import moteur_ruptures as moteur
+import raccourci
 import stock_rotation
 import ui_commun
 
@@ -56,7 +57,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "4.0"
+VERSION_APP = "4.1"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -269,6 +270,39 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "🔒  Stock fermé — inventaire scanné"
 
+DOSSIER_APP = Path(__file__).resolve().parent
+
+
+def _proposer_raccourci() -> None:
+    """Propose de poser l'icône du Bureau — seulement si elle manque.
+
+    Un fichier à retrouver dans un dossier, c'est déjà trop demander :
+    Windows masque l'extension « .bat », et certains postes en interdisent
+    l'exécution. Le bouton est ici, dans l'écran déjà ouvert.
+
+    Il s'efface de lui-même une fois l'icône posée : une proposition qui
+    reste affichée après avoir été suivie n'est plus une aide, c'est du
+    bruit. Rien ne s'affiche non plus hors Windows.
+    """
+    with st.sidebar:
+        message = st.session_state.pop("raccourci_message", None)
+        if message:
+            niveau, texte = message
+            (st.success if niveau == "ok" else st.warning)(texte)
+        if not raccourci.sur_windows() or raccourci.raccourci_existant():
+            return
+        with st.container(border=True):
+            st.markdown("**🖥️ Icône du Bureau**")
+            st.caption("Aucune icône « Pharmacie » sur votre Bureau. Elle "
+                       "ouvre l'utilitaire en un double-clic, sans avoir à "
+                       "revenir dans ce dossier.")
+            if st.button("📌 Créer l'icône maintenant",
+                         use_container_width=True):
+                succes, texte = raccourci.creer(DOSSIER_APP)
+                st.session_state["raccourci_message"] = (
+                    "ok" if succes else "attention", texte)
+                st.rerun()
+
 # Deux grands onglets plutôt qu'un choix discret : les deux espaces ne
 # partagent NI fichiers, NI données, NI exports. Savoir dans lequel on se
 # trouve est la première chose à voir en arrivant sur l'écran.
@@ -285,6 +319,12 @@ def _garder_espace() -> None:
             "espace_retenu", ESPACE_CADENCIER)
     st.session_state["espace_retenu"] = st.session_state["espace_travail"]
 
+
+# Avant l'aiguillage : la barre latérale des deux espaces est construite
+# plus bas, chacune de son côté, et l'espace « stock fermé » s'arrête sur un
+# st.stop(). Poser la proposition ici est le seul endroit d'où elle est
+# visible dans les deux.
+_proposer_raccourci()
 
 espace = st.segmented_control(
     "Espace de travail", [ESPACE_CADENCIER, ESPACE_STOCK_FERME],
