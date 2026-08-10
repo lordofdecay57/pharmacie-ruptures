@@ -57,7 +57,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "4.2"
+VERSION_APP = "4.3"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -103,8 +103,6 @@ st.markdown("""
 .hero .version { font-size: .74rem; font-weight: 600;
   background: rgba(255,255,255,.22); border-radius: 999px; padding: 1px 9px;
   letter-spacing: .3px; }
-.hero .local { color: rgba(255,255,255,.85); font-size: .78rem;
-  margin-left: auto; }
 /* Version périmée : signalé en ambre, impossible à confondre avec le reste
    du bandeau — c'est la seule information du bandeau qui appelle une action. */
 .hero .maj { background: #b45309; color: #fff; font-size: .78rem;
@@ -236,7 +234,6 @@ st.markdown(f"""
   <h1>💊 Pilotage pharmacie</h1>
   <span class="version">v{VERSION_APP}</span>
   {_maj}
-  <span class="local">🔒 100 % local — vos données ne quittent pas ce poste</span>
 </div>
 """, unsafe_allow_html=True)
 st.write("")
@@ -719,7 +716,6 @@ with st.sidebar:
         for cle in ("resultat", "resultat_stock", "date_analyse", "mode_demo"):
             st.session_state.pop(cle, None)
         st.rerun()
-    st.caption("🔒 100 % local : vos fichiers ne quittent pas ce poste.")
 
 if "cadencier" not in dataframes:
     _journal.info("Cadencier absent — attente d'un dépôt de fichier.")

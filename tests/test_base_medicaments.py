@@ -16,8 +16,10 @@ import pandas as pd
 import pytest
 
 from base_medicaments import (COLONNES_BASE, anciennete_jours, charger_table,
-                              chercher, cip7_depuis_cip13, construire_table,
-                              decoder, index_par_cip, info_base, sauver_table)
+                              chercher, chercher_par_nom, cip7_depuis_cip13,
+                              construire_table, decoder, index_par_cip,
+                              index_par_nom, info_base, sauver_table,
+                              unites_par_boite)
 
 # Extraits authentiques des fichiers officiels (colonnes séparées par des
 # tabulations, sans ligne d'en-tête).
@@ -141,6 +143,104 @@ class TestChercher:
 # Conservation sur le poste
 # ---------------------------------------------------------------------------
 
+class TestUnitesParBoite:
+    """Le conditionnement officiel dit combien la boîte contient.
+
+    Libellés authentiques de la base : ils sont beaucoup moins réguliers
+    qu'on ne l'imagine, et une quantité fausse sur un stock fermé est pire
+    qu'une case vide — elle ne se remarque pas.
+    """
+
+    @pytest.mark.parametrize("libelle,attendu", [
+        ("plaquette(s) PVC PVDC aluminium de 30 comprimé(s)", 30),
+        ("plaquette(s) thermoformée(s) PVC aluminium de 30  gélule(s)", 30),
+        ("1 flacon(s) polyéthylène (PEHD) de 90 gélule(s)", 90),
+        ("plaquette(s) PVC polyéthylène de 10 suppositoire(s)", 10),
+        ("plaquette(s) aluminium de 18 pastille(s)", 18),
+        ("plaquettes PVC-Aluminium de 16 comprimés", 16),
+    ])
+    def test_cas_courants(self, libelle, attendu):
+        assert unites_par_boite(libelle) == attendu
+
+    @pytest.mark.parametrize("libelle,attendu", [
+        # Sans le multiplicateur de tête, on lirait 20 au lieu de 40…
+        ("2 plaquette(s) thermoformée(s) PVC de 20 comprimé(s)", 40),
+        ("3 pilulier(s) polypropylène de 30 comprimé(s)", 90),
+        # …et 1 au lieu de 100, ce qui est la vraie contenance.
+        ("100 plaquette(s) PVC-Aluminium de 1 gélule(s)", 100),
+        ("14 plaquettes aluminium de 8 comprimés "
+         "(emballage multiple : 2 x 56)", 112),
+    ])
+    def test_boites_multiples(self, libelle, attendu):
+        assert unites_par_boite(libelle) == attendu
+
+    @pytest.mark.parametrize("libelle", [
+        "1 flacon(s) en verre de 500 ml",          # un volume ne se compte pas
+        "1 tube(s) polyéthylène de 15 ml",
+        "1 flacon(s) en verre de 1,5 ml - 1 flacon(s) en verre de 4,5 ml",
+        # Deux nombres possibles : on ne devine pas.
+        "20 récipient(s) unidose(s) de 2 ml par plaquette de 5 récipients",
+        "",
+        None,
+    ])
+    def test_en_cas_de_doute_rien_plutot_qu_une_valeur_inventee(self, libelle):
+        assert unites_par_boite(libelle) == 0
+
+
+class TestRechercheParNom:
+    """Taper un nom au clavier doit proposer les présentations réelles."""
+
+    def _index(self):
+        return index_par_nom(construire_table(CIS, CIP))
+
+    def test_une_entree_par_presentation(self):
+        """Chaque médicament figure deux fois dans la table (CIP13 et CIP7) :
+        le proposer deux fois serait un choix pour rien."""
+        index = self._index()
+        assert len(index) == 2
+        assert all(len(e["cip"]) == 13 for e in index), \
+            "le CIP13 doit primer : c'est lui que portent les boîtes"
+
+    def test_recherche_simple(self):
+        trouves = chercher_par_nom(self._index(), "doliprane")
+        assert len(trouves) == 1
+        assert trouves[0]["cip"] == "3400935955838"
+        assert trouves[0]["presentation"] == "plaquette de 8 comprimés"
+        assert trouves[0]["unites_par_boite"] == 8
+
+    def test_plusieurs_mots_dans_le_desordre(self):
+        """On tape ce dont on se souvient, pas la dénomination officielle."""
+        assert chercher_par_nom(self._index(), "1000 doliprane")
+        assert chercher_par_nom(self._index(), "doliprane 1000 comprimé")
+
+    def test_accents_et_casse_ignores(self):
+        assert chercher_par_nom(self._index(), "ANASTROZOLE")
+        assert chercher_par_nom(self._index(), "anastrozole accord")
+
+    def test_terme_trop_court_ne_ramene_pas_la_base_entiere(self):
+        assert chercher_par_nom(self._index(), "do") == []
+        assert chercher_par_nom(self._index(), "") == []
+
+    def test_aucune_correspondance(self):
+        assert chercher_par_nom(self._index(), "medicamentinexistant") == []
+
+    def test_les_correspondances_de_tete_passent_devant(self):
+        """Qui tape « doli » cherche DOLIPRANE, pas un générique dont le nom
+        le contient au milieu."""
+        table = pd.DataFrame(
+            [{"Code CIP": "3400900000017", "Nom du produit": "ZZZ DOLIX 1 mg",
+              "Présentation": "plaquette de 10 comprimés"},
+             {"Code CIP": "3400900000024", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette de 10 comprimés"}],
+            columns=COLONNES_BASE)
+        trouves = chercher_par_nom(index_par_nom(table), "dolix")
+        assert trouves[0]["nom"] == "DOLIX 1 mg"
+
+    def test_base_absente(self):
+        assert index_par_nom(pd.DataFrame(columns=COLONNES_BASE)) == []
+        assert chercher_par_nom([], "doliprane") == []
+
+
 class TestPersistance:
     def test_aller_retour_sur_disque(self, tmp_path):
         chemin = tmp_path / "base.csv"
@@ -171,7 +271,23 @@ class TestPersistance:
         sauver_table(table, chemin)
         info = info_base(chemin)
         assert info["existe"] and info["lignes"] == len(table)
+        assert info["presentations"] == len(table)
         assert info["date"] == date.today()
+
+    def test_base_installee_avant_le_conditionnement(self, tmp_path):
+        """Les bases téléchargées avant l'ajout de la colonne n'ont que deux
+        champs. Elles doivent continuer de servir — l'identification par
+        code marche, seul le conditionnement manque — et pouvoir être
+        signalées comme à refaire."""
+        chemin = tmp_path / "ancienne.csv"
+        chemin.write_text(
+            "Code CIP;Nom du produit\n3400935955838;DOLIPRANE 1000 mg\n",
+            encoding="utf-8-sig")
+        table = charger_table(chemin)
+        assert list(table.columns) == COLONNES_BASE
+        assert chercher(index_par_cip(table), "3400935955838") is not None
+        assert chercher_par_nom(index_par_nom(table), "doliprane")
+        assert info_base(chemin)["presentations"] == 0
 
 
 class TestAnciennete:

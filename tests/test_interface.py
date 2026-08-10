@@ -233,6 +233,25 @@ class TestEspaceStockFerme:
         assert "Nom du médicament manquant" in contenu
         assert "recopiez-le depuis la boîte" in contenu
 
+    def test_un_nom_tape_au_clavier_remplit_la_fiche(self, page):
+        """Sans base publique installée, il n'y a rien à proposer — mais ce
+        qui vient d'être tapé doit au moins servir de nom. Le retaper dans
+        la fiche juste en dessous n'aurait aucun sens."""
+        champ = page.get_by_placeholder("Douchez la boîte")
+        champ.fill("DOLIPRANE 1000 mg")
+        champ.press("Enter")
+        page.wait_for_timeout(5000)
+        _sans_exception(page)
+        assert page.get_by_role(
+            "textbox", name="Nom du médicament").input_value() == \
+            "DOLIPRANE 1000 mg"
+
+    def test_le_champ_invite_a_taper_un_nom(self, page):
+        """La présélection ne sert à rien si personne ne sait qu'on peut
+        taper autre chose qu'un code."""
+        champ = page.get_by_placeholder("Douchez la boîte")
+        assert "nom de médicament" in champ.get_attribute("placeholder")
+
     def test_recliquer_le_mode_actif_ne_le_deselectionne_pas(self, page):
         """Même garde-fou pour Entrée / Sortie : un scan a toujours un sens,
         aucun des deux ne doit pouvoir rester éteint."""
