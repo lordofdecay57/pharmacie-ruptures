@@ -48,6 +48,13 @@ COLONNES_STOCK_FERME = [
 COLONNES_REPERTOIRE = ["Code CIP", "Nom du produit", "Dosage",
                        "Unités par boîte"]
 
+#: Colonnes RÉELLEMENT affichées et imprimées. Le dosage n'y figure pas :
+#: il fait partie de la dénomination (« DOLIPRANE 1000 mg, comprimé »), et
+#: une colonne de plus pour le répéter ne dit rien de neuf tout en poussant
+#: la péremption hors de l'écran. Il est fondu dans le nom à l'affichage —
+#: rien n'est perdu, y compris pour les produits saisis à la main.
+COLONNES_AFFICHEES = [c for c in COLONNES_STOCK_FERME if c != "Dosage"]
+
 #: Péremption imminente : la boîte ne passera pas le mois. C'est le palier
 #: qui déclenche une action immédiate — retrait, remplacement, ou emploi en
 #: priorité absolue.
@@ -462,9 +469,12 @@ def inventaire_vide() -> pd.DataFrame:
 
 
 def _ligne_en_dict(entree: EntreeStock, aujourdhui: date) -> dict:
+    # Le dosage est intégré au nom dès l'enregistrement : il n'a plus de
+    # colonne à lui, et l'identité d'un lot sans code CIP repose sur le nom
+    # — le stocker à part le ferait diverger de ce qui est affiché.
     return {
-        "Nom du produit": entree.nom,
-        "Dosage": entree.dosage,
+        "Nom du produit": _nom_avec_dosage(entree.nom, entree.dosage),
+        "Dosage": "",
         "Code CIP": entree.cip,
         "Boîtes": int(entree.boites),
         "Unités par boîte": int(entree.unites_par_boite),
@@ -497,7 +507,12 @@ def ajouter_entree(inventaire: pd.DataFrame, entree: EntreeStock,
         inventaire = inventaire_vide()
     inventaire = inventaire.reindex(columns=COLONNES_STOCK_FERME).copy()
 
-    cible = cle_lot(entree.cip, entree.nom, entree.peremption, entree.lot)
+    # Le nom qui sert de clé est celui qui sera ÉCRIT — dosage compris. Le
+    # comparer sous sa forme brute pendant que l'inventaire porte la forme
+    # complète créerait un doublon à chaque second scan d'un produit sans
+    # code CIP.
+    nom_complet = _nom_avec_dosage(entree.nom, entree.dosage)
+    cible = cle_lot(entree.cip, nom_complet, entree.peremption, entree.lot)
     for i, cle in zip(inventaire.index, _cles(inventaire)):
         if cle != cible:
             continue
@@ -508,10 +523,8 @@ def ajouter_entree(inventaire: pd.DataFrame, entree: EntreeStock,
             + int(entree.unites_vrac))
         if entree.unites_par_boite:
             inventaire.at[i, "Unités par boîte"] = int(entree.unites_par_boite)
-        if entree.nom:
-            inventaire.at[i, "Nom du produit"] = entree.nom
-        if entree.dosage:
-            inventaire.at[i, "Dosage"] = entree.dosage
+        if nom_complet:
+            inventaire.at[i, "Nom du produit"] = nom_complet
         inventaire.at[i, "Total unités"] = total_unites(
             inventaire.at[i, "Boîtes"], inventaire.at[i, "Unités par boîte"],
             inventaire.at[i, "Unités en vrac"])
@@ -578,13 +591,12 @@ def lots_sortables(inventaire: pd.DataFrame,
         if _texte(ligne["Lot"]):
             details.append(f"lot {_texte(ligne['Lot'])}")
         details.append(f"{boites} boîte(s)")
-        nom_complet = " ".join(
-            p for p in (_texte(ligne["Nom du produit"]),
-                        _texte(ligne["Dosage"])) if p)
+        # Le dosage fait déjà partie du nom affiché : rien à recoller ici.
+        nom_complet = _texte(ligne["Nom du produit"])
         lots.append({
             "cip": _texte(ligne["Code CIP"]),
-            "nom": _texte(ligne["Nom du produit"]),
-            "dosage": _texte(ligne["Dosage"]),
+            "nom": nom_complet,
+            "dosage": "",
             "peremption": peremption,
             "lot": _texte(ligne["Lot"]),
             "boites": boites,
@@ -692,6 +704,20 @@ def _cle_alphabetique(valeur) -> str:
                    if not unicodedata.combining(c))
 
 
+def _nom_avec_dosage(nom, dosage) -> str:
+    """« DOLIPRANE » + « 1000 mg » → « DOLIPRANE 1000 mg ».
+
+    **Idempotent** : un dosage déjà contenu dans le nom n'est pas répété.
+    Sans cette garde, une ligne corrigée dans le tableau puis réaffichée
+    finirait par « DOLIPRANE 1000 mg 1000 mg » — et les noms venus de la
+    base publique portent tous leur dosage.
+    """
+    nom, dosage = _texte(nom).strip(), _texte(dosage).strip()
+    if not dosage or dosage.upper() in nom.upper():
+        return nom
+    return f"{nom} {dosage}".strip()
+
+
 def inventaire_affichable(inventaire: pd.DataFrame,
                           aujourdhui: Optional[date] = None,
                           tri: str = TRI_PEREMPTION) -> pd.DataFrame:
@@ -702,16 +728,28 @@ def inventaire_affichable(inventaire: pd.DataFrame,
     libellé, pour parcourir l'inventaire produit par produit devant
     l'armoire ; à nom égal, la boîte qui périme la première reste en tête,
     car c'est celle qu'on prend.
+
+    Le **dosage est fondu dans le nom** et sa colonne disparaît : il fait
+    déjà partie de la dénomination officielle, et le répéter poussait la
+    péremption — la seule colonne qui compte vraiment ici — hors de l'écran.
+    L'opération est sans perte et se refait à l'identique : un dosage déjà
+    intégré ne l'est pas deux fois.
     """
     aujourdhui = aujourdhui or date.today()
     if inventaire is None or inventaire.empty:
-        return inventaire_vide().assign(**{"Statut": [], "Jours restants": []})
+        return (inventaire_vide().reindex(columns=COLONNES_AFFICHEES)
+                .assign(**{"Statut": [], "Jours restants": []})
+                .reindex(columns=["Statut"] + COLONNES_AFFICHEES
+                         + ["Jours restants"]))
 
     tableau = inventaire.reindex(columns=COLONNES_STOCK_FERME).copy()
     # Une cellule vide relue d'un fichier vaut NaN : sans ce nettoyage, elle
     # s'afficherait « nan » dans le tableau et « None » dans le PDF.
     for colonne in ("Nom du produit", "Dosage", "Code CIP", "Lot"):
         tableau[colonne] = tableau[colonne].map(_texte)
+    tableau["Nom du produit"] = [
+        _nom_avec_dosage(nom, dosage)
+        for nom, dosage in zip(tableau["Nom du produit"], tableau["Dosage"])]
     tableau["Péremption"] = tableau["Péremption"].map(parser_peremption_saisie)
     tableau["Statut"] = tableau["Péremption"].map(
         lambda p: statut_peremption(p, aujourdhui))
@@ -724,14 +762,12 @@ def inventaire_affichable(inventaire: pd.DataFrame,
     tableau["_ordre"] = tableau["Jours restants"].map(
         lambda j: 10 ** 6 if j is None else j)
     tableau["_nom"] = tableau["Nom du produit"].map(_cle_alphabetique)
-    tableau["_dosage"] = tableau["Dosage"].map(_cle_alphabetique)
-    cles = (["_nom", "_dosage", "_ordre"] if tri == TRI_NOM
-            else ["_ordre", "_nom", "_dosage"])
+    cles = (["_nom", "_ordre"] if tri == TRI_NOM else ["_ordre", "_nom"])
     tableau = (tableau.sort_values(cles)
-               .drop(columns=["_ordre", "_nom", "_dosage"])
+               .drop(columns=["_ordre", "_nom"])
                .reset_index(drop=True))
     return tableau.reindex(
-        columns=["Statut"] + COLONNES_STOCK_FERME + ["Jours restants"])
+        columns=["Statut"] + COLONNES_AFFICHEES + ["Jours restants"])
 
 
 def normaliser_tableau_edite(edite: pd.DataFrame) -> pd.DataFrame:
@@ -762,6 +798,13 @@ def normaliser_tableau_edite(edite: pd.DataFrame) -> pd.DataFrame:
         tableau[colonne] = tableau[colonne].map(parser_peremption_saisie)
 
     tableau = tableau[tableau["Nom du produit"] != ""]
+    # Le tableau modifiable n'affiche plus de colonne « Dosage » : elle
+    # revient donc vide. Le nom, lui, porte déjà le dosage — cette ligne ne
+    # sert qu'aux appels qui fourniraient encore les deux séparément.
+    tableau["Nom du produit"] = [
+        _nom_avec_dosage(nom, dosage)
+        for nom, dosage in zip(tableau["Nom du produit"], tableau["Dosage"])]
+    tableau["Dosage"] = ""
     tableau["Total unités"] = [
         total_unites(l["Boîtes"], l["Unités par boîte"], l["Unités en vrac"])
         for _, l in tableau.iterrows()]
@@ -844,6 +887,14 @@ def charger_inventaire(chemin: Path) -> pd.DataFrame:
         tableau[colonne] = tableau[colonne].map(parser_peremption_saisie)
     for colonne in ("Nom du produit", "Dosage", "Code CIP", "Lot"):
         tableau[colonne] = tableau[colonne].fillna("").astype(str)
+    # Inventaires écrits avant la disparition de la colonne « Dosage » : on
+    # le replie dans le nom une fois pour toutes. Sans cette reprise, un lot
+    # SANS code CIP serait affiché sous un nom et retrouvé sous un autre —
+    # sa sortie ne décrémenterait rien.
+    tableau["Nom du produit"] = [
+        _nom_avec_dosage(nom, dosage)
+        for nom, dosage in zip(tableau["Nom du produit"], tableau["Dosage"])]
+    tableau["Dosage"] = ""
     return tableau
 
 
@@ -987,7 +1038,7 @@ def charger_repertoire(chemin: Path) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 #: Colonnes de la liste imprimée, dans l'ordre demandé au comptoir.
-COLONNES_IMPRESSION = ["Statut", "Nom du produit", "Dosage", "Code CIP",
+COLONNES_IMPRESSION = ["Statut", "Nom du produit", "Code CIP",
                        "Boîtes", "Unités", "Péremption", "Lot"]
 
 #: Statuts retenus par le filtre « à traiter » : ce qui exige une action.
@@ -1018,7 +1069,9 @@ def filtrer_inventaire(inventaire: pd.DataFrame, recherche: str = "",
         return inventaire_vide()
     terme = " ".join(str(recherche or "").split()).upper()
     if terme:
-        colonnes = ("Nom du produit", "Dosage", "Code CIP", "Lot")
+        # Le dosage est fondu dans le nom : le chercher séparément
+        # n'apporterait rien, il est déjà couvert.
+        colonnes = ("Nom du produit", "Code CIP", "Lot")
         garde = None
         for colonne in colonnes:
             trouve = tableau[colonne].map(
@@ -1039,7 +1092,6 @@ def _tableau_impression(inventaire: pd.DataFrame,
     sortie = pd.DataFrame({
         "Statut": tableau["Statut"],
         "Nom du produit": tableau["Nom du produit"],
-        "Dosage": tableau["Dosage"],
         "Code CIP": tableau["Code CIP"],
         "Boîtes": tableau["Boîtes"],
         "Unités": tableau["Total unités"],
@@ -1149,13 +1201,15 @@ def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
     # qui se replient sur plusieurs lignes.
     style_cellule = ParagraphStyle("cellule", fontName="Helvetica",
                                    fontSize=7.5, leading=9)
-    repliees = ("Nom du produit", "Dosage", "Lot")
+    repliees = ("Nom du produit", "Lot")
     for colonne in repliees:
         imprime[colonne] = imprime[colonne].map(
             lambda v: Paragraph(escape(v), style_cellule))
     donnees = [list(imprime.columns)] + imprime.values.tolist()
-    largeurs = [22 * mm, 68 * mm, 30 * mm, 30 * mm, 18 * mm, 18 * mm,
-                26 * mm, 30 * mm]
+    # La colonne du nom récupère la place du dosage, qui y est désormais
+    # inclus : les dénominations officielles sont longues.
+    largeurs = [22 * mm, 96 * mm, 30 * mm, 18 * mm, 18 * mm, 26 * mm,
+                32 * mm]
     grille = Table(donnees, colWidths=largeurs, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9D9D9")),

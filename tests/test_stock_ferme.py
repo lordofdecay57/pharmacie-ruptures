@@ -235,7 +235,10 @@ class TestTotalUnites:
 # ---------------------------------------------------------------------------
 
 def _entree(**kw):
-    base = dict(cip="3400912345678", nom="DOLIPRANE", dosage="1000 mg",
+    # Le dosage fait partie du NOM, comme dans la base publique — il n'a
+    # plus de colonne à lui. Les rares tests qui vérifient le repli du
+    # dosage dans le nom le passent explicitement.
+    base = dict(cip="3400912345678", nom="DOLIPRANE", dosage="",
                 boites=1, unites_par_boite=8, unites_vrac=0,
                 peremption=date(2027, 6, 30), lot="A1")
     base.update(kw)
@@ -271,10 +274,12 @@ class TestAjouterEntree:
         assert len(inv) == 2
 
     def test_nom_deja_connu_conserve_si_le_scan_est_muet(self):
-        inv = ajouter_entree(inventaire_vide(), _entree(), AUJOURDHUI)
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(nom="DOLIPRANE", dosage="1000 mg"),
+                             AUJOURDHUI)
         inv = ajouter_entree(inv, _entree(nom="", dosage=""), AUJOURDHUI)
-        assert inv.iloc[0]["Nom du produit"] == "DOLIPRANE"
-        assert inv.iloc[0]["Dosage"] == "1000 mg"
+        # Le dosage a rejoint le nom : une colonne de moins, rien de perdu.
+        assert inv.iloc[0]["Nom du produit"] == "DOLIPRANE 1000 mg"
 
     def test_produit_sans_cip_identifie_par_son_nom(self):
         inv = ajouter_entree(inventaire_vide(),
@@ -506,6 +511,72 @@ class TestInventaireAffichable:
         assert resume_inventaire(brut, AUJOURDHUI)["references"] == 1
 
 
+class TestDosageDansLeNom:
+    """Le dosage n'a plus de colonne : il fait partie du nom.
+
+    Il figure déjà dans la dénomination officielle (« DOLIPRANE 1000 mg,
+    comprimé ») ; une colonne pour le répéter poussait la péremption — la
+    seule qui compte vraiment ici — hors de l'écran.
+    """
+
+    def test_le_dosage_saisi_rejoint_le_nom(self):
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(nom="MORPHINE", dosage="10 mg/mL"),
+                             AUJOURDHUI)
+        assert inv.iloc[0]["Nom du produit"] == "MORPHINE 10 mg/mL"
+        assert inv.iloc[0]["Dosage"] == ""
+
+    def test_un_dosage_deja_dans_le_nom_n_est_pas_repete(self):
+        """Sinon une ligne réaffichée finirait par « DOLIPRANE 1 g 1 g »."""
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(nom="DOLIPRANE 1 g", dosage="1 g"),
+                             AUJOURDHUI)
+        assert inv.iloc[0]["Nom du produit"] == "DOLIPRANE 1 g"
+
+    def test_aucune_colonne_dosage_a_l_affichage(self):
+        vue = inventaire_affichable(
+            ajouter_entree(inventaire_vide(), _entree(), AUJOURDHUI),
+            AUJOURDHUI)
+        assert "Dosage" not in vue.columns
+        assert "Péremption" in vue.columns
+
+    def test_inventaire_vide_a_les_memes_colonnes(self):
+        """Un tableau vide et un tableau rempli doivent avoir la même forme,
+        sans quoi l'affichage change de colonnes au premier scan."""
+        vide = inventaire_affichable(inventaire_vide(), AUJOURDHUI)
+        rempli = inventaire_affichable(
+            ajouter_entree(inventaire_vide(), _entree(), AUJOURDHUI),
+            AUJOURDHUI)
+        assert list(vide.columns) == list(rempli.columns)
+
+    def test_un_lot_sans_cip_reste_retrouvable_apres_le_repli(self):
+        """Le vrai piège : l'identité d'un lot sans code CIP repose sur son
+        nom. Si l'affichage montre « PRÉPARATION 5 % » pendant que le fichier
+        dit « PRÉPARATION », la sortie ne décrémente rien."""
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(cip="", nom="PRÉPARATION", dosage="5 %"),
+                             AUJOURDHUI)
+        lot = lots_sortables(inv, AUJOURDHUI)[0]
+        apres = retirer_entree(inv, lot["cip"], lot["nom"], lot["peremption"],
+                               lot["lot"], boites=1)
+        assert len(apres) == 0, "la boîte devait sortir de l'inventaire"
+
+    def test_reprise_d_un_ancien_fichier(self, tmp_path):
+        """Les inventaires écrits avant la disparition de la colonne sont
+        repliés à la relecture, une fois pour toutes."""
+        import pandas as pd
+        chemin = tmp_path / "ancien.csv"
+        pd.DataFrame([{"Nom du produit": "MORPHINE", "Dosage": "10 mg/mL",
+                       "Code CIP": "", "Boîtes": 2, "Unités par boîte": 0,
+                       "Unités en vrac": 0, "Total unités": 0,
+                       "Péremption": "2027-06-30", "Lot": "A1",
+                       "Enregistré le": "2026-07-31"}]).to_csv(
+            chemin, index=False, sep=";", encoding="utf-8-sig")
+        relu = charger_inventaire(chemin)
+        assert relu.iloc[0]["Nom du produit"] == "MORPHINE 10 mg/mL"
+        assert relu.iloc[0]["Dosage"] == ""
+
+
 class TestLotsSortables:
     """Sortie sans douchette : désigner la boîte dans une liste.
 
@@ -701,7 +772,9 @@ class TestFiltrerInventaire:
     def _inventaire(self):
         inv = inventaire_vide()
         for nom, lot, peremption in (
-                ("DOLIPRANE", "A1", date(2026, 7, 1)),      # périmé
+                # Dénomination complète, dosage compris : c'est la forme que
+                # rend la base publique, et celle que porte l'inventaire.
+                ("DOLIPRANE 1000 mg", "A1", date(2026, 7, 1)),   # périmé
                 ("MORPHINE", "B2", date(2026, 8, 10)),      # < 1 mois
                 ("DIAZEPAM", "C3", date(2026, 9, 30)),      # < 3 mois
                 ("NALOXONE", "D4", date(2028, 1, 31))):     # OK
@@ -719,12 +792,13 @@ class TestFiltrerInventaire:
         retrait = filtrer_inventaire(self._inventaire(),
                                      statuts=STATUTS_A_TRAITER,
                                      aujourdhui=AUJOURDHUI)
-        assert list(retrait["Nom du produit"]) == ["DOLIPRANE", "MORPHINE"]
+        assert list(retrait["Nom du produit"]) == ["DOLIPRANE 1000 mg",
+                                                   "MORPHINE"]
 
     @pytest.mark.parametrize("terme,attendu", [
         ("morph", "MORPHINE"),       # nom, insensible à la casse
         ("c3", "DIAZEPAM"),          # n° de lot
-        ("1000 mg", "DOLIPRANE"),    # dosage
+        ("1000 mg", "DOLIPRANE 1000 mg"),   # dosage, inclus dans le nom
     ])
     def test_recherche_sur_les_quatre_colonnes(self, terme, attendu):
         trouve = filtrer_inventaire(self._inventaire(), recherche=terme,
@@ -747,7 +821,8 @@ class TestFiltrerInventaire:
         trouve = filtrer_inventaire(self._inventaire(), recherche="o",
                                     statuts=STATUTS_A_TRAITER,
                                     aujourdhui=AUJOURDHUI)
-        assert list(trouve["Nom du produit"]) == ["DOLIPRANE", "MORPHINE"]
+        assert list(trouve["Nom du produit"]) == ["DOLIPRANE 1000 mg",
+                                                  "MORPHINE"]
 
     def test_resultat_reutilisable_tel_quel(self):
         """La sortie a la forme d'un inventaire : elle se réaffiche et
@@ -954,7 +1029,9 @@ class TestExports:
     def test_csv_contient_les_informations_demandees(self):
         texte = exporter_csv(self._inventaire(), AUJOURDHUI).decode("utf-8-sig")
         entete = texte.splitlines()[0]
-        for colonne in ("Nom du produit", "Dosage", "Code CIP", "Boîtes",
+        # Pas de colonne « Dosage » : il fait partie du nom du produit.
+        assert "Dosage" not in entete
+        for colonne in ("Nom du produit", "Code CIP", "Boîtes",
                         "Unités", "Péremption", "Lot"):
             assert colonne in entete
         assert "DOLIPRANE" in texte
@@ -1012,7 +1089,10 @@ class TestExports:
             texte = pdf.pages[0].extract_text()
         # Le code CIP et la quantité restent intacts, donc non chevauchés.
         assert "3400912345678" in texte
-        assert "comprimé pelliculé sécable boîte de 8" in texte
+        # Le libellé se replie : on le retrouve en entier une fois les
+        # retours à la ligne recollés, et NON tronqué.
+        assert "comprimé pelliculé sécable" in texte
+        assert "boîte de 8" in texte.replace("\n", " ")
 
     def test_pdf_echappe_les_caracteres_xml(self):
         """« & » et « < » sont du balisage pour ReportLab : mal échappés,
