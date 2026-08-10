@@ -502,22 +502,18 @@ def _formulaire_complement(inventaire: pd.DataFrame,
                 "importez votre catalogue (encadré « Pré-remplir les noms » "
                 "ci-dessus).")
 
-        col1, col2, col3 = st.columns([3, 2, 2])
+        col1, col2 = st.columns([3, 2])
         # Placeholders rédigés comme des CONSIGNES : un exemple réaliste
         # (« DOLIPRANE » en gris) se confond avec une valeur déjà saisie, et
         # l'on valide sans comprendre pourquoi le champ est refusé.
         nom = col1.text_input("Nom du médicament *", value=attente["nom"],
-                              placeholder="à recopier sur la boîte")
-        # Le dosage n'a plus de colonne à lui : il rejoint le nom dès
-        # l'enregistrement. Le champ reste, pour les produits saisis à la
-        # main dont le nom ne le porte pas.
-        dosage = col2.text_input("Dosage", value=attente["dosage"],
-                                 placeholder="facultatif",
-                                 help="Ajouté au nom du produit : les "
-                                      "dénominations officielles le "
-                                      "contiennent déjà.")
-        cip = col3.text_input("Code CIP", value=attente["cip"],
+                              placeholder="nom et dosage, comme sur la boîte")
+        cip = col2.text_input("Code CIP", value=attente["cip"],
                               placeholder="facultatif")
+        # Plus de champ « Dosage » : il fait partie du nom, partout. Celui
+        # qui vient d'un catalogue importé continue d'être repris ici, sans
+        # rien demander — il sera fondu dans le nom à l'enregistrement.
+        dosage = attente["dosage"]
 
         col4, col5, col6 = st.columns(3)
         boites = col4.number_input("Nombre de boîtes", min_value=0,
@@ -579,8 +575,14 @@ def _formulaire_complement(inventaire: pd.DataFrame,
                  "reconnu aux scans suivants.")
         return
     if peremption is None:
-        st.error("Date de péremption obligatoire et lisible "
-                 "(JJ/MM/AAAA ou MM/AAAA).")
+        st.error(
+            "**Date de péremption illisible.** Tapez les chiffres du mois et "
+            "de l'année : « 082027 » pour 08/2027, « 31082027 » pour une date "
+            f"complète. L'année doit rester entre "
+            f"{stock_ferme.ANNEE_PEREMPTION_MIN} et "
+            f"{stock_ferme.ANNEE_PEREMPTION_MAX} — au-delà, c'est une faute "
+            "de frappe, et une boîte qui périme en l'an 9999 ne se signale "
+            "jamais.")
         return
     if boites == 0 and unites_vrac == 0:
         st.error("Indiquez au moins une boîte ou des unités en vrac.")

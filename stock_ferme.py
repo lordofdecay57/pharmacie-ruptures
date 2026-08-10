@@ -71,6 +71,16 @@ STATUT_VIGILANCE = "🟡 < 6 mois"
 STATUT_OK = "🟢 OK"
 STATUT_INCONNU = "⚪ Sans date"
 
+#: Bornes d'une péremption plausible. Un stock fermé contient des boîtes
+#: périmées depuis longtemps (elles y sont pour être retirées) et des boîtes
+#: qui périment loin — mais pas en l'an 9999. Sans ces bornes, une faute de
+#: frappe sur l'année (« 31129999 », « 082207 ») passait sans un mot et la
+#: boîte s'affichait « 🟢 OK » pour toujours, en bas de la liste, invisible.
+#: Bornes ABSOLUES et non relatives au jour : la lecture d'un inventaire ne
+#: doit pas dépendre de la date à laquelle on l'ouvre.
+ANNEE_PEREMPTION_MIN = 1990
+ANNEE_PEREMPTION_MAX = 2099
+
 #: Ordres d'affichage de l'inventaire. Les deux répondent à deux gestes
 #: différents : la péremption pour décider ce qu'on retire, le nom pour
 #: retrouver un produit — sur l'écran comme sur la liste papier que l'on
@@ -350,6 +360,22 @@ def _peremption_chiffres_seuls(texte: str) -> Optional[tuple]:
     return None
 
 
+def _date_plausible(annee: int, mois: int, jour: int) -> Optional[date]:
+    """Date construite, ou ``None`` si elle n'a aucun sens pour une boîte.
+
+    ``jour = 0`` signifie « fin de mois » — la convention des boîtes, qui ne
+    portent qu'un mois et une année.
+    """
+    if not 1 <= mois <= 12:
+        return None
+    if not ANNEE_PEREMPTION_MIN <= annee <= ANNEE_PEREMPTION_MAX:
+        return None
+    try:
+        return date(annee, mois, jour or monthrange(annee, mois)[1])
+    except ValueError:
+        return None
+
+
 def parser_peremption_saisie(valeur) -> Optional[date]:
     """Péremption tapée au clavier : ``MM/AAAA``, ``JJ/MM/AAAA``, ``AAAA-MM``…
 
@@ -358,6 +384,10 @@ def parser_peremption_saisie(valeur) -> Optional[date]:
 
     Sans jour, on retient le DERNIER jour du mois : une boîte marquée
     « 03/2027 » est utilisable jusqu'au 31 mars 2027.
+
+    Une année hors des bornes plausibles est REFUSÉE plutôt que retenue :
+    mieux vaut faire retaper une date que laisser une boîte se croire bonne
+    jusqu'en l'an 9999.
     """
     if valeur in (None, ""):
         return None
@@ -369,13 +399,7 @@ def parser_peremption_saisie(valeur) -> Optional[date]:
     texte = str(valeur).strip()
     chiffres = _peremption_chiffres_seuls(texte)
     if chiffres:
-        annee, mois, jour = chiffres
-        if not 1 <= mois <= 12:
-            return None
-        try:
-            return date(annee, mois, jour or monthrange(annee, mois)[1])
-        except ValueError:
-            return None
+        return _date_plausible(*chiffres)
     for motif, ordre in (
         (r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$", "jma"),
         (r"^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$", "amj"),
@@ -397,12 +421,7 @@ def parser_peremption_saisie(valeur) -> Optional[date]:
             annee, mois, jour = int(g[0]), int(g[1]), 0
         else:  # MM/AA
             mois, annee, jour = int(g[0]), 2000 + int(g[1]), 0
-        if not 1 <= mois <= 12:
-            return None
-        try:
-            return date(annee, mois, jour or monthrange(annee, mois)[1])
-        except ValueError:
-            return None
+        return _date_plausible(annee, mois, jour)
     return None
 
 
