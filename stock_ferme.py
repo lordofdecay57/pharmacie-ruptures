@@ -317,8 +317,37 @@ def parser_code_scanne(brut: str) -> CodeScanne:
     return CodeScanne(brut=brut or "")
 
 
+def _peremption_chiffres_seuls(texte: str) -> Optional[tuple]:
+    """« 082027 » → (2027, 8, 0). Les barres obliques deviennent inutiles.
+
+    Taper les séparateurs coûte deux frappes par date, et il y en a une par
+    boîte : sur un inventaire complet, cela fait des centaines de frappes
+    pour rien. Les chiffres seuls suffisent — c'est d'ailleurs ce qui est
+    imprimé sur les cartons.
+
+    Six chiffres sont ambigus : ``082027`` est un mois suivi d'une année,
+    ``310827`` un jour, un mois et une année courte. On tranche par le sens
+    — un mois vaut au plus 12, une année tient entre 1900 et 2199.
+    """
+    if not texte.isdigit():
+        return None
+    if len(texte) == 8:                                   # JJMMAAAA
+        return int(texte[4:]), int(texte[2:4]), int(texte[:2])
+    if len(texte) == 6:
+        mois, annee = int(texte[:2]), int(texte[2:])
+        if 1 <= mois <= 12 and 1900 <= annee <= 2199:     # MMAAAA
+            return annee, mois, 0
+        return 2000 + int(texte[4:]), int(texte[2:4]), int(texte[:2])  # JJMMAA
+    if len(texte) == 4:                                   # MMAA
+        return 2000 + int(texte[2:]), int(texte[:2]), 0
+    return None
+
+
 def parser_peremption_saisie(valeur) -> Optional[date]:
     """Péremption tapée au clavier : ``MM/AAAA``, ``JJ/MM/AAAA``, ``AAAA-MM``…
+
+    Les séparateurs sont **facultatifs** : ``082027`` vaut ``08/2027``, et
+    ``31082027`` vaut ``31/08/2027``.
 
     Sans jour, on retient le DERNIER jour du mois : une boîte marquée
     « 03/2027 » est utilisable jusqu'au 31 mars 2027.
@@ -331,6 +360,15 @@ def parser_peremption_saisie(valeur) -> Optional[date]:
         return valeur.date()
 
     texte = str(valeur).strip()
+    chiffres = _peremption_chiffres_seuls(texte)
+    if chiffres:
+        annee, mois, jour = chiffres
+        if not 1 <= mois <= 12:
+            return None
+        try:
+            return date(annee, mois, jour or monthrange(annee, mois)[1])
+        except ValueError:
+            return None
     for motif, ordre in (
         (r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$", "jma"),
         (r"^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$", "amj"),

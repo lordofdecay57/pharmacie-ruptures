@@ -588,12 +588,20 @@ def _formulaire_complement(inventaire: pd.DataFrame,
             help="Comprimés restants d'une boîte entamée.")
 
         col7, col8 = st.columns([2, 2])
+        # Les barres obliques coûtent deux frappes par boîte, et il y a une
+        # date par boîte : sur un inventaire complet, cela fait des
+        # centaines de frappes pour rien. Les chiffres seuls suffisent —
+        # c'est d'ailleurs ce qui est imprimé sur les cartons.
         peremption_texte = col7.text_input(
             "Date de péremption *",
             value=(f"{attente['peremption']:%d/%m/%Y}"
                    if attente["peremption"] else ""),
-            placeholder="JJ/MM/AAAA ou MM/AAAA",
-            help="Obligatoire : c'est elle qui distingue deux boîtes du "
+            placeholder="082027 pour 08/2027 — sans les barres",
+            help="Tapez seulement les chiffres : « 082027 » pour une boîte "
+                 "marquée 08/2027 (elle vaut alors jusqu'au 31 août), "
+                 "« 31082027 » pour une date complète, « 0827 » en encore "
+                 "plus court. Avec les barres, ça marche aussi.\n\n"
+                 "Obligatoire : c'est elle qui distingue deux boîtes du "
                  "même médicament.")
         lot = col8.text_input("N° de lot", value=attente["lot"])
 
