@@ -174,6 +174,35 @@ class TestPeremptionSaisie:
     def test_formats_acceptes(self, saisie, attendu):
         assert parser_peremption_saisie(saisie) == attendu
 
+    @pytest.mark.parametrize("saisie,attendu", [
+        ("032027", date(2027, 3, 31)),      # MMAAAA — le cas courant
+        ("15032027", date(2027, 3, 15)),    # JJMMAAAA
+        ("0327", date(2027, 3, 31)),        # MMAA — le plus court
+        ("150327", date(2027, 3, 15)),      # JJMMAA
+        ("022028", date(2028, 2, 29)),      # année bissextile
+    ])
+    def test_les_barres_obliques_sont_facultatives(self, saisie, attendu):
+        """Deux frappes par boîte, une date par boîte : sur un inventaire
+        complet, taper les « / » fait des centaines de frappes pour rien."""
+        assert parser_peremption_saisie(saisie) == attendu
+
+    @pytest.mark.parametrize("saisie", [
+        "132027",          # ni mois 13, ni jour 13 + mois 20
+        "3400935955838",   # un code CIP tapé dans la mauvaise case
+        "00000000",
+        "3102",            # « mois » 31
+        "12345",           # longueur qui ne veut rien dire
+    ])
+    def test_chiffres_qui_ne_font_pas_une_date(self, saisie):
+        assert parser_peremption_saisie(saisie) is None
+
+    def test_six_chiffres_tranches_par_le_sens(self):
+        """« 082027 » est un mois puis une année ; « 310827 » un jour, un
+        mois et une année courte. Un mois vaut au plus 12 — cela suffit à
+        les distinguer sans rien demander."""
+        assert parser_peremption_saisie("082027") == date(2027, 8, 31)
+        assert parser_peremption_saisie("310827") == date(2027, 8, 31)
+
     def test_mois_invalide_refuse(self):
         assert parser_peremption_saisie("13/2027") is None
 

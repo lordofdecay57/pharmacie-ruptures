@@ -282,6 +282,22 @@ l'unité d'enregistrement est donc le **lot**, identifié par
 L'inventaire est toujours trié par péremption la plus proche : c'est l'ordre
 dans lequel on veut traiter les boîtes, et celui de la liste imprimée.
 
+**Les barres obliques sont facultatives.** Une date par boîte, deux frappes
+de `/` par date : sur un inventaire complet, cela fait des centaines de
+frappes pour rien. Les chiffres seuls suffisent — c'est d'ailleurs ce qui
+est imprimé sur les cartons.
+
+| Ce qu'on tape | Ce qui est retenu |
+|---|---|
+| `082027` · `0827` · `08/2027` | 31 août 2027 (fin de mois) |
+| `31082027` · `310827` · `31/08/2027` | 31 août 2027 |
+
+Six chiffres sont ambigus — `082027` est un mois suivi d'une année,
+`310827` un jour, un mois et une année courte. On tranche par le sens : un
+mois vaut au plus 12, une année tient entre 1900 et 2199. Ce qui ne fait
+pas une date (un code CIP tapé dans la mauvaise case, par exemple) est
+refusé plutôt que deviné.
+
 | Statut | Seuil | Signification |
 |---|---|---|
 | ⛔ Périmé | date dépassée | à retirer du stock |

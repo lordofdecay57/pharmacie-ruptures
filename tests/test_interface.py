@@ -427,6 +427,19 @@ class TestSaisieAssistee:
             "spinbutton", name="Unités par boîte",
             exact=True).input_value() == "8"
 
+    def test_la_peremption_s_ecrit_en_chiffres_seuls(self, page_avec_base):
+        """Une date par boîte, deux frappes de « / » par date : sur un
+        inventaire complet, cela fait des centaines de frappes pour rien.
+        « 082027 » doit valoir « 08/2027 », donc le 31 août."""
+        page_avec_base.get_by_role(
+            "textbox", name="Date de péremption").fill("082027")
+        page_avec_base.get_by_role("button", name="Ajouter au stock").click()
+        page_avec_base.wait_for_timeout(5000)
+        _sans_exception(page_avec_base)
+        contenu = page_avec_base.content()
+        assert "31/08/2027" in contenu, "la fin de mois doit être retenue"
+        assert "DOLIPRANE 1000 mg" in contenu
+
 
 class TestModeDemonstration:
     """Le jeu de démonstration fait tourner les deux modules cadencier de
