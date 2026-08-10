@@ -402,6 +402,21 @@ une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
 (périmés et moins d'un mois) permettent de retrouver une boîte sans faire
 défiler l'inventaire.
 
+**Classement** — deux ordres, pour deux gestes différents :
+
+| Ordre | À quelle question il répond |
+|---|---|
+| **Péremption (au plus proche)** — *par défaut* | « Que dois-je retirer ? » Ce qui périme demain arrive en tête, les lots sans date en queue |
+| **Nom (A → Z)** | « Où est ce produit dans ma liste ? » On parcourt l'inventaire produit par produit devant l'armoire |
+
+Le classement alphabétique ignore **accents et casse** — sans quoi
+« ÉLAVIL » se rangerait après « ZOLPIDEM ». À nom égal, la boîte qui périme
+la première reste en tête : c'est celle qu'on prend.
+
+Le choix **suit jusqu'au CSV et au PDF** — une liste papier qui contredit
+l'écran se relit en entier pour rien — et le PDF **annonce son classement**
+dans son en-tête.
+
 ### Impression
 
 La liste de stock s'exporte en **CSV** (`;` + BOM : Excel l'ouvre sans

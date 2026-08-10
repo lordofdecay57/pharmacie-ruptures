@@ -20,7 +20,8 @@ import pytest
 from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          STATUT_IMMINENT, STATUT_INCONNU, STATUT_OK,
                          STATUT_PERIME,
-                         STATUTS_A_TRAITER, STATUT_VIGILANCE,
+                         STATUTS_A_TRAITER, STATUT_VIGILANCE, TRIS, TRI_NOM,
+                         TRI_PEREMPTION,
                          ajouter_entree, charger_inventaire,
                          charger_repertoire, cip_depuis_gtin, cle_lot,
                          exporter_csv, exporter_pdf, filtrer_inventaire,
@@ -474,6 +475,116 @@ class TestInventaireAffichable:
         assert "nan" not in texte.lower() and "None" not in texte
         # Un produit sans CIP compte quand même comme une référence.
         assert resume_inventaire(brut, AUJOURDHUI)["references"] == 1
+
+
+class TestTriAlphabetique:
+    """Classer par nom : on parcourt l'inventaire devant l'armoire.
+
+    Le tri par péremption répond à « que dois-je retirer ? ». Il ne répond
+    pas à « où est ce produit dans ma liste ? » — d'où ce second ordre.
+    """
+
+    def _inventaire(self, produits):
+        inv = inventaire_vide()
+        for nom, peremption in produits:
+            inv = ajouter_entree(inv, _entree(nom=nom, peremption=peremption,
+                                              lot=f"{nom}-{peremption}"),
+                                 AUJOURDHUI)
+        return inv
+
+    def test_ordre_alphabetique(self):
+        inv = self._inventaire([("ZOLPIDEM", date(2026, 8, 5)),
+                                ("AMOXICILLINE", date(2028, 1, 31)),
+                                ("MORPHINE", date(2027, 3, 1))])
+        vue = inventaire_affichable(inv, AUJOURDHUI, TRI_NOM)
+        assert list(vue["Nom du produit"]) == [
+            "AMOXICILLINE", "MORPHINE", "ZOLPIDEM"]
+
+    def test_les_accents_ne_rejettent_pas_en_fin_de_liste(self):
+        """Sans normalisation, « ÉLAVIL » se range après « ZOLPIDEM » : un
+        classement qui ne suit pas l'ordre du dictionnaire ne sert à rien."""
+        inv = self._inventaire([("ZOLPIDEM", date(2027, 1, 1)),
+                                ("ÉLAVIL", date(2027, 1, 1)),
+                                ("AMOXICILLINE", date(2027, 1, 1))])
+        vue = inventaire_affichable(inv, AUJOURDHUI, TRI_NOM)
+        assert list(vue["Nom du produit"]) == [
+            "AMOXICILLINE", "ÉLAVIL", "ZOLPIDEM"]
+
+    def test_la_casse_est_ignoree(self):
+        inv = self._inventaire([("zolpidem", date(2027, 1, 1)),
+                                ("Amoxicilline", date(2027, 1, 1))])
+        vue = inventaire_affichable(inv, AUJOURDHUI, TRI_NOM)
+        assert list(vue["Nom du produit"]) == ["Amoxicilline", "zolpidem"]
+
+    def test_a_nom_egal_la_boite_qui_perime_la_premiere_reste_en_tete(self):
+        """C'est celle qu'on prend : l'ordre alphabétique ne doit pas faire
+        perdre le FEFO à l'intérieur d'un même produit."""
+        inv = self._inventaire([("MORPHINE", date(2028, 1, 31)),
+                                ("MORPHINE", date(2026, 8, 5)),
+                                ("MORPHINE", date(2027, 3, 1))])
+        vue = inventaire_affichable(inv, AUJOURDHUI, TRI_NOM)
+        assert list(vue["Péremption"]) == [
+            date(2026, 8, 5), date(2027, 3, 1), date(2028, 1, 31)]
+
+    def test_le_tri_par_peremption_reste_le_defaut(self):
+        """Ce qui périme demain doit sauter aux yeux sans rien régler."""
+        inv = self._inventaire([("AMOXICILLINE", date(2028, 1, 31)),
+                                ("ZOLPIDEM", date(2026, 8, 5))])
+        sans_choix = inventaire_affichable(inv, AUJOURDHUI)
+        explicite = inventaire_affichable(inv, AUJOURDHUI, TRI_PEREMPTION)
+        assert list(sans_choix["Nom du produit"]) == ["ZOLPIDEM",
+                                                      "AMOXICILLINE"]
+        assert list(explicite["Nom du produit"]) == list(
+            sans_choix["Nom du produit"])
+
+    def test_chaque_ordre_propose_range_vraiment_autrement(self):
+        """``TRIS`` est la liste offerte à l'écran, et l'interface s'en sert
+        pour distinguer ses tableaux : deux entrées qui donneraient le même
+        ordre seraient un réglage sans effet visible."""
+        inv = self._inventaire([("ZOLPIDEM", date(2026, 8, 5)),
+                                ("AMOXICILLINE", date(2028, 1, 31))])
+        ordres = {tri: tuple(inventaire_affichable(inv, AUJOURDHUI, tri)
+                             ["Nom du produit"]) for tri in TRIS}
+        assert len(set(ordres.values())) == len(TRIS)
+
+    def test_les_lots_sans_date_restent_en_dernier_par_peremption(self):
+        inv = self._inventaire([("AMOXICILLINE", None),
+                                ("ZOLPIDEM", date(2026, 8, 5))])
+        assert list(inventaire_affichable(inv, AUJOURDHUI)["Nom du produit"]
+                    ) == ["ZOLPIDEM", "AMOXICILLINE"]
+
+    def test_le_classement_suit_jusqu_au_filtre(self):
+        """Filtrer ne doit pas rebattre les lignes sous les yeux de qui
+        vient de choisir son classement."""
+        inv = self._inventaire([("ZOLPIDEM", date(2026, 8, 5)),
+                                ("AMOXICILLINE", date(2026, 8, 10)),
+                                ("MORPHINE", date(2026, 8, 1))])
+        vue = filtrer_inventaire(inv, statuts=STATUTS_A_TRAITER,
+                                 aujourdhui=AUJOURDHUI, tri=TRI_NOM)
+        assert list(vue["Nom du produit"]) == [
+            "AMOXICILLINE", "MORPHINE", "ZOLPIDEM"]
+
+    def test_le_classement_suit_jusqu_au_csv(self):
+        """La liste papier ne doit pas contredire l'écran."""
+        inv = self._inventaire([("ZOLPIDEM", date(2026, 8, 5)),
+                                ("AMOXICILLINE", date(2028, 1, 31))])
+        lignes = exporter_csv(inv, AUJOURDHUI, TRI_NOM).decode(
+            "utf-8-sig").splitlines()
+        assert lignes[1].split(";")[1] == "AMOXICILLINE"
+
+    def test_le_pdf_annonce_son_classement(self):
+        """La liste se parcourt devant l'armoire : savoir dans quel ordre
+        elle est rangée évite de la relire en entier."""
+        pdfplumber = pytest.importorskip("pdfplumber")
+        import io
+        inv = self._inventaire([("ZOLPIDEM", date(2026, 8, 5))])
+        with pdfplumber.open(io.BytesIO(
+                exporter_pdf(inv, "Stock fermé", AUJOURDHUI, TRI_NOM))) as pdf:
+            texte = pdf.pages[0].extract_text()
+        assert "Classement" in texte and "A-Z" in texte
+        # La flèche « → » du libellé d'écran n'existe pas dans les polices
+        # PDF standard : elle s'imprimerait en pavé noir.
+        assert "→" not in texte
 
 
 class TestFiltrerInventaire:
