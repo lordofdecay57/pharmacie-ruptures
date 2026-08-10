@@ -276,6 +276,27 @@ def index_par_nom(table: pd.DataFrame) -> list:
     return list(retenus.values())
 
 
+def noms_distincts(index: list) -> list:
+    """Dénominations, sans doublon, dans l'ordre alphabétique.
+
+    Destinée à la **saisie assistée** : la liste part telle quelle dans le
+    navigateur, qui la filtre à chaque frappe. Les présentations d'un même
+    médicament portent la même dénomination — les envoyer toutes
+    tripleraient la liste sans rien apprendre tant que le nom n'est pas
+    choisi.
+    """
+    return sorted({e["nom"] for e in (index or []) if e.get("nom")})
+
+
+def presentations_du_nom(index: list, nom: str) -> list:
+    """Présentations d'une dénomination donnée, de la plus petite boîte à la
+    plus grande — c'est l'ordre du rayon."""
+    exactes = [e for e in (index or []) if e.get("nom") == nom]
+    exactes.sort(key=lambda e: (e["unites_par_boite"] or 10 ** 6,
+                                e["presentation"]))
+    return exactes
+
+
 #: En dessous, la recherche ramènerait la moitié de la base : on attend que
 #: le terme soit assez discriminant pour valoir une liste.
 LONGUEUR_RECHERCHE_MINIMALE = 3

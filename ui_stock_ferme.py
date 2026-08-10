@@ -77,14 +77,23 @@ def _base_chargee() -> tuple:
                  if BASE_MEDICAMENTS_PATH.exists() else 0)
     if st.session_state.get("sf_base_empreinte") != empreinte:
         table = base_medicaments.charger_table(BASE_MEDICAMENTS_PATH)
+        table = base_medicaments.charger_table(BASE_MEDICAMENTS_PATH)
+        index_noms = base_medicaments.index_par_nom(table)
         st.session_state["sf_base_index"] = base_medicaments.index_par_cip(
             table)
-        st.session_state["sf_base_noms"] = base_medicaments.index_par_nom(
-            table)
+        st.session_state["sf_base_noms"] = index_noms
+        # Liste figée une fois pour toutes : c'est elle qui part dans le
+        # navigateur pour la saisie assistée. La recalculer à chaque
+        # interaction la rendrait « nouvelle » aux yeux de Streamlit, qui la
+        # renverrait en entier au lieu d'une simple référence.
+        st.session_state["sf_base_denominations"] = (
+            base_medicaments.noms_distincts(index_noms))
         st.session_state["sf_base_empreinte"] = empreinte
-        _journal.info("Base des médicaments : %d code(s), %d présentation(s)",
+        _journal.info("Base des médicaments : %d code(s), %d présentation(s), "
+                      "%d dénomination(s)",
                       len(st.session_state["sf_base_index"]),
-                      len(st.session_state["sf_base_noms"]))
+                      len(index_noms),
+                      len(st.session_state["sf_base_denominations"]))
     return (st.session_state["sf_base_index"],
             st.session_state["sf_base_noms"])
 
@@ -95,6 +104,11 @@ def _index_base() -> dict:
 
 def _index_noms() -> list:
     return _base_chargee()[1]
+
+
+def _denominations() -> list:
+    _base_chargee()
+    return st.session_state["sf_base_denominations"]
 
 
 def _enregistrer(inventaire=None, repertoire=None) -> None:
@@ -345,6 +359,65 @@ def _choisir_proposition(medicament: dict) -> None:
     st.session_state["sf_message"] = (
         "ok", f"{medicament['nom']} — il ne reste que la date de péremption "
               "à saisir.")
+
+
+def _nom_choisi_dans_la_liste() -> None:
+    """Un médicament vient d'être choisi dans la saisie assistée.
+
+    Une seule présentation : inutile de faire choisir entre une seule
+    proposition, on remplit directement la fiche. Plusieurs : on les
+    propose, c'est le conditionnement qui les distingue.
+    """
+    nom = st.session_state.get("sf_auto_nom")
+    # Remis à zéro tout de suite : sans cela, rechoisir le MÊME médicament
+    # après coup ne déclencherait rien, la valeur du menu n'ayant pas changé.
+    st.session_state["sf_auto_nom"] = None
+    if not nom:
+        return
+    presentations = base_medicaments.presentations_du_nom(_index_noms(), nom)
+    if not presentations:
+        return
+    st.session_state.setdefault("sf_en_attente", {
+        "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
+        "peremption": None, "lot": "", "brut": "", "reconnu": True})
+    if len(presentations) == 1:
+        _choisir_proposition(presentations[0])
+        return
+    # Le nom est acquis dès maintenant : le laisser vide pendant qu'on
+    # choisit le conditionnement donnerait l'impression que le clic n'a rien
+    # fait. Seuls le code CIP et les unités attendent la présentation.
+    st.session_state["sf_en_attente"]["nom"] = nom
+    st.session_state["sf_propositions"] = {
+        "saisi": nom, "terme": nom, "elargi": False,
+        "resultats": presentations}
+    st.session_state["sf_message"] = (
+        "ok", f"{nom} — {len(presentations)} conditionnements possibles, "
+              "choisissez le vôtre ci-dessous.")
+
+
+def _saisie_assistee() -> None:
+    """Liste déroulante cherchable : les propositions viennent à la frappe.
+
+    C'est le navigateur qui filtre, pas le serveur : les dénominations lui
+    sont envoyées une fois, et la liste se réduit **dès les premières
+    lettres**, sans validation ni aller-retour. Un champ texte ordinaire ne
+    peut pas le faire — Streamlit n'y réagit qu'à la validation, et l'écran
+    semblait alors ne rien faire.
+
+    Seules les dénominations sont envoyées (~14 000), pas les présentations
+    (~20 700) : trois fois moins de texte à filtrer à chaque frappe, pour la
+    même information tant que le médicament n'est pas choisi.
+    """
+    denominations = _denominations()
+    if not denominations:
+        return          # base absente : l'encadré ci-dessous le dit déjà
+    st.selectbox(
+        "Nom du médicament", denominations, index=None,
+        key="sf_auto_nom", on_change=_nom_choisi_dans_la_liste,
+        label_visibility="collapsed",
+        placeholder=f"🔎 Ou tapez les premières lettres du médicament "
+                    f"({len(denominations)} référencés) — les propositions "
+                    f"s'affichent aussitôt")
 
 
 def _preselection_par_nom() -> None:
@@ -898,16 +971,14 @@ def rendre(etape, tuile_kpi) -> None:
             "⌨️ Saisie manuelle", use_container_width=True,
             on_click=_saisie_manuelle_vierge,
             help="Enregistrer une boîte dont le code ne se lit pas.")
-        st.caption("Sans code lisible, **tapez le nom du médicament, puis "
-                   "appuyez sur Entrée** (ou cliquez sur « 🔎 Chercher ») : "
-                   "la base publique propose les présentations "
-                   "correspondantes. Rien ne se déclenche tant que la saisie "
-                   "n'est pas validée — la douchette, elle, valide toute "
-                   "seule.")
+        # La saisie assistée AVANT l'explication : c'est le geste, le reste
+        # n'est que du commentaire.
+        _saisie_assistee()
         st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le "
                    "code CIP, la date de péremption et le n° de lot. Un "
                    "code-barres linéaire ne donne que le CIP : la péremption "
-                   "reste à saisir.")
+                   "reste à saisir. Sans code lisible, cherchez le médicament "
+                   "par son nom dans la liste ci-dessus.")
     else:
         col_manuel.button(
             "⌨️ Sortie manuelle", use_container_width=True,
