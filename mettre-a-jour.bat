@@ -64,6 +64,12 @@ if %ERRORLEVEL% GEQ 8 (
 )
 python -m pip install -r requirements.txt --quiet
 
+REM  Icone du Bureau. Elle est aussi posee par lancer.bat, mais qui met a
+REM  jour depuis CE script ne passe jamais par lancer.bat : sans cet appel,
+REM  l'icone n'apparaitrait tout simplement jamais sur son poste.
+REM  /sipremier : rien a faire si elle a deja ete posee une fois.
+call "%~dp0creer-raccourci.bat" /silencieux /sipremier
+
 REM  Affiche la version qui vient d'etre installee : sans ce reperage, une
 REM  mise a jour qui n'a pas pris passe inapercue.
 REM  L'espace fait partie des delimiteurs, et %%~v retire les guillemets :

@@ -511,8 +511,25 @@ blanche fait aussitôt « autocollant ».
 - Elle n'est **pas** recréée toute seule à chaque démarrage : un témoin
   local (`.raccourci-bureau`) mémorise qu'elle a déjà été posée, pour
   qu'une suppression volontaire soit respectée.
+- Le témoin retient la **version**, pas un simple « déjà fait » : après un
+  changement de visuel, l'icône est reposée une fois. Sans cela, Windows
+  continuerait d'afficher l'ancien dessin, qu'il garde en cache.
 - Le Bureau est résolu par Windows lui-même, ce qui couvre les postes où il
-  est redirigé (OneDrive, profil itinérant).
+  est redirigé (OneDrive, profil itinérant). Si PowerShell est interdit par
+  la stratégie du poste, un raccourci Internet (`.url`, du texte brut)
+  prend le relais — et si tout échoue, le script le **dit** plutôt que de
+  laisser chercher.
+
+`lancer.bat` **et** `mettre-a-jour.bat` posent l'icône. Les deux, parce que
+`mettre-a-jour.bat` relance l'application lui-même : qui met à jour depuis
+ce script ne passe jamais par `lancer.bat`, et n'aurait jamais vu son
+icône apparaître.
+
+> ⚠️ `mettre-a-jour.bat` n'est **jamais remplacé** par une mise à jour (il
+> est en cours d'exécution pendant la copie des fichiers — voir
+> [Mise à jour automatique](#mise-à-jour-automatique)). Les postes déjà
+> installés ne reçoivent donc pas cet appel : sur ceux-là, un double-clic
+> sur `creer-raccourci.bat` suffit, une seule fois.
 
 Le fichier `pharmacie.ico` est **livré tout fait** dans le dépôt : le poste
 de la pharmacie n'a besoin d'aucune bibliothèque graphique. Il contient
