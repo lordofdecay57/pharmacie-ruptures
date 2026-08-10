@@ -404,11 +404,26 @@ une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
 (périmés et moins d'un mois) permettent de retrouver une boîte sans faire
 défiler l'inventaire.
 
-**Présélection par le nom** — un code illisible, une boîte reconditionnée,
-et il n'y a plus qu'à **taper le nom** dans le champ de scan, puis
-**Entrée** (ou le bouton « 🔎 Chercher » à côté). La douchette valide
-toute seule ; un nom tapé au clavier, non — sans validation le champ reste
-plein et rien ne se déclenche. La base publique répond alors par la liste
+**Saisie assistée** — un code illisible, une boîte reconditionnée, et il
+n'y a plus qu'à **taper les premières lettres** dans le menu sous le champ
+de scan : les médicaments correspondants s'affichent **aussitôt**, sans
+rien valider.
+
+Le filtrage se fait dans le **navigateur**, pas sur le serveur : les
+~14 400 dénominations lui sont envoyées une fois, puis chaque frappe filtre
+localement. Mesuré sur la base officielle complète : **218 ms** au premier
+caractère, **35 ms** au neuvième. Un champ texte ordinaire ne peut pas le
+faire — Streamlit n'y réagit qu'à la validation, et l'écran semble alors ne
+rien faire.
+
+Seules les **dénominations** partent dans le navigateur (~14 400), pas les
+présentations (~20 700) : trois fois moins de texte à filtrer à chaque
+frappe, pour la même information tant que le médicament n'est pas choisi.
+Une fois le nom retenu, ses conditionnements sont proposés — et s'il n'y en
+a qu'un, la fiche se remplit directement.
+
+Le champ de scan accepte aussi un nom tapé au clavier, suivi d'**Entrée**
+(ou du bouton « 🔎 Chercher »). La base publique répond alors par la liste
 des présentations correspondantes :
 
 ```

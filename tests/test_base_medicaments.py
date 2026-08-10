@@ -19,7 +19,8 @@ from base_medicaments import (COLONNES_BASE, anciennete_jours, charger_table,
                               chercher, chercher_par_nom, cip7_depuis_cip13,
                               construire_table, decoder, index_par_cip,
                               index_par_nom, info_base,
-                              preselectionner, sauver_table,
+                              noms_distincts, preselectionner,
+                              presentations_du_nom, sauver_table,
                               unites_par_boite)
 
 # Extraits authentiques des fichiers officiels (colonnes séparées par des
@@ -240,6 +241,61 @@ class TestRechercheParNom:
     def test_base_absente(self):
         assert index_par_nom(pd.DataFrame(columns=COLONNES_BASE)) == []
         assert chercher_par_nom([], "doliprane") == []
+
+
+class TestSaisieAssistee:
+    """Ce qui part dans le navigateur pour les propositions à la frappe.
+
+    Le filtrage se fait côté navigateur : la liste doit donc être aussi
+    courte que possible, et surtout STABLE d'un rendu à l'autre — une liste
+    reconstruite différemment serait renvoyée en entier à chaque
+    interaction.
+    """
+
+    def _index(self):
+        return index_par_nom(construire_table(CIS, CIP))
+
+    def test_une_seule_entree_par_denomination(self):
+        """Les présentations d'un même médicament portent le même nom : les
+        envoyer toutes tripleraient la liste sans rien apprendre."""
+        table = pd.DataFrame(
+            [{"Code CIP": "3400900000017", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette de 10 comprimés"},
+             {"Code CIP": "3400900000024", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette de 30 comprimés"}],
+            columns=COLONNES_BASE)
+        assert noms_distincts(index_par_nom(table)) == ["DOLIX 1 mg"]
+
+    def test_ordre_alphabetique_stable(self):
+        noms = noms_distincts(self._index())
+        assert noms == sorted(noms)
+        assert noms == noms_distincts(self._index())
+
+    def test_base_absente(self):
+        assert noms_distincts([]) == []
+
+    def test_presentations_d_un_nom(self):
+        presentations = presentations_du_nom(
+            self._index(), "DOLIPRANE 1000 mg, comprimé")
+        assert len(presentations) == 1
+        assert presentations[0]["cip"] == "3400935955838"
+
+    def test_presentations_de_la_plus_petite_boite_a_la_plus_grande(self):
+        """C'est l'ordre du rayon : on cherche « la boîte de 8 » avant « la
+        boîte de 100 »."""
+        table = pd.DataFrame(
+            [{"Code CIP": "3400900000017", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette de 100 comprimés"},
+             {"Code CIP": "3400900000024", "Nom du produit": "DOLIX 1 mg",
+              "Présentation": "plaquette de 8 comprimés"}],
+            columns=COLONNES_BASE)
+        tailles = [p["unites_par_boite"]
+                   for p in presentations_du_nom(index_par_nom(table),
+                                                 "DOLIX 1 mg")]
+        assert tailles == [8, 100]
+
+    def test_nom_inconnu(self):
+        assert presentations_du_nom(self._index(), "INEXISTANT") == []
 
 
 class TestDosesEquivalentes:

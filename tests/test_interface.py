@@ -48,23 +48,14 @@ def _attendre(port: int, delai: float = DEMARRAGE_MAX_S) -> bool:
     return False
 
 
-@pytest.fixture(scope="module")
-def application(tmp_path_factory):
-    """Streamlit lancé sur un port libre, sur des données JETABLES.
-
-    ``PHARMACIE_DONNEES`` déplace la configuration, l'historique et
-    l'inventaire du stock fermé dans un dossier temporaire. Sans cette
-    variable, ces fichiers vivent à côté du programme (et non dans le
-    répertoire de lancement) : le test lirait — et écraserait — les données
-    réelles de la pharmacie.
-    """
+def _lancer(travail: Path):
+    """Streamlit sur un port libre, sur le dossier de données donné."""
     pytest.importorskip("streamlit")
     pytest.importorskip("playwright")
     if not Path(NAVIGATEUR).exists():
         pytest.skip("navigateur Playwright absent")
 
     port = _port_libre()
-    travail = tmp_path_factory.mktemp("appli")
     environnement = dict(os.environ, PHARMACIE_DONNEES=str(travail))
     processus = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", str(RACINE / "app.py"),
@@ -86,6 +77,40 @@ def application(tmp_path_factory):
             processus.kill()
 
 
+@pytest.fixture(scope="module")
+def application(tmp_path_factory):
+    """Streamlit lancé sur des données JETABLES, sans base publique.
+
+    ``PHARMACIE_DONNEES`` déplace la configuration, l'historique et
+    l'inventaire du stock fermé dans un dossier temporaire. Sans cette
+    variable, ces fichiers vivent à côté du programme (et non dans le
+    répertoire de lancement) : le test lirait — et écraserait — les données
+    réelles de la pharmacie.
+    """
+    yield from _lancer(tmp_path_factory.mktemp("appli"))
+
+
+@pytest.fixture(scope="module")
+def application_avec_base(tmp_path_factory):
+    """Même chose, mais avec une base publique minuscule déjà installée.
+
+    La saisie assistée n'existe QUE si la base est là : sans elle, il n'y a
+    rien à proposer et le menu ne s'affiche pas. Il faut donc une seconde
+    application pour la voir à l'œuvre.
+    """
+    travail = tmp_path_factory.mktemp("appli_base")
+    (travail / "base_medicaments.csv").write_text(
+        "Code CIP;Nom du produit;Présentation\n"
+        "3400935955838;DOLIPRANE 1000 mg, comprimé;"
+        "plaquette de 8 comprimés\n"
+        "3400956369553;DOLIPRANE 1000 mg, comprimé;"
+        "plaquette de 100 comprimés\n"
+        "3400949497294;ANASTROZOLE ACCORD 1 mg, comprimé pelliculé;"
+        "plaquette de 30 comprimés\n",
+        encoding="utf-8-sig")
+    yield from _lancer(travail)
+
+
 def _ouvrir(page, url: str) -> list:
     """Charge la page et renvoie les erreurs JavaScript observées.
 
@@ -103,13 +128,37 @@ def _ouvrir(page, url: str) -> list:
 
 
 @pytest.fixture(scope="module")
-def page(application):
+def pilote():
+    """Un SEUL Playwright pour tout le module.
+
+    Deux contextes ``sync_playwright`` ouverts en même temps dans le même
+    fil refusent de démarrer : les navigateurs des différentes applications
+    testées doivent donc partager celui-ci.
+    """
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        navigateur = p.chromium.launch(executable_path=NAVIGATEUR)
-        onglet = navigateur.new_page(viewport={"width": 1400, "height": 1000})
-        yield onglet
-        navigateur.close()
+        yield p
+
+
+@pytest.fixture(scope="module")
+def page(application, pilote):
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1400, "height": 1000})
+    yield onglet
+    navigateur.close()
+
+
+@pytest.fixture(scope="module")
+def page_avec_base(application_avec_base, pilote):
+    """Onglet ouvert sur l'espace « stock fermé », base publique installée."""
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1400, "height": 1100})
+    onglet.goto(application_avec_base, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    onglet.get_by_text(ESPACE_STOCK_FERME).first.click()
+    onglet.wait_for_timeout(6000)
+    yield onglet
+    navigateur.close()
 
 
 def _sans_exception(page) -> None:
@@ -315,6 +364,68 @@ class TestEspaceStockFerme:
         assert "Entrée" in _onglet_actif(page, "sf_mode")
         assert page.get_by_role("button",
                                 name="Saisie manuelle").first.is_enabled()
+
+
+class TestSaisieAssistee:
+    """Les propositions doivent venir **à la frappe**, sans rien valider.
+
+    C'est la demande à laquelle un champ texte ordinaire ne pouvait pas
+    répondre : Streamlit n'y réagit qu'à la validation. Le menu déroulant
+    cherchable, lui, filtre dans le navigateur — ce test le vérifie en
+    tapant caractère par caractère, sans jamais presser Entrée.
+    """
+
+    def test_le_menu_est_present(self, page_avec_base):
+        _sans_exception(page_avec_base)
+        assert page_avec_base.locator(".st-key-sf_auto_nom").count() == 1
+
+    def test_les_propositions_arrivent_a_la_frappe(self, page_avec_base):
+        champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
+        champ.click()
+        page_avec_base.wait_for_selector("[role='option']", timeout=15000)
+        depart = page_avec_base.locator("[role='option']").all_inner_texts()
+        # Liste ouverte, rien de tapé : ordre alphabétique.
+        assert depart[0].startswith("ANASTROZOLE"), depart
+        # Les deux présentations du Doliprane portent la MÊME dénomination :
+        # une seule entrée, tant que le nom n'est pas choisi.
+        assert len(depart) == 2, depart
+
+        for lettre in "DOLI":
+            champ.press(lettre)
+        # Le tri de Streamlit est APPROXIMATIF : il fait remonter ce qui
+        # correspond sans forcément écarter le reste (« DOLI » se retrouve
+        # lettre à lettre dans « ...accorD... cOmprimé peLlIculé »). Ce qui
+        # compte, et ce que voit l'utilisateur, c'est que le bon médicament
+        # passe en tête — sans avoir rien validé.
+        page_avec_base.wait_for_function(
+            "document.querySelectorAll(\"[role='option']\")[0]"
+            ".textContent.includes('DOLIPRANE')", timeout=15000)
+        _sans_exception(page_avec_base)
+
+    def test_choisir_un_nom_propose_ses_conditionnements(self, page_avec_base):
+        page_avec_base.locator("[role='option']").first.click()
+        page_avec_base.wait_for_timeout(5000)
+        _sans_exception(page_avec_base)
+        contenu = page_avec_base.content()
+        assert "conditionnements possibles" in contenu
+        # Le nom est acquis tout de suite : le laisser vide pendant qu'on
+        # choisit la boîte donnerait l'impression que le clic n'a rien fait.
+        assert page_avec_base.get_by_role(
+            "textbox", name="Nom du médicament").input_value() == \
+            "DOLIPRANE 1000 mg, comprimé"
+
+    def test_choisir_le_conditionnement_remplit_cip_et_unites(self, page_avec_base):
+        page_avec_base.get_by_role("button", name="Utiliser ce médicament").click()
+        page_avec_base.wait_for_timeout(5000)
+        _sans_exception(page_avec_base)
+        # « exact » : la recherche de l'inventaire, plus bas, contient aussi
+        # « code CIP » dans son libellé.
+        assert page_avec_base.get_by_role(
+            "textbox", name="Code CIP",
+            exact=True).input_value() == "3400935955838"
+        assert page_avec_base.get_by_role(
+            "spinbutton", name="Unités par boîte",
+            exact=True).input_value() == "8"
 
 
 class TestModeDemonstration:
