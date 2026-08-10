@@ -18,6 +18,7 @@ ICONE = RACINE / "pharmacie.ico"
 APERCU = RACINE / "pharmacie.png"
 SCRIPT = RACINE / "creer-raccourci.bat"
 LANCEUR = RACINE / "lancer.bat"
+MISE_A_JOUR = RACINE / "mettre-a-jour.bat"
 
 #: Doit rester identique à ``outils/creer_icone.py``.
 TAILLES_ATTENDUES = {16, 24, 32, 48, 64, 128, 256}
@@ -89,13 +90,38 @@ class TestScriptDeRaccourci:
         assert "lancer.bat" in texte
         assert "pharmacie.ico" in texte
 
-    def test_bureau_resolu_par_windows(self):
+    def test_bureau_resolu_par_windows_en_premier(self):
         """Un chemin en dur ``%USERPROFILE%\\Desktop`` rate les postes dont
         le Bureau est redirigé (OneDrive, profil itinérant) : le raccourci
-        atterrit dans un dossier que l'utilisateur ne voit jamais."""
+        atterrit dans un dossier que l'utilisateur ne voit jamais. Il ne
+        sert donc que de repli, après la méthode qui interroge Windows."""
+        lignes = self._texte(avec_commentaires=False).splitlines()
+        officiel = [i for i, l in enumerate(lignes)
+                    if "GetFolderPath('Desktop')" in l]
+        repli = [i for i, l in enumerate(lignes)
+                 if "%USERPROFILE%\\Desktop" in l]
+        assert officiel, "le Bureau doit être demandé à Windows"
+        assert not repli or min(repli) > max(officiel), (
+            "le chemin en dur passe avant la méthode fiable")
+
+    def test_repli_sans_powershell(self):
+        """Certains postes d'officine interdisent PowerShell par stratégie
+        de groupe. Sans repli, l'icône n'apparaît jamais et personne ne sait
+        pourquoi."""
         instructions = self._texte(avec_commentaires=False)
-        assert "GetFolderPath('Desktop')" in instructions
-        assert "%USERPROFILE%\\Desktop" not in instructions
+        assert "[InternetShortcut]" in instructions
+        assert "IconFile=" in instructions
+
+    def test_l_echec_est_annonce_meme_en_silencieux(self):
+        """Une icône absente sans un mot d'explication fait chercher
+        longtemps : le message d'échec est hors du bloc « si non
+        silencieux », seule la pause y reste."""
+        lignes = self._texte(avec_commentaires=False).splitlines()
+        echec = [i for i, l in enumerate(lignes) if l.strip() == ":echec"]
+        assert echec, "il faut une étiquette :echec"
+        suite = "\n".join(lignes[echec[0]:])
+        assert "[ATTENTION]" in suite
+        assert "if not defined SILENCE pause" in suite
 
     def test_guillemets_equilibres(self):
         """Un guillemet orphelin dans un .bat ne se voit qu'à l'exécution,
@@ -113,18 +139,42 @@ class TestScriptDeRaccourci:
 
 
 class TestPremierLancement:
-    """L'icône doit apparaître sans que personne ait à chercher un script."""
+    """L'icône doit apparaître sans que personne ait à chercher un script.
 
-    def test_le_lanceur_cree_l_icone(self):
-        texte = LANCEUR.read_text(encoding="utf-8", errors="replace")
-        assert "creer-raccourci.bat" in texte
-        assert "/silencieux" in texte
+    Elle a d'abord manqué à l'appel sur un poste réel : `lancer.bat` la
+    posait, mais qui met à jour depuis `mettre-a-jour.bat` — lequel relance
+    l'application lui-même — ne passe jamais par `lancer.bat`. Les DEUX
+    chemins d'entrée doivent donc la poser.
+    """
 
-    def test_une_seule_fois(self):
-        """Un témoin évite qu'une icône supprimée volontairement revienne à
-        chaque démarrage."""
-        texte = LANCEUR.read_text(encoding="utf-8", errors="replace")
+    @pytest.mark.parametrize("script", [LANCEUR, MISE_A_JOUR],
+                             ids=lambda p: p.name)
+    def test_les_deux_chemins_posent_l_icone(self, script):
+        texte = script.read_text(encoding="utf-8", errors="replace")
+        assert "creer-raccourci.bat" in texte, (
+            f"{script.name} ne pose pas l'icône du Bureau")
+        assert "/silencieux" in texte, "l'appel automatique doit être discret"
+        assert "/sipremier" in texte, (
+            "sans /sipremier, une icône supprimée volontairement reviendrait")
+
+    def test_le_temoin_retient_la_version(self):
+        """Windows met les icônes en cache : après un changement de visuel,
+        le Bureau continue d'afficher l'ancien dessin tant que le raccourci
+        n'est pas réécrit. Le témoin porte donc la version, pas un simple
+        « déjà fait »."""
+        texte = SCRIPT.read_text(encoding="utf-8", errors="replace")
+        assert "VERSION_APP" in texte, "le témoin doit lire la version"
+        assert '"%DEJA%"=="%VER%"' in texte
+
+    def test_le_temoin_est_gere_par_un_seul_script(self):
+        """Le témoin appartient à creer-raccourci.bat : dupliquer sa gestion
+        dans chaque appelant, c'est se garantir qu'un des deux l'oublie."""
+        texte = SCRIPT.read_text(encoding="utf-8", errors="replace")
         assert ".raccourci-bureau" in texte
+        for appelant in (LANCEUR, MISE_A_JOUR):
+            contenu = appelant.read_text(encoding="utf-8", errors="replace")
+            assert ".raccourci-bureau" not in contenu, (
+                f"{appelant.name} ne doit pas manipuler le témoin lui-même")
 
     def test_le_temoin_reste_local_au_poste(self):
         """Il ne doit ni être versionné ni voyager dans une mise à jour."""

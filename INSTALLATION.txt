@@ -66,10 +66,11 @@ ETAPE 2 - Lancer l'utilitaire pour la premiere fois
    que vous utiliserez desormais - plus besoin de revenir dans ce
    dossier.
 
-Si l'icone n'apparait pas (poste verrouille par l'informatique,
-par exemple), double-cliquez sur "creer-raccourci.bat" dans ce
-dossier. En dernier recours, faites-la a la main : clic droit sur
-lancer.bat, puis "Envoyer vers" > "Bureau (creer un raccourci)".
+Si l'icone n'apparait pas, double-cliquez sur
+"creer-raccourci.bat" dans ce dossier : il la pose et vous dit ce
+qui s'est passe. En dernier recours, faites-la a la main : clic
+droit sur lancer.bat, puis "Envoyer vers" > "Bureau (creer un
+raccourci)".
 
 
 ---------------------------------------------------------------
