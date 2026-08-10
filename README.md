@@ -405,8 +405,11 @@ une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
 défiler l'inventaire.
 
 **Présélection par le nom** — un code illisible, une boîte reconditionnée,
-et il n'y a plus qu'à **taper le nom** dans le champ de scan. La base
-publique répond par la liste des présentations correspondantes :
+et il n'y a plus qu'à **taper le nom** dans le champ de scan, puis
+**Entrée** (ou le bouton « 🔎 Chercher » à côté). La douchette valide
+toute seule ; un nom tapé au clavier, non — sans validation le champ reste
+plein et rien ne se déclenche. La base publique répond alors par la liste
+des présentations correspondantes :
 
 ```
 DOLIPRANE 1000 mg, comprimé — plaquette(s) PVC-aluminium de 8 comprimé(s) · 8 unités/boîte

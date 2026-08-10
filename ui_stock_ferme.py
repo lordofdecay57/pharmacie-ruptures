@@ -869,14 +869,27 @@ def rendre(etape, tuile_kpi) -> None:
     if mode is None:  # premier rendu suivant une déselection
         mode = st.session_state.get("sf_mode_choisi", MODE_ENTREE)
     st.session_state["sf_mode_choisi"] = mode
-    col_scan, col_manuel = st.columns([3, 1])
+    # Un bouton « Chercher » à côté du champ, en plus de la touche Entrée.
+    # La douchette valide toute seule ; un nom tapé au clavier, non — et le
+    # champ restait alors plein sans que rien ne se passe. C'est exactement
+    # ce qui s'est produit en officine : « DOLIPRA » écrit, aucune réaction.
+    if mode == MODE_ENTREE:
+        col_scan, col_valider, col_manuel = st.columns([4, 1.3, 1.7])
+    else:
+        col_scan, col_manuel = st.columns([3, 1])
+        col_valider = None
     col_scan.text_input(
         "Code scanné", key="sf_scan", on_change=_traiter_scan,
         placeholder=("Douchez la boîte à ajouter — ou tapez un nom de "
-                     "médicament" if mode == MODE_ENTREE
-                     else "Douchez la boîte à sortir")
-                    + " (le champ se vide tout seul)",
+                     "médicament puis Entrée" if mode == MODE_ENTREE
+                     else "Douchez la boîte à sortir"
+                          " (le champ se vide tout seul)"),
         label_visibility="collapsed")
+    if col_valider is not None:
+        col_valider.button("🔎 Chercher", use_container_width=True,
+                           on_click=_traiter_scan,
+                           help="Valide ce qui est écrit dans le champ — "
+                                "même chose que la touche Entrée.")
     # Le bouton de droite sert dans LES DEUX sens. Il était désactivé en
     # mode Sortie : une étiquette illisible, et il n'existait plus aucune
     # façon de retirer une boîte.
@@ -885,12 +898,16 @@ def rendre(etape, tuile_kpi) -> None:
             "⌨️ Saisie manuelle", use_container_width=True,
             on_click=_saisie_manuelle_vierge,
             help="Enregistrer une boîte dont le code ne se lit pas.")
+        st.caption("Sans code lisible, **tapez le nom du médicament, puis "
+                   "appuyez sur Entrée** (ou cliquez sur « 🔎 Chercher ») : "
+                   "la base publique propose les présentations "
+                   "correspondantes. Rien ne se déclenche tant que la saisie "
+                   "n'est pas validée — la douchette, elle, valide toute "
+                   "seule.")
         st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le "
                    "code CIP, la date de péremption et le n° de lot. Un "
                    "code-barres linéaire ne donne que le CIP : la péremption "
-                   "reste à saisir. Sans code lisible, **tapez le nom du "
-                   "médicament** : la base publique propose les "
-                   "présentations correspondantes.")
+                   "reste à saisir.")
     else:
         col_manuel.button(
             "⌨️ Sortie manuelle", use_container_width=True,
