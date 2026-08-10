@@ -516,6 +516,47 @@ def retirer_entree(inventaire: pd.DataFrame, cip: str, nom: str,
     return inventaire.reset_index(drop=True)
 
 
+def lots_sortables(inventaire: pd.DataFrame,
+                   aujourdhui: Optional[date] = None,
+                   tri: str = TRI_PEREMPTION) -> list:
+    """Boîtes réellement sortables, décrites une par une.
+
+    Sert la **sortie manuelle** : une douchette ne lit pas tout (étiquette
+    abîmée, boîte reconditionnée, produit sans code), et il faut alors
+    pouvoir désigner la boîte dans une liste. Chaque entrée porte de quoi
+    appeler ``retirer_entree`` et de quoi se relire à l'écran.
+
+    Les lignes à zéro boîte sont écartées : les proposer serait promettre
+    une sortie impossible.
+    """
+    tableau = inventaire_affichable(inventaire, aujourdhui, tri)
+    lots = []
+    for _, ligne in tableau.iterrows():
+        boites = int(pd.to_numeric(ligne["Boîtes"], errors="coerce") or 0)
+        if boites <= 0:
+            continue
+        peremption = ligne["Péremption"]
+        details = [f"{peremption:%d/%m/%Y}" if peremption else "sans date"]
+        if _texte(ligne["Lot"]):
+            details.append(f"lot {_texte(ligne['Lot'])}")
+        details.append(f"{boites} boîte(s)")
+        nom_complet = " ".join(
+            p for p in (_texte(ligne["Nom du produit"]),
+                        _texte(ligne["Dosage"])) if p)
+        lots.append({
+            "cip": _texte(ligne["Code CIP"]),
+            "nom": _texte(ligne["Nom du produit"]),
+            "dosage": _texte(ligne["Dosage"]),
+            "peremption": peremption,
+            "lot": _texte(ligne["Lot"]),
+            "boites": boites,
+            "statut": ligne["Statut"],
+            "libelle": f"{ligne['Statut']}  {nom_complet} — "
+                       + " · ".join(details),
+        })
+    return lots
+
+
 def lot_a_sortir(inventaire: pd.DataFrame, cip: str = "", nom: str = "",
                  peremption: Optional[date] = None,
                  lot: str = "") -> Optional[dict]:

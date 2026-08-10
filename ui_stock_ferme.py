@@ -131,7 +131,9 @@ def _traiter_sortie(code, inventaire) -> None:
         st.session_state["sf_message"] = (
             "avertissement",
             f"Sortie impossible : « {code.cip or code.brut} » n'est pas à "
-            "l'inventaire. Vérifiez le code, ou passez en mode Entrée.")
+            "l'inventaire. Vérifiez le code, choisissez la boîte avec "
+            "« ⌨️ Sortie manuelle », ou passez en mode Entrée pour "
+            "l'enregistrer.")
         return
 
     _enregistrer(inventaire=stock_ferme.retirer_entree(
@@ -172,9 +174,8 @@ def _traiter_scan() -> None:
         if not code.reconnu:
             st.session_state["sf_message"] = (
                 "avertissement",
-                f"Code non reconnu : « {code.brut} ». Une sortie se fait par "
-                "scan ; pour un produit sans code, supprimez la ligne dans "
-                "le tableau.")
+                f"Code non reconnu : « {code.brut} ». Utilisez « ⌨️ Sortie "
+                "manuelle » pour choisir la boîte dans la liste.")
             return
         _traiter_sortie(code, inventaire)
         return
@@ -256,6 +257,69 @@ def _saisie_manuelle_vierge() -> None:
         "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
         "peremption": None, "lot": "", "brut": "", "reconnu": True}
     st.session_state["sf_message"] = None
+
+
+def _basculer_sortie_manuelle() -> None:
+    """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
+    st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
+        "sf_sortie_manuelle", False)
+    st.session_state["sf_message"] = None
+
+
+def _passer_en_entree() -> None:
+    """Bascule en mode Entrée depuis un message d'aide.
+
+    Les deux clés bougent ensemble : ``sf_mode`` est celle du sélecteur,
+    ``sf_mode_choisi`` la mémoire qui survit à une déselection.
+    """
+    st.session_state["sf_mode"] = MODE_ENTREE
+    st.session_state["sf_mode_choisi"] = MODE_ENTREE
+    st.session_state["sf_sortie_manuelle"] = False
+
+
+def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
+                             tri: str) -> None:
+    """Retirer une boîte en la désignant dans la liste, sans douchette.
+
+    Une étiquette abîmée, une boîte reconditionnée, un produit sans
+    code-barres : la douchette ne lit pas tout, et il n'y avait alors
+    aucune façon de sortir une boîte — le bouton de saisie manuelle était
+    purement et simplement désactivé en mode Sortie.
+    """
+    lots = stock_ferme.lots_sortables(inventaire, aujourdhui, tri)
+    if not lots:
+        st.info("Aucune boîte à sortir : l'inventaire est vide.")
+        return
+
+    with st.container(border=True):
+        st.markdown("**Choisissez la boîte à sortir**")
+        choix = st.selectbox(
+            "Boîte à sortir", range(len(lots)),
+            format_func=lambda i: lots[i]["libelle"],
+            key="sf_sortie_choix", label_visibility="collapsed")
+        lot = lots[choix]
+        colonne_nombre, colonne_bouton = st.columns([1, 2])
+        # Le maximum est le stock du lot : proposer davantage, c'est
+        # promettre une sortie que l'inventaire ne peut pas honorer.
+        combien = colonne_nombre.number_input(
+            "Boîtes à retirer", min_value=1, max_value=lot["boites"],
+            value=1, step=1, key="sf_sortie_combien")
+        colonne_bouton.markdown("<div style='height:1.8rem'></div>",
+                                unsafe_allow_html=True)
+        if colonne_bouton.button("➖ Retirer du stock", type="primary",
+                                 use_container_width=True):
+            _enregistrer(inventaire=stock_ferme.retirer_entree(
+                inventaire, lot["cip"], lot["nom"], lot["peremption"],
+                lot["lot"], boites=int(combien)))
+            reste = lot["boites"] - int(combien)
+            peremption = (f"{lot['peremption']:%d/%m/%Y}" if lot["peremption"]
+                          else "sans date")
+            st.session_state["sf_message"] = (
+                "ok", f"➖ {lot['nom']} {lot['dosage']} — {int(combien)} "
+                      f"boîte(s) sortie(s) ({peremption}) · reste {reste} "
+                      "boîte(s) sur ce lot.")
+            st.session_state["sf_sortie_manuelle"] = False
+            st.rerun()
 
 
 def _detail_code(brut: str) -> str:
@@ -674,19 +738,39 @@ def rendre(etape, tuile_kpi) -> None:
                      else "Douchez la boîte à sortir")
                     + " (le champ se vide tout seul)",
         label_visibility="collapsed")
-    col_manuel.button("⌨️ Saisie manuelle", use_container_width=True,
-                      disabled=mode == MODE_SORTIE,
-                      on_click=_saisie_manuelle_vierge)
+    # Le bouton de droite sert dans LES DEUX sens. Il était désactivé en
+    # mode Sortie : une étiquette illisible, et il n'existait plus aucune
+    # façon de retirer une boîte.
     if mode == MODE_ENTREE:
+        col_manuel.button(
+            "⌨️ Saisie manuelle", use_container_width=True,
+            on_click=_saisie_manuelle_vierge,
+            help="Enregistrer une boîte dont le code ne se lit pas.")
         st.caption("Le Data Matrix des boîtes récentes fournit d'un coup le "
                    "code CIP, la date de péremption et le n° de lot. Un "
                    "code-barres linéaire ne donne que le CIP : la péremption "
                    "reste à saisir.")
     else:
+        col_manuel.button(
+            "⌨️ Sortie manuelle", use_container_width=True,
+            on_click=_basculer_sortie_manuelle,
+            help="Choisir la boîte à retirer dans la liste, sans douchette.")
         st.caption("Chaque scan retire **une boîte**. Le Data Matrix désigne "
                    "la boîte exacte ; un code-barres linéaire ne donne que le "
                    "produit, et c'est alors le lot qui **périme le plus tôt** "
                    "qui sort.")
+
+    if mode == MODE_SORTIE:
+        tri_courant = st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION)
+        if inventaire is None or inventaire.empty:
+            # Sortir d'un inventaire vide ne peut que rater : chaque scan
+            # répondait « ce produit n'est pas à l'inventaire », et le seul
+            # autre bouton était grisé. Impasse complète.
+            st.info("L'inventaire est vide : il n'y a rien à sortir. "
+                    "Enregistrez d'abord vos boîtes en mode Entrée.")
+            st.button("➕ Passer en Entrée", on_click=_passer_en_entree)
+        elif st.session_state.get("sf_sortie_manuelle"):
+            _panneau_sortie_manuelle(inventaire, aujourdhui, tri_courant)
 
     if mode == MODE_ENTREE:
         _base_publique()
