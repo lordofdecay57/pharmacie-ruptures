@@ -421,7 +421,23 @@ qu'à la boîte qu'on a en main.
 
 La recherche accepte plusieurs mots dans le désordre (« 1000 doliprane »),
 ignore accents et casse, et fait remonter d'abord les noms qui
-**commencent** par le terme tapé. Le nombre d'unités n'est déduit que
+**commencent** par le terme tapé.
+
+Deux points la rendent utilisable au comptoir plutôt que théoriquement
+correcte :
+
+- **les doses sont ramenées au milligramme des deux côtés.** La base
+  officielle écrit « DOLIPRANE **1000 mg** » ; à l'officine on dit
+  « Doliprane **1 g** ». `1 g`, `1g`, `1 gramme`, `1000 mg`, `1000mg` et
+  `1000 milligrammes` désignent donc la même chose — de même que
+  `500 microgrammes` et `0,5 mg` ;
+- **un mot de trop ne vide pas la liste.** « Doliprane 1 g boîte bleue »
+  n'existe dans aucune dénomination officielle : les mots sont abandonnés
+  par la fin jusqu'à trouver, et l'écran indique ce qui a réellement servi.
+
+Et quand il n'y a vraiment rien, l'écran le **dit** — en distinguant « ce
+nom est introuvable » de « la base n'est pas installée ». Une liste vide
+sans un mot ressemble à une application qui ne réagit pas. Le nombre d'unités n'est déduit que
 lorsqu'il est certain : forme dénombrable (comprimés, gélules, sachets…),
 un seul nombre possible, multiplicateur de tête pris en compte
 (« 3 piluliers de 30 comprimés » = 90). Dans le doute, la case reste à 0 —
