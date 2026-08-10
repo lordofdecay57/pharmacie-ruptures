@@ -367,57 +367,64 @@ class TestEspaceStockFerme:
 
 
 class TestSaisieAssistee:
-    """Les propositions doivent venir **à la frappe**, sans rien valider.
+    """Tout se choisit dans UNE liste, à la frappe, sans rien valider.
 
-    C'est la demande à laquelle un champ texte ordinaire ne pouvait pas
-    répondre : Streamlit n'y réagit qu'à la validation. Le menu déroulant
-    cherchable, lui, filtre dans le navigateur — ce test le vérifie en
-    tapant caractère par caractère, sans jamais presser Entrée.
+    Deux exigences successives de la pharmacie : les propositions doivent
+    venir dès les premières lettres (un champ texte Streamlit ne réagit
+    qu'à la validation), et le nom, le dosage et le conditionnement doivent
+    tenir sur la même ligne — plus de second écran « Médicaments trouvés »
+    à confirmer.
     """
 
     def test_le_menu_est_present(self, page_avec_base):
         _sans_exception(page_avec_base)
         assert page_avec_base.locator(".st-key-sf_auto_nom").count() == 1
 
-    def test_les_propositions_arrivent_a_la_frappe(self, page_avec_base):
+    def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
         champ.click()
         page_avec_base.wait_for_selector("[role='option']", timeout=15000)
         depart = page_avec_base.locator("[role='option']").all_inner_texts()
-        # Liste ouverte, rien de tapé : ordre alphabétique.
-        assert depart[0].startswith("ANASTROZOLE"), depart
-        # Les deux présentations du Doliprane portent la MÊME dénomination :
-        # une seule entrée, tant que le nom n'est pas choisi.
-        assert len(depart) == 2, depart
+        # Une entrée par BOÎTE : le Doliprane a deux conditionnements.
+        assert len(depart) == 3, depart
+        assert any("boîte de 8" in p for p in depart), depart
+        assert any("boîte de 100" in p for p in depart), depart
+        # L'emballage n'apparaît pas : il allongerait la liste sans rien
+        # apprendre.
+        assert not any("plaquette" in p for p in depart), depart
 
+    def test_les_propositions_arrivent_a_la_frappe(self, page_avec_base):
+        champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
         for lettre in "DOLI":
             champ.press(lettre)
         # Le tri de Streamlit est APPROXIMATIF : il fait remonter ce qui
-        # correspond sans forcément écarter le reste (« DOLI » se retrouve
-        # lettre à lettre dans « ...accorD... cOmprimé peLlIculé »). Ce qui
-        # compte, et ce que voit l'utilisateur, c'est que le bon médicament
-        # passe en tête — sans avoir rien validé.
+        # correspond sans forcément écarter le reste. Ce qui compte, et ce
+        # que voit l'utilisateur, c'est que le bon médicament passe en tête
+        # — sans avoir rien validé.
         page_avec_base.wait_for_function(
             "document.querySelectorAll(\"[role='option']\")[0]"
             ".textContent.includes('DOLIPRANE')", timeout=15000)
         _sans_exception(page_avec_base)
 
-    def test_choisir_un_nom_propose_ses_conditionnements(self, page_avec_base):
+    def test_le_dosage_affine_dans_la_meme_liste(self, page_avec_base):
+        """« puis le dosage pour affiner » : pas de second écran."""
+        champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
+        champ.type(" 1000")
+        page_avec_base.wait_for_function(
+            "document.querySelectorAll(\"[role='option']\")[0]"
+            ".textContent.includes('1000 mg')", timeout=15000)
+        _sans_exception(page_avec_base)
+
+    def test_un_seul_clic_remplit_toute_la_fiche(self, page_avec_base):
+        """Nom, code CIP et unités par boîte d'un coup — sans passer par un
+        panneau « Médicaments trouvés » ni un bouton de confirmation."""
         page_avec_base.locator("[role='option']").first.click()
         page_avec_base.wait_for_timeout(5000)
         _sans_exception(page_avec_base)
-        contenu = page_avec_base.content()
-        assert "conditionnements possibles" in contenu
-        # Le nom est acquis tout de suite : le laisser vide pendant qu'on
-        # choisit la boîte donnerait l'impression que le clic n'a rien fait.
+        assert "Médicaments trouvés" not in page_avec_base.content()
         assert page_avec_base.get_by_role(
             "textbox", name="Nom du médicament").input_value() == \
             "DOLIPRANE 1000 mg, comprimé"
-
-    def test_choisir_le_conditionnement_remplit_cip_et_unites(self, page_avec_base):
-        page_avec_base.get_by_role("button", name="Utiliser ce médicament").click()
-        page_avec_base.wait_for_timeout(5000)
-        _sans_exception(page_avec_base)
         # « exact » : la recherche de l'inventaire, plus bas, contient aussi
         # « code CIP » dans son libellé.
         assert page_avec_base.get_by_role(
