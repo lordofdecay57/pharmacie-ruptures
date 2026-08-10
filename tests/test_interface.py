@@ -253,6 +253,31 @@ class TestEspaceStockFerme:
         _sans_exception(page)
         assert "Sortie impossible" in page.content()
 
+    def test_l_impasse_du_mode_sortie_est_signalee(self, page):
+        """Sortir d'un inventaire vide ne peut que rater : chaque scan
+        répondait « pas à l'inventaire » et le second bouton était grisé.
+        L'écran doit dire pourquoi, et offrir la sortie de secours."""
+        contenu = page.content()
+        assert "il n'y a rien à sortir" in contenu
+        assert page.get_by_role("button", name="Passer en Entrée").count() == 1
+
+    def test_la_sortie_manuelle_est_disponible(self, page):
+        """Une étiquette abîmée, une boîte reconditionnée : la douchette ne
+        lit pas tout. Le bouton était purement désactivé en mode Sortie —
+        il n'existait alors AUCUNE façon de retirer une boîte."""
+        bouton = page.get_by_role("button", name="Sortie manuelle")
+        assert bouton.count() == 1
+        assert bouton.first.is_enabled()
+
+    def test_le_bouton_ramene_en_entree(self, page):
+        """Le seul geste qui débloque l'écran doit tenir en un clic."""
+        page.get_by_role("button", name="Passer en Entrée").click()
+        page.wait_for_timeout(4000)
+        _sans_exception(page)
+        assert "Entrée" in _onglet_actif(page, "sf_mode")
+        assert page.get_by_role("button",
+                                name="Saisie manuelle").first.is_enabled()
+
 
 class TestModeDemonstration:
     """Le jeu de démonstration fait tourner les deux modules cadencier de

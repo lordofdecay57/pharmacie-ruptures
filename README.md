@@ -402,6 +402,18 @@ une ligne de boîte sortie se supprime par la touche `Suppr`. Une **recherche**
 (périmés et moins d'un mois) permettent de retrouver une boîte sans faire
 défiler l'inventaire.
 
+**Sortie manuelle** — la douchette ne lit pas tout : étiquette abîmée,
+boîte reconditionnée, produit sans code-barres. En mode **Sortie**, le
+bouton **« ⌨️ Sortie manuelle »** ouvre la liste des boîtes en stock
+(statut, nom, dosage, péremption, n° de lot, nombre de boîtes) : on désigne
+celle qui sort et on choisit combien. Le maximum proposé est le stock du
+lot — promettre davantage serait promettre une sortie que l'inventaire ne
+peut pas honorer.
+
+Et si l'inventaire est **vide** alors qu'on est en mode Sortie, l'écran le
+dit et propose un bouton pour repasser en Entrée : chaque scan répondrait
+sinon « ce produit n'est pas à l'inventaire », sans issue visible.
+
 **Classement** — deux ordres, pour deux gestes différents :
 
 | Ordre | À quelle question il répond |

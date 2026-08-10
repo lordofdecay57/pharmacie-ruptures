@@ -28,7 +28,7 @@ from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          inventaire_affichable,
                          importer_repertoire, inventaire_vide,
                          jours_avant_peremption,
-                         lot_a_sortir,
+                         lot_a_sortir, lots_sortables,
                          memoriser_produit, nom_fichier_stock_ferme,
                          normaliser_tableau_edite,
                          parser_code_scanne, parser_datamatrix,
@@ -475,6 +475,85 @@ class TestInventaireAffichable:
         assert "nan" not in texte.lower() and "None" not in texte
         # Un produit sans CIP compte quand même comme une référence.
         assert resume_inventaire(brut, AUJOURDHUI)["references"] == 1
+
+
+class TestLotsSortables:
+    """Sortie sans douchette : désigner la boîte dans une liste.
+
+    Le bouton de saisie manuelle était purement désactivé en mode Sortie.
+    Une étiquette abîmée, une boîte reconditionnée, un produit sans code —
+    et il n'existait plus aucune façon de retirer une boîte.
+    """
+
+    def _inventaire(self):
+        inv = inventaire_vide()
+        for nom, cip, lot, peremption, boites in (
+                ("ZOLPIDEM", "3400930000011", "Z1", date(2026, 8, 20), 2),
+                ("AMOXICILLINE", "3400930000028", "A1", date(2028, 1, 31), 5),
+                ("MORPHINE", "3400930000035", "M1", None, 1)):
+            inv = ajouter_entree(inv, _entree(nom=nom, cip=cip, lot=lot,
+                                              boites=boites,
+                                              peremption=peremption),
+                                 AUJOURDHUI)
+        return inv
+
+    def test_inventaire_vide(self):
+        assert lots_sortables(inventaire_vide(), AUJOURDHUI) == []
+
+    def test_chaque_lot_porte_de_quoi_le_retirer(self):
+        lots = lots_sortables(self._inventaire(), AUJOURDHUI)
+        assert len(lots) == 3
+        for lot in lots:
+            # Exactement les arguments de retirer_entree : sans eux, le
+            # choix de l'écran ne se traduirait en rien.
+            assert set(("cip", "nom", "peremption", "lot", "boites")) <= set(lot)
+
+    def test_le_choix_se_traduit_en_sortie(self):
+        """Le tour complet : ce que la liste propose doit réellement sortir."""
+        inv = self._inventaire()
+        lot = [l for l in lots_sortables(inv, AUJOURDHUI)
+               if l["nom"] == "AMOXICILLINE"][0]
+        apres = retirer_entree(inv, lot["cip"], lot["nom"], lot["peremption"],
+                               lot["lot"], boites=2)
+        restant = [l for l in lots_sortables(apres, AUJOURDHUI)
+                   if l["nom"] == "AMOXICILLINE"][0]
+        assert restant["boites"] == 3
+
+    def test_un_lot_sans_date_est_sortable(self):
+        """Rien ne presse à son sujet, mais on doit pouvoir le retirer."""
+        noms = [l["nom"] for l in lots_sortables(self._inventaire(),
+                                                 AUJOURDHUI)]
+        assert "MORPHINE" in noms
+
+    def test_une_ligne_a_zero_boite_n_est_pas_proposee(self):
+        """La proposer serait promettre une sortie impossible."""
+        inv = self._inventaire()
+        morphine = [l for l in lots_sortables(inv, AUJOURDHUI)
+                    if l["nom"] == "MORPHINE"][0]
+        vide = retirer_entree(inv, morphine["cip"], morphine["nom"],
+                              morphine["peremption"], morphine["lot"],
+                              boites=morphine["boites"])
+        assert "MORPHINE" not in [l["nom"] for l in
+                                  lots_sortables(vide, AUJOURDHUI)]
+
+    def test_le_libelle_dit_tout_ce_qu_il_faut_pour_choisir(self):
+        """Deux boîtes du même médicament ne se distinguent que par leur
+        péremption et leur lot : les omettre rendrait le choix aveugle."""
+        lots = lots_sortables(self._inventaire(), AUJOURDHUI)
+        zolpidem = [l for l in lots if l["nom"] == "ZOLPIDEM"][0]
+        for attendu in ("ZOLPIDEM", "20/08/2026", "Z1", "2 boîte(s)"):
+            assert attendu in zolpidem["libelle"], zolpidem["libelle"]
+        sans_date = [l for l in lots if l["nom"] == "MORPHINE"][0]
+        assert "sans date" in sans_date["libelle"]
+
+    def test_l_ordre_suit_le_classement_demande(self):
+        lots = lots_sortables(self._inventaire(), AUJOURDHUI, TRI_NOM)
+        assert [l["nom"] for l in lots] == ["AMOXICILLINE", "MORPHINE",
+                                            "ZOLPIDEM"]
+
+    def test_par_defaut_le_plus_urgent_en_tete(self):
+        lots = lots_sortables(self._inventaire(), AUJOURDHUI)
+        assert lots[0]["nom"] == "ZOLPIDEM"
 
 
 class TestTriAlphabetique:
