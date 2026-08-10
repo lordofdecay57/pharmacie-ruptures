@@ -66,11 +66,24 @@ ETAPE 2 - Lancer l'utilitaire pour la premiere fois
    que vous utiliserez desormais - plus besoin de revenir dans ce
    dossier.
 
-Si l'icone n'apparait pas, double-cliquez sur
-"creer-raccourci.bat" dans ce dossier : il la pose et vous dit ce
-qui s'est passe. En dernier recours, faites-la a la main : clic
-droit sur lancer.bat, puis "Envoyer vers" > "Bureau (creer un
-raccourci)".
+Si l'icone n'apparait pas, vous avez trois solutions, de la plus
+simple a la plus manuelle :
+
+  a) DANS L'APPLICATION (le plus simple) : en haut de la colonne
+     de gauche, un encadre "Icone du Bureau" propose un bouton
+     "Creer l'icone maintenant". Un clic suffit. L'encadre
+     disparait une fois l'icone posee.
+
+  b) Double-cliquez sur "creer-raccourci.bat" dans ce dossier :
+     il pose l'icone et affiche ce qui s'est passe. Attention,
+     Windows masque souvent les extensions : le fichier peut
+     s'afficher simplement comme "creer-raccourci".
+
+  c) A LA MAIN, sans aucun script : clic droit sur "lancer.bat",
+     puis "Envoyer vers" > "Bureau (creer un raccourci)". Pour
+     avoir la jolie icone : clic droit sur le raccourci du
+     Bureau > "Proprietes" > "Changer d'icone" > "Parcourir",
+     et choisissez "pharmacie.ico" dans ce dossier.
 
 
 ---------------------------------------------------------------

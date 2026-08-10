@@ -521,8 +521,13 @@ sans contour ni seconde couleur, et du vide autour. Le relief vient d'une
 ombre portée très douce, pas d'un trait — un liseré sombre sur une forme
 blanche fait aussitôt « autocollant ».
 
-- L'icône a été supprimée par erreur ? Double-cliquez sur
-  **`creer-raccourci.bat`**, elle revient.
+- **L'icône manque ?** L'application le voit et propose un bouton
+  **« 📌 Créer l'icône maintenant »** en haut de sa barre latérale. Il
+  disparaît de lui-même une fois l'icône posée — une proposition qui reste
+  affichée après avoir été suivie n'est plus une aide. Rien à chercher dans
+  le dossier : Windows masque l'extension `.bat`, et certains postes en
+  interdisent l'exécution.
+- Sinon, double-cliquez sur **`creer-raccourci.bat`**, elle revient.
 - Elle n'est **pas** recréée toute seule à chaque démarrage : un témoin
   local (`.raccourci-bureau`) mémorise qu'elle a déjà été posée, pour
   qu'une suppression volontaire soit respectée.
@@ -689,6 +694,7 @@ pharmacie-ruptures/
 ├── lancer.bat                 # double-clic Windows
 ├── lancer.command              # double-clic Mac
 ├── creer-raccourci.bat       # pose l'icône 💊 « Pharmacie » sur le Bureau
+├── raccourci.py             # la même pose, appelable depuis l'application
 ├── pharmacie.ico            # icône du raccourci (16 → 256 px)
 ├── pharmacie.png            # même visuel en 1024 px (Mac, documentation)
 ├── outils/creer_icone.py    # régénère l'icône (outil de développement)
@@ -702,6 +708,7 @@ pharmacie-ruptures/
     ├── test_maj_auto.py       # mise à jour auto : données préservées, app ouverte
     ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
     ├── test_icone.py          # icône du Bureau : tailles, script de raccourci
+    ├── test_raccourci.py      # pose du raccourci : Bureau redirigé, replis
     └── test_interface.py      # fumée : l'application démarre et répond
 ```
 
