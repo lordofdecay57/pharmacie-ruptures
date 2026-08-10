@@ -319,10 +319,8 @@ class TestColonnePeremption:
         deux réglages séparés finiraient par diverger."""
         source = (pathlib.Path(__file__).parent.parent
                   / "ui_stock_ferme.py").read_text(encoding="utf-8")
-        assert source.count("_COLONNE_PEREMPTION") == 3   # défini + 2 usages
-        # Une seule colonne de date déclarée : le « DD/MM/YYYY » restant est
-        # celui de la date du jour, un champ de saisie, pas une colonne.
-        assert source.count("column_config.DateColumn") == 1
+        # Les deux tableaux passent par la MÊME fabrique de colonnes.
+        assert source.count("column_config=_colonnes_inventaire()") == 2
 
     def test_l_impression_garde_la_date_complete(self):
         """Sur le papier, il n'y a pas de colonne « Jours restants » pour
@@ -330,3 +328,36 @@ class TestColonnePeremption:
         source = (pathlib.Path(__file__).parent.parent
                   / "stock_ferme.py").read_text(encoding="utf-8")
         assert "%d/%m/%Y" in source
+
+
+class TestColonnesCentrees:
+    """Tout le contenu du tableau est centré.
+
+    Par défaut, Streamlit colle les nombres au bord droit de leur colonne :
+    sur une colonne large, le « 1 » des boîtes se retrouvait à des
+    centimètres de son en-tête, et l'œil ne savait plus à quelle colonne il
+    appartenait.
+    """
+
+    def _colonnes(self):
+        pytest.importorskip("streamlit")
+        import ui_stock_ferme
+        return ui_stock_ferme._colonnes_inventaire()
+
+    def test_toutes_les_colonnes_sont_centrees(self):
+        for nom, config in self._colonnes().items():
+            assert config.get("alignment") == "center", nom
+
+    def test_toutes_les_colonnes_affichees_sont_couvertes(self):
+        """Une colonne oubliée retomberait sur l'alignement par défaut et
+        trancherait avec les autres."""
+        import stock_ferme
+        attendues = set(["Statut"] + stock_ferme.COLONNES_AFFICHEES
+                        + ["Jours restants"])
+        assert set(self._colonnes()) == attendues
+
+    def test_la_date_d_enregistrement_est_en_francais(self):
+        """Elle s'affichait en 2026-08-10, seule note anglo-saxonne d'un
+        écran entièrement en français."""
+        config = self._colonnes()["Enregistré le"]["type_config"]
+        assert config["format"] == "DD/MM/YYYY"

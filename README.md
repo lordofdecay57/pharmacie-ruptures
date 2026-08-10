@@ -290,6 +290,13 @@ exact à la journée près. La liste **imprimée**, elle, garde la date
 complète : sur le papier il n'y a pas de « jours restants » pour rattraper
 un jour masqué.
 
+**Tout le contenu est centré dans les cases.** Streamlit colle les nombres
+au bord droit de leur colonne : sur une colonne large, le « 1 » des boîtes
+se retrouvait à des centimètres de son en-tête et l'œil ne savait plus à
+quelle colonne il appartenait. Le tableau modifiable et la vue filtrée
+partagent la même déclaration de colonnes — deux réglages séparés
+finiraient par diverger.
+
 **Pas de colonne « Dosage ».** Il fait partie de la dénomination
 (« DOLIPRANE 1000 mg, comprimé ») ; une colonne pour le répéter poussait la
 péremption — la seule qui compte vraiment ici — hors de l'écran. Un dosage
