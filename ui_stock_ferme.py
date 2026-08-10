@@ -47,7 +47,47 @@ _MIME_PDF = "application/pdf"
 #: perdu — la date complète reste enregistrée, et « Jours restants », juste
 #: à côté, donne le compte exact à la journée près.
 _COLONNE_PEREMPTION = st.column_config.DateColumn(
-    "Péremption", format="MM/YYYY", width="small")
+    "Péremption", format="MM/YYYY", width="small", alignment="center")
+
+
+def _colonnes_inventaire() -> dict:
+    """Mise en forme des colonnes de l'inventaire, pour LES DEUX tableaux.
+
+    Tout est **centré**. Par défaut, Streamlit colle les nombres au bord
+    droit de leur colonne : sur des colonnes larges, le « 1 » des boîtes se
+    retrouvait à des centimètres de son en-tête, et l'œil ne savait plus à
+    quelle colonne il appartenait.
+
+    Le tableau modifiable et la vue filtrée partagent cette déclaration :
+    deux réglages séparés finiraient par diverger.
+    """
+    nombre = dict(min_value=0, step=1, width="small", alignment="center")
+    return {
+        "Statut": st.column_config.TextColumn(
+            "Statut", width="small", alignment="center"),
+        "Nom du produit": st.column_config.TextColumn(
+            "Nom du produit", alignment="center"),
+        # Pas de largeur imposée : un CIP tronqué (« 34009300000… ») ne
+        # sert à rien, et c'est par lui qu'on identifie une boîte.
+        "Code CIP": st.column_config.TextColumn(
+            "Code CIP", alignment="center"),
+        "Boîtes": st.column_config.NumberColumn("Boîtes", **nombre),
+        "Unités par boîte": st.column_config.NumberColumn(
+            "Unités/boîte", **nombre),
+        "Unités en vrac": st.column_config.NumberColumn("Vrac", **nombre),
+        "Total unités": st.column_config.NumberColumn(
+            "Total unités", width="small", alignment="center"),
+        "Péremption": _COLONNE_PEREMPTION,
+        "Lot": st.column_config.TextColumn(
+            "Lot", width="small", alignment="center"),
+        # Date d'enregistrement : elle s'affichait en 2026-08-10, seule note
+        # anglo-saxonne d'un écran entièrement en français.
+        "Enregistré le": st.column_config.DateColumn(
+            "Enregistré le", format="DD/MM/YYYY", width="small",
+            alignment="center"),
+        "Jours restants": st.column_config.NumberColumn(
+            "Jours restants", width="small", alignment="center"),
+    }
 
 #: Colonnes modifiables directement dans le tableau.
 _COLONNES_EDITABLES = ("Nom du produit", "Boîtes",
@@ -772,20 +812,7 @@ def _tableau_editable(inventaire: pd.DataFrame, aujourdhui: date,
             f"_{stock_ferme.TRIS.index(tri)}",
         disabled=["Statut", "Code CIP", "Total unités", "Jours restants",
                   "Enregistré le"],
-        column_config={
-            "Statut": st.column_config.TextColumn("Statut", width="small"),
-            "Péremption": _COLONNE_PEREMPTION,
-            "Boîtes": st.column_config.NumberColumn(
-                "Boîtes", min_value=0, step=1, width="small"),
-            "Unités par boîte": st.column_config.NumberColumn(
-                "Unités/boîte", min_value=0, step=1, width="small"),
-            "Unités en vrac": st.column_config.NumberColumn(
-                "Vrac", min_value=0, step=1, width="small"),
-            "Total unités": st.column_config.NumberColumn(
-                "Total unités", width="small"),
-            "Jours restants": st.column_config.NumberColumn(
-                "Jours restants", width="small"),
-        })
+        column_config=_colonnes_inventaire())
     st.caption("Corrigez une quantité ou une date directement dans le "
                "tableau ; la ligne d'une boîte sortie peut être supprimée "
                "(sélection puis touche Suppr). Tout est enregistré "
@@ -991,7 +1018,7 @@ def rendre(etape, tuile_kpi) -> None:
         st.dataframe(
             stock_ferme.inventaire_affichable(vue_filtree, aujourdhui, tri),
             use_container_width=True, hide_index=True,
-            column_config={"Péremption": _COLONNE_PEREMPTION})
+            column_config=_colonnes_inventaire())
         st.caption(f"{len(vue_filtree)} lot(s) affiché(s). Videz la recherche "
                    "et décochez le filtre pour corriger l'inventaire.")
         corrige = None
