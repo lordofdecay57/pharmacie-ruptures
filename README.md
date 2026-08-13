@@ -892,8 +892,12 @@ Deux conditions à connaître :
 
 #### À la main, quand le bandeau le signale
 
-Le bandeau de l'application affiche « ⬆️ v5.8 disponible » dès qu'une
-version est publiée. Sur le serveur, double-cliquez sur
+Le plus simple est le **bouton de la barre latérale** (voir
+[Le bouton d'installation](#️-le-bouton-dinstallation-le-chemin-normal)) :
+sur un serveur, il lance le bon script et demande confirmation avant de
+déconnecter les postes.
+
+À défaut, sur le serveur lui-même, double-cliquez sur
 **`mettre-a-jour-serveur.bat`** : il arrête l'application, remplace les
 fichiers et **la relance en mode serveur**.
 
@@ -969,6 +973,33 @@ scanné ne se trouve nulle part ailleurs :
 - **Sauvegarde.** Tout est dans un seul dossier sur le serveur, ce qui
   simplifie la sauvegarde — et la rend indispensable : il n'y a plus de
   copie sur les postes.
+
+## ⬆️ Le bouton d'installation (le chemin normal)
+
+Quand une nouvelle version est publiée, le bandeau l'annonce et un encadré
+**⬆️ Version disponible** apparaît en haut de la barre latérale. Un clic sur
+**« Installer la vX.Y »** suffit : l'application redémarre et la page se
+recharge toute seule au bout d'une minute environ. Rien de ce qui est
+enregistré n'est perdu.
+
+C'est le geste normal, et il existe pour une raison précise : **le
+double-clic sur l'icône du Bureau ne met jamais à jour une application déjà
+ouverte.** `lancer.bat` appelle bien la mise à jour automatique, mais
+celle-ci se reporte tant que l'application répond — et personne ne ferme
+l'application avant de cliquer sur son icône. Le bandeau annonçait donc une
+version sans donner le moyen de la prendre.
+
+- L'encadré n'apparaît **que** lorsqu'il sert : à jour, il n'y a rien à dire.
+- **Sur un serveur**, un clic redémarre l'application de toute la pharmacie :
+  l'encadré le dit, et demande de cocher « J'ai prévenu les autres postes »
+  avant d'agir. C'est le bon script qui est lancé
+  (`mettre-a-jour-serveur.bat`), reconnu au drapeau avec lequel
+  l'application a démarré — pas à un fichier témoin qui pourrait mentir.
+- Une fenêtre noire s'ouvre et montre la mise à jour se dérouler : ne la
+  fermez pas.
+- Si le lancement échoue (script interdit sur le poste, droits insuffisants),
+  l'application le **dit** en français et reste debout : il reste le
+  double-clic sur le script, décrit plus bas.
 
 ## Mise à jour automatique
 
