@@ -31,6 +31,7 @@ import streamlit as st
 import yaml
 
 import commun
+import mise_a_jour
 import moteur_ruptures as moteur
 import raccourci
 import stock_rotation
@@ -57,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "5.7"
+VERSION_APP = "5.8"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -243,13 +244,13 @@ def _version_publiee_cache() -> str:
 _maj = ""
 if st.session_state.get("verifier_version", True):
     if ui_commun.mise_a_jour_disponible(VERSION_APP, _version_publiee_cache()):
-        # Le bandeau est lu depuis N'IMPORTE QUEL poste, y compris ceux qui
-        # n'ont pas l'application chez eux : dire « lancez mettre-a-jour.bat »
-        # sans dire OÙ envoie chercher un fichier qui n'existe pas sur leur
-        # machine.
+        # Le bandeau renvoie vers le BOUTON, pas vers un fichier à retrouver
+        # dans un dossier : nommer un « .bat » n'aide personne — Windows en
+        # masque l'extension, certains postes en interdisent l'exécution, et
+        # depuis un poste sans installation locale ce fichier n'existe même
+        # pas. Le bouton, lui, est dans l'écran déjà ouvert.
         _maj = (f'<span class="maj">⬆️ v{_version_publiee_cache()} disponible '
-                "— lancez <b>mettre-a-jour.bat</b> (sur un serveur : "
-                "<b>mettre-a-jour-serveur.bat</b>, sur le serveur)</span>")
+                "— bouton d'installation dans la barre latérale ◀</span>")
 
 st.markdown(f"""
 <div class="hero">
@@ -322,6 +323,73 @@ def _proposer_raccourci() -> None:
                     "ok" if succes else "attention", texte)
                 st.rerun()
 
+def _mode_serveur() -> bool:
+    """Cette instance sert-elle toute la pharmacie, ou ce poste seulement ?
+
+    On lit le drapeau avec lequel le processus a RÉELLEMENT démarré :
+    ``lancer-serveur.bat`` passe ``--server.address 0.0.0.0``, pas
+    ``lancer.bat``. Un fichier témoin, lui, survivrait à un changement de
+    mode — et se tromper coûte cher : relancer un poste isolé en mode
+    serveur n'ouvrirait plus aucune fenêtre devant quelqu'un qui attend.
+    """
+    try:
+        return st.get_option("server.address") == "0.0.0.0"
+    except Exception:                        # option absente d'une version
+        return False
+
+
+def _proposer_mise_a_jour() -> None:
+    """Installe la nouvelle version en un clic, quand il y en a une.
+
+    Le bandeau annonçait « ⬆️ vX disponible » sans donner le moyen de la
+    prendre : il constatait le retard sans permettre de le combler. Et le
+    geste le plus courant — double-cliquer sur l'icône du Bureau — ne met
+    JAMAIS à jour, puisque la mise à jour automatique se reporte tant que
+    l'application répond, et que personne ne la ferme d'abord.
+
+    L'encadré n'apparaît que lorsqu'il sert : à jour, il n'y a rien à dire.
+    """
+    with st.sidebar:
+        message = st.session_state.pop("maj_message", None)
+        if message:
+            niveau, texte = message
+            (st.success if niveau == "ok" else st.warning)(texte)
+        # Même interrupteur que le bandeau : qui coupe la vérification de
+        # version ne doit pas se voir proposer d'installer quand même.
+        if not mise_a_jour.sur_windows():
+            return
+        if not st.session_state.get("verifier_version", True):
+            return
+        publiee = _version_publiee_cache()
+        if not ui_commun.mise_a_jour_disponible(VERSION_APP, publiee):
+            return
+
+        serveur = _mode_serveur()
+        with st.container(border=True):
+            st.markdown(f"**⬆️ Version v{publiee} disponible**")
+            if serveur:
+                # Un clic depuis un comptoir arrête l'application de TOUTE
+                # la pharmacie : cela se dit avant, pas après.
+                st.caption("Cette application sert tous les postes. La mettre "
+                           "à jour la redémarre : chaque poste perdra sa page "
+                           "une trentaine de secondes, et une fiche en cours "
+                           "de saisie sera perdue.")
+                pret = st.checkbox("J'ai prévenu les autres postes",
+                                   key="maj_confirme_serveur")
+            else:
+                st.caption("L'application va redémarrer et cette page se "
+                           "rechargera toute seule. Vous ne perdez rien de "
+                           "ce qui est enregistré.")
+                pret = True
+            if st.button(f"⬆️ Installer la v{publiee}", type="primary",
+                         use_container_width=True, disabled=not pret):
+                succes, texte = mise_a_jour.lancer(DOSSIER_APP,
+                                                   mode_serveur=serveur)
+                st.session_state["maj_message"] = (
+                    "ok" if succes else "attention", texte)
+                st.rerun()
+
+
 # Deux grands onglets plutôt qu'un choix discret : les deux espaces ne
 # partagent NI fichiers, NI données, NI exports. Savoir dans lequel on se
 # trouve est la première chose à voir en arrivant sur l'écran.
@@ -343,6 +411,7 @@ def _garder_espace() -> None:
 # plus bas, chacune de son côté, et l'espace « stock fermé » s'arrête sur un
 # st.stop(). Poser la proposition ici est le seul endroit d'où elle est
 # visible dans les deux.
+_proposer_mise_a_jour()
 _proposer_raccourci()
 
 espace = st.segmented_control(
