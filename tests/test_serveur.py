@@ -268,6 +268,46 @@ class TestPlanification:
         assert "05:00" in _texte(PLANIFIER)
 
 
+class TestLiensDuReadme:
+    """Les renvois internes doivent mener quelque part.
+
+    Un lien mort dans une procédure d'installation est pire qu'une absence
+    de lien : on clique, il ne se passe rien, et on croit avoir manqué une
+    étape. Le cas réellement rencontré : le sélecteur de variante d'un
+    emoji (U+FE0F) resté dans l'ancre d'un titre — invisible à la lecture.
+    """
+
+    def _ancre(self, titre: str) -> str:
+        """Ancre telle que GitHub la fabrique : minuscules, ponctuation
+        retirée (emoji compris), espaces en tirets, accents conservés."""
+        nu = "".join(c for c in titre.strip().lower()
+                     if c.isalnum() or c in " -_")
+        return "#" + nu.replace(" ", "-")
+
+    def test_aucun_renvoi_ne_pointe_dans_le_vide(self):
+        import re
+        texte = README.read_text(encoding="utf-8")
+        ancres = {self._ancre(t)
+                  for t in re.findall(r"^#{2,4} (.+)$", texte, re.M)}
+        liens = re.findall(r"\]\((#[^)]*)\)", texte)
+        assert liens, "aucun renvoi trouvé : le test ne vérifierait rien"
+        casses = [l for l in liens if l not in ancres]
+        assert not casses, f"renvois morts : {casses}"
+
+    def test_la_procedure_serveur_est_une_liste_ordonnee_complete(self):
+        """Elle doit se suffire à elle-même : quelqu'un qui la déroule sans
+        rien lire d'autre doit arriver au bout avec une pharmacie qui
+        marche — mise à jour et récupération des données comprises."""
+        texte = README.read_text(encoding="utf-8")
+        procedure = texte.split("### La procédure complète", 1)[1]
+        procedure = procedure.split("\n#### ", 1)[0]
+        for attendu in ("lancer-serveur.bat", "port 8501", "IP fixe",
+                        "veille", "planifier-maj-serveur.bat",
+                        "creer-raccourci-poste.bat", "récupérer ses"):
+            assert attendu in procedure, (
+                f"« {attendu} » manque à la procédure ordonnée")
+
+
 class TestDocumentation:
     def test_le_readme_explique_l_installation_serveur(self):
         texte = README.read_text(encoding="utf-8")
