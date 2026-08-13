@@ -22,3 +22,5 @@ web/.next/
 web/out/
 web/.vercel/
 web/.env*.local
+# Adresse du serveur, ecrite par lancer-serveur.bat (propre a chaque reseau)
+adresse-serveur.txt

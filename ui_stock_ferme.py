@@ -100,15 +100,37 @@ _COLONNES_EDITABLES = ("Nom du produit", "Boîtes",
 # ---------------------------------------------------------------------------
 
 def _etat():
-    """Inventaire et répertoire courants, relus du disque au premier appel."""
-    if "sf_inventaire" not in st.session_state:
+    """Inventaire et répertoire courants, relus dès qu'un autre poste écrit.
+
+    Sur un serveur partagé, chaque poste a sa propre page et sa propre
+    mémoire de session. Garder la photo prise à l'ouverture, c'est afficher
+    un stock périmé et — bien pire — réenregistrer plus tard une version qui
+    ignore les boîtes scannées ailleurs. On compare donc l'empreinte du
+    fichier à chaque affichage : un simple ``stat``, et on relit seulement
+    quand elle a bougé.
+    """
+    empreinte = stock_ferme.empreinte_fichier(INVENTAIRE_PATH)
+    if ("sf_inventaire" not in st.session_state
+            or st.session_state.get("sf_empreinte") != empreinte):
+        premiere = "sf_inventaire" not in st.session_state
         st.session_state["sf_inventaire"] = stock_ferme.charger_inventaire(
             INVENTAIRE_PATH)
+        st.session_state["sf_empreinte"] = empreinte
+        if not premiere:
+            # Les lignes ont changé de forme sous l'éditeur : ses corrections
+            # en cours désignent des positions qui ne veulent plus rien dire.
+            st.session_state["sf_generation"] = (
+                st.session_state.get("sf_generation", 0) + 1)
         _journal.info("Stock fermé — %d lot(s) relus depuis %s",
                       len(st.session_state["sf_inventaire"]), INVENTAIRE_PATH)
-    if "sf_repertoire" not in st.session_state:
+
+    empreinte_repertoire = stock_ferme.empreinte_fichier(REPERTOIRE_PATH)
+    if ("sf_repertoire" not in st.session_state
+            or st.session_state.get("sf_empreinte_repertoire")
+            != empreinte_repertoire):
         st.session_state["sf_repertoire"] = stock_ferme.charger_repertoire(
             REPERTOIRE_PATH)
+        st.session_state["sf_empreinte_repertoire"] = empreinte_repertoire
     return st.session_state["sf_inventaire"], st.session_state["sf_repertoire"]
 
 
@@ -163,18 +185,94 @@ def _catalogue_par_libelle() -> dict:
     return st.session_state["sf_base_par_libelle"]
 
 
+def _memoriser(inventaire, empreinte=None) -> None:
+    """Range en session l'inventaire qui vient d'être écrit, et son empreinte.
+
+    Sans l'empreinte, le prochain affichage croirait qu'un autre poste a
+    écrit et relirait pour rien ; pire, le tableau modifiable se croirait en
+    conflit avec sa propre écriture.
+
+    L'empreinte vient de l'écriture elle-même, relevée **sous le verrou** :
+    la relire ici l'exposerait à un autre poste écrivant entre-temps, et le
+    poste retiendrait le fichier de l'autre en croyant y voir le sien.
+    """
+    st.session_state["sf_inventaire"] = inventaire
+    st.session_state["sf_empreinte"] = (
+        empreinte if empreinte is not None
+        else stock_ferme.empreinte_fichier(INVENTAIRE_PATH))
+    # Change la clé de l'éditeur : ses corrections en cours ne doivent
+    # pas être rejouées sur le tableau qui vient d'être réenregistré.
+    st.session_state["sf_generation"] = (
+        st.session_state.get("sf_generation", 0) + 1)
+
+
+MESSAGE_VERROU = (
+    "Un autre poste enregistre au même instant — rien n'a été modifié. "
+    "Refaites le geste dans un instant.")
+
+
+def _memoriser_produit(**produit) -> None:
+    """Ajoute un produit au répertoire du disque, sans écraser les autres."""
+    try:
+        ecriture = stock_ferme.appliquer_au_repertoire(
+            REPERTOIRE_PATH,
+            lambda courant: stock_ferme.memoriser_produit(courant, **produit))
+    except stock_ferme.VerrouIndisponible:                   # pragma: no cover
+        _journal.warning("Verrou du répertoire indisponible")
+        return
+    st.session_state["sf_repertoire"] = ecriture.tableau
+    st.session_state["sf_empreinte_repertoire"] = ecriture.empreinte
+
+
+def _appliquer(mouvement, produit=None):
+    """Applique un mouvement à l'inventaire **du disque**, sous verrou.
+
+    C'est le cœur du partage entre postes : on ne réenregistre pas la photo
+    qu'on avait en mémoire (elle effacerait la boîte scannée à côté), on
+    relit le fichier et on lui applique le geste — une boîte de plus, une de
+    moins. Renvoie l'inventaire enregistré, ou ``None`` si le verrou n'a pas
+    pu être pris (le message d'attente est alors déjà posé).
+    """
+    if produit is not None:
+        _memoriser_produit(**produit)
+    try:
+        ecriture = stock_ferme.appliquer_a_l_inventaire(INVENTAIRE_PATH,
+                                                        mouvement)
+    except stock_ferme.VerrouIndisponible:
+        _journal.warning("Verrou de l'inventaire indisponible")
+        st.session_state["sf_message"] = ("avertissement", MESSAGE_VERROU)
+        return None
+    _memoriser(ecriture.tableau, ecriture.empreinte)
+    return ecriture.tableau
+
+
 def _enregistrer(inventaire=None, repertoire=None) -> None:
-    """Écrit sur le disque : c'est la « mémoire » entre deux ouvertures."""
+    """Écrit sur le disque : c'est la « mémoire » entre deux ouvertures.
+
+    Réservé aux écritures qui remplacent délibérément le tout (remise à
+    zéro, import du répertoire) ; un mouvement de stock passe par
+    ``_appliquer``.
+    """
     if inventaire is not None:
-        st.session_state["sf_inventaire"] = inventaire
-        stock_ferme.sauver_inventaire(inventaire, INVENTAIRE_PATH)
-        # Change la clé de l'éditeur : ses corrections en cours ne doivent
-        # pas être rejouées sur le tableau qui vient d'être réenregistré.
-        st.session_state["sf_generation"] = (
-            st.session_state.get("sf_generation", 0) + 1)
+        try:
+            # L'empreinte est relevée SOUS le verrou, comme partout ailleurs.
+            with stock_ferme.verrou_fichier(INVENTAIRE_PATH):
+                stock_ferme.sauver_inventaire(inventaire, INVENTAIRE_PATH)
+                empreinte = stock_ferme.empreinte_fichier(INVENTAIRE_PATH)
+        except stock_ferme.VerrouIndisponible:
+            st.session_state["sf_message"] = ("avertissement", MESSAGE_VERROU)
+            return
+        _memoriser(inventaire, empreinte)
     if repertoire is not None:
         st.session_state["sf_repertoire"] = repertoire
-        stock_ferme.sauver_repertoire(repertoire, REPERTOIRE_PATH)
+        try:
+            with stock_ferme.verrou_fichier(REPERTOIRE_PATH):
+                stock_ferme.sauver_repertoire(repertoire, REPERTOIRE_PATH)
+                empreinte = stock_ferme.empreinte_fichier(REPERTOIRE_PATH)
+        except stock_ferme.VerrouIndisponible:      # pragma: no cover
+            _journal.warning("Verrou du répertoire indisponible")
+            return
+        st.session_state["sf_empreinte_repertoire"] = empreinte
 
 
 # ---------------------------------------------------------------------------
@@ -198,16 +296,32 @@ def _garder_mode() -> None:
     st.session_state["sf_mode_choisi"] = st.session_state["sf_mode"]
 
 
-def _traiter_sortie(code, inventaire) -> None:
+def _traiter_sortie(code) -> None:
     """Sortie de stock à la douchette : une boîte de moins, du bon lot.
 
     Un Data Matrix désigne la boîte précise ; un code-barres linéaire ne
     donne que le produit, et c'est alors le lot qui périme le plus tôt qui
     sort (FEFO).
     """
-    cible = stock_ferme.lot_a_sortir(inventaire, cip=code.cip,
-                                     peremption=code.peremption, lot=code.lot)
-    if cible is None:
+    # Le lot est choisi sur l'inventaire RELU sous verrou, pas sur celui
+    # qu'affiche la page : entre l'affichage et le scan, un autre poste a pu
+    # sortir la dernière boîte de ce lot.
+    cible = {}
+
+    def mouvement(courant):
+        trouve = stock_ferme.lot_a_sortir(courant, cip=code.cip,
+                                          peremption=code.peremption,
+                                          lot=code.lot)
+        if trouve is None:
+            return None
+        cible.update(trouve)
+        return stock_ferme.retirer_entree(
+            courant, trouve["cip"], trouve["nom"], trouve["peremption"],
+            trouve["lot"], boites=1)
+
+    if _appliquer(mouvement) is None:
+        return
+    if not cible:
         st.session_state["sf_message"] = (
             "avertissement",
             f"Sortie impossible : « {code.cip or code.brut} » n'est pas à "
@@ -216,9 +330,6 @@ def _traiter_sortie(code, inventaire) -> None:
             "l'enregistrer.")
         return
 
-    _enregistrer(inventaire=stock_ferme.retirer_entree(
-        inventaire, cible["cip"], cible["nom"], cible["peremption"],
-        cible["lot"], boites=1))
     reste = max(0, cible["boites"] - 1)
     peremption = (f"{cible['peremption']:%d/%m/%Y}" if cible["peremption"]
                   else "sans date")
@@ -244,7 +355,9 @@ def _traiter_scan() -> None:
         return
 
     code = stock_ferme.parser_code_scanne(brut)
-    inventaire, repertoire = _etat()
+    # Seul le répertoire est lu ici : l'inventaire, lui, n'est jamais
+    # manipulé de mémoire — chaque mouvement le relit sur le disque.
+    _, repertoire = _etat()
 
     # On lit le mode RETENU, pas la valeur brute du widget : celui-ci vaut
     # None quand on reclique dessus pour le déselectionner, et un scan ne
@@ -257,7 +370,7 @@ def _traiter_scan() -> None:
                 f"Code non reconnu : « {code.brut} ». Utilisez « ⌨️ Sortie "
                 "manuelle » pour choisir la boîte dans la liste.")
             return
-        _traiter_sortie(code, inventaire)
+        _traiter_sortie(code)
         return
 
     # Qui est ce produit ? Le répertoire de la pharmacie d'abord — c'est sa
@@ -280,14 +393,14 @@ def _traiter_scan() -> None:
             cip=code.cip, nom=connu["nom"], dosage=connu["dosage"],
             boites=1, unites_par_boite=connu["unites_par_boite"],
             peremption=code.peremption, lot=code.lot)
-        nouveau_repertoire = None
+        produit = None
         if depuis_base:
             # Le nom devient celui de la pharmacie : elle peut le corriger,
             # et l'identification ne dépendra plus de la base ensuite.
-            nouveau_repertoire = stock_ferme.memoriser_produit(
-                repertoire, code.cip, connu["nom"])
-        _enregistrer(inventaire=stock_ferme.ajouter_entree(inventaire, entree),
-                     repertoire=nouveau_repertoire)
+            produit = {"cip": code.cip, "nom": connu["nom"]}
+        if _appliquer(lambda courant: stock_ferme.ajouter_entree(
+                courant, entree), produit=produit) is None:
+            return
         st.session_state["sf_message"] = (
             "ok", f"➕ {connu['nom']} {connu['dosage']} — 1 boîte "
                   f"(péremption {code.peremption:%d/%m/%Y}"
@@ -481,16 +594,43 @@ def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
                                 unsafe_allow_html=True)
         if colonne_bouton.button("➖ Retirer du stock", type="primary",
                                  use_container_width=True):
-            _enregistrer(inventaire=stock_ferme.retirer_entree(
-                inventaire, lot["cip"], lot["nom"], lot["peremption"],
-                lot["lot"], boites=int(combien)))
-            reste = lot["boites"] - int(combien)
+            # Le stock réel est celui du disque : un autre poste a pu retirer
+            # des boîtes depuis que cette liste s'est affichée. On retire ce
+            # qu'on peut, et on annonce ce qui a été retiré — pas ce qui
+            # avait été demandé.
+            retire = {"boites": 0, "reste": 0}
+
+            def mouvement(courant, lot=lot, combien=int(combien)):
+                disponible = stock_ferme.stock_du_lot(
+                    courant, lot["cip"], lot["nom"], lot["peremption"],
+                    lot["lot"])
+                nombre = min(combien, disponible)
+                retire.update(boites=nombre, reste=disponible - nombre)
+                if nombre == 0:
+                    return None
+                return stock_ferme.retirer_entree(
+                    courant, lot["cip"], lot["nom"], lot["peremption"],
+                    lot["lot"], boites=nombre)
+
+            if _appliquer(mouvement) is None:
+                # Verrou indisponible : le panneau reste ouvert, avec le
+                # même choix déjà fait — il n'y a qu'à recliquer.
+                st.rerun()
+            sorties = retire["boites"]
             peremption = (f"{lot['peremption']:%d/%m/%Y}" if lot["peremption"]
                           else "sans date")
-            st.session_state["sf_message"] = (
-                "ok", f"➖ {lot['nom']} {lot['dosage']} — {int(combien)} "
-                      f"boîte(s) sortie(s) ({peremption}) · reste {reste} "
-                      "boîte(s) sur ce lot.")
+            if sorties == 0:
+                st.session_state["sf_message"] = (
+                    "avertissement",
+                    f"{lot['nom']} — ce lot n'a plus de boîte à sortir "
+                    "(un autre poste vient de le vider).")
+            else:
+                st.session_state["sf_message"] = (
+                    "ok", f"➖ {lot['nom']} {lot['dosage']} — {sorties} "
+                          f"boîte(s) sortie(s) ({peremption}) · reste "
+                          f"{retire['reste']} boîte(s) sur ce lot."
+                          + ("" if sorties == int(combien) else
+                             " ⚠️ Moins que demandé : le stock avait changé."))
             st.session_state["sf_sortie_manuelle"] = False
             st.rerun()
 
@@ -522,8 +662,7 @@ def _detail_code(brut: str) -> str:
     return "\n".join(lignes)
 
 
-def _formulaire_complement(inventaire: pd.DataFrame,
-                           repertoire: pd.DataFrame) -> None:
+def _formulaire_complement() -> None:
     """Fiche d'ajout : ce que le code ne dit pas, l'opérateur le complète."""
     attente = st.session_state["sf_en_attente"]
     with st.form("sf_form_ajout", clear_on_submit=False):
@@ -632,10 +771,11 @@ def _formulaire_complement(inventaire: pd.DataFrame,
         cip=cip, nom=nom, dosage=dosage, boites=int(boites),
         unites_par_boite=int(unites_par_boite), unites_vrac=int(unites_vrac),
         peremption=peremption, lot=lot)
-    _enregistrer(
-        inventaire=stock_ferme.ajouter_entree(inventaire, entree),
-        repertoire=stock_ferme.memoriser_produit(
-            repertoire, cip, nom, dosage, int(unites_par_boite)))
+    if _appliquer(
+            lambda courant: stock_ferme.ajouter_entree(courant, entree),
+            produit={"cip": cip, "nom": nom, "dosage": dosage,
+                     "unites_par_boite": int(unites_par_boite)}) is None:
+        return
     st.session_state.pop("sf_en_attente", None)
     st.session_state["sf_message"] = (
         "ok", f"➕ {entree.nom} {entree.dosage} — {boites} boîte(s), "
@@ -826,6 +966,33 @@ def _tableau_editable(inventaire: pd.DataFrame, aujourdhui: date,
     return stock_ferme.normaliser_tableau_edite(edite)
 
 
+def _enregistrer_corrections(corrige: pd.DataFrame) -> None:
+    """Enregistre le tableau corrigé — sauf si un autre poste a écrit depuis.
+
+    Le tableau modifiable ne décrit pas un mouvement mais un état complet :
+    l'écrire, c'est remplacer tout l'inventaire par celui qu'on avait sous
+    les yeux. Si un autre poste a scanné entre-temps, sa boîte disparaîtrait
+    sans un mot. On refuse donc, on réaffiche la version du disque, et on le
+    dit : une correction à refaire vaut mieux qu'un stock faux.
+    """
+    attendu = st.session_state.get("sf_empreinte")
+    conflit = []
+
+    def mouvement(courant):
+        if stock_ferme.empreinte_fichier(INVENTAIRE_PATH) != attendu:
+            conflit.append(True)
+            return None
+        return corrige
+
+    if _appliquer(mouvement) is None or not conflit:
+        return
+    st.session_state["sf_message"] = (
+        "avertissement",
+        "Un autre poste a modifié l'inventaire pendant votre correction : "
+        "elle n'a pas été enregistrée, pour ne pas effacer son travail. Le "
+        "tableau est à jour ci-dessous — refaites la correction.")
+
+
 def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date,
                      tri: str) -> None:
     st.markdown("**Imprimer la liste de stock**")
@@ -984,7 +1151,7 @@ def rendre(etape, tuile_kpi) -> None:
         inventaire, repertoire = _etat()
 
     if "sf_en_attente" in st.session_state and mode == MODE_ENTREE:
-        _formulaire_complement(inventaire, repertoire)
+        _formulaire_complement()
         inventaire, repertoire = _etat()
 
     # --- Inventaire --------------------------------------------------------
@@ -1025,7 +1192,7 @@ def rendre(etape, tuile_kpi) -> None:
     else:
         corrige = _tableau_editable(inventaire, aujourdhui, tri)
     if corrige is not None:
-        _enregistrer(inventaire=corrige)
+        _enregistrer_corrections(corrige)
         st.rerun()
 
     # --- Impression --------------------------------------------------------

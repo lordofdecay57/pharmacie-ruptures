@@ -469,3 +469,100 @@ class TestModeDemonstration:
 
     def test_les_exports_sont_proposes(self, page):
         assert page.get_by_role("button", name="Excel", exact=False).count() >= 1
+
+
+# ---------------------------------------------------------------------------
+# Plusieurs postes sur un même serveur
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def serveur_partage(tmp_path_factory):
+    """Une application, un dossier de données — comme sur le serveur."""
+    yield from _lancer(tmp_path_factory.mktemp("appli_partagee"))
+
+
+@pytest.fixture(scope="module")
+def deux_postes(serveur_partage, pilote):
+    """Deux navigateurs INDÉPENDANTS sur la même application.
+
+    Deux contextes, pas deux onglets : chacun a ses propres cookies, donc
+    sa propre session Streamlit et sa propre mémoire — exactement deux
+    comptoirs de la pharmacie devant le même serveur.
+    """
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+
+    def poste():
+        contexte = navigateur.new_context(
+            viewport={"width": 1400, "height": 1000})
+        onglet = contexte.new_page()
+        onglet.goto(serveur_partage, wait_until="domcontentloaded")
+        onglet.wait_for_selector(".hero", timeout=60000)
+        onglet.get_by_text(ESPACE_STOCK_FERME).first.click()
+        onglet.wait_for_timeout(6000)
+        return onglet
+
+    # Les DEUX pages sont ouvertes avant la première écriture : c'est la
+    # situation qui fait perdre des données — le poste B garde en mémoire
+    # l'inventaire d'AVANT le scan du poste A.
+    yield poste(), poste()
+    navigateur.close()
+
+
+def _scanner_et_enregistrer(page, code: str, nom: str) -> None:
+    """Un scan de code inconnu, complété à la main : le geste du comptoir."""
+    champ = page.get_by_placeholder("Douchez la boîte")
+    champ.fill(code)
+    champ.press("Enter")
+    page.wait_for_timeout(4000)
+    page.get_by_role("textbox", name="Nom du médicament").fill(nom)
+    page.get_by_role("textbox", name="Date de péremption").fill("062028")
+    page.get_by_role("button", name="Ajouter au stock").click()
+    page.wait_for_timeout(4000)
+
+
+class TestPostesSimultanes:
+    """Le stock est partagé : ce que scanne un poste ne doit jamais
+    disparaître parce qu'un autre a scanné juste après.
+
+    Ce test a d'abord été écrit pour CONSTATER la perte : les deux postes
+    enregistraient une boîte chacun, et le fichier n'en contenait qu'une.
+    Il reste ici pour que cela ne puisse pas revenir sans qu'on le voie.
+    """
+
+    def test_les_deux_boites_sont_conservees(self, deux_postes):
+        poste_a, poste_b = deux_postes
+        _scanner_et_enregistrer(
+            poste_a, "0103400930000110" + "17280630" + "10LOT-A",
+            "PRODUIT DU POSTE A")
+        _sans_exception(poste_a)
+        assert "PRODUIT DU POSTE A" in poste_a.content()
+
+        _scanner_et_enregistrer(
+            poste_b, "0103400930000280" + "17280630" + "10LOT-B",
+            "PRODUIT DU POSTE B")
+        _sans_exception(poste_b)
+
+        contenu = poste_b.content()
+        assert "PRODUIT DU POSTE B" in contenu
+        assert "PRODUIT DU POSTE A" in contenu, (
+            "la boîte du poste A a disparu de l'inventaire : le poste B a "
+            "réenregistré la version qu'il avait en mémoire")
+
+    def test_chaque_poste_voit_le_stock_de_l_autre(self, deux_postes):
+        """Le poste A doit voir la boîte du poste B SANS recharger sa page.
+
+        Un simple clic suffit à réafficher l'écran ; sa session, elle, garde
+        l'inventaire d'avant. Sans relecture du fichier, le poste A
+        continuerait d'afficher un stock qui n'existe plus — et sa
+        prochaine correction l'écrirait tel quel.
+        """
+        poste_a, _ = deux_postes
+        assert "PRODUIT DU POSTE B" not in poste_a.content(), (
+            "l'écran du poste A ne peut pas déjà être à jour : ce test "
+            "vérifie la relecture, il lui faut un écran périmé au départ")
+        # Un geste anodin, qui ne touche pas au stock : recliquer le mode
+        # déjà actif. Il provoque un réaffichage, sans rien enregistrer.
+        poste_a.locator(".st-key-sf_mode button").first.click()
+        poste_a.wait_for_timeout(4000)
+        _sans_exception(poste_a)
+        assert "PRODUIT DU POSTE B" in poste_a.content()

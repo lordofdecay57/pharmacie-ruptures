@@ -722,6 +722,83 @@ Trois garde-fous rendent désormais ce scénario impossible à subir :
 > transmet aucune donnée**. Poste hors ligne : rien ne s'affiche, rien ne
 > bloque.
 
+## 🖧 Installation sur un serveur (toute la pharmacie sur une seule base)
+
+Par défaut, chaque poste a **sa propre** base : ce qui est scanné au
+comptoir 1 n'existe pas au comptoir 2. Pour que toute la pharmacie
+travaille sur **un seul inventaire**, on installe l'utilitaire sur un
+ordinateur serveur et les postes s'y connectent par leur navigateur.
+
+**Rien n'est installé sur les postes.** Ni Python, ni l'application, ni
+données : ils reçoivent une icône, qui n'est qu'une adresse.
+
+### Sur le serveur, une fois
+
+1. Installer Python et le dossier `pharmacie-ruptures/` comme sur un poste
+   normal (voir [Installation](#installation-une-seule-fois)).
+2. Double-cliquer sur **`lancer-serveur.bat`**. Il affiche l'adresse à
+   donner aux postes, par exemple `http://192.168.1.10:8501`.
+3. Autoriser le **port 8501** dans le pare-feu Windows du serveur — c'est
+   l'oubli qui explique presque tous les « ça ne marche pas ».
+4. Donner au serveur une **adresse IP fixe** (réservation dans la box ou le
+   routeur). Sans cela l'adresse change au redémarrage, et toutes les
+   icônes des postes pointent dans le vide.
+
+> ⚠️ La **fenêtre noire du serveur EST l'application**. La fermer arrête
+> l'utilitaire pour toute la pharmacie. Sur un serveur qui redémarre la
+> nuit, placez un raccourci vers `lancer-serveur.bat` dans le dossier
+> `shell:startup` pour qu'il reparte tout seul.
+
+### Sur chaque poste, une fois
+
+Double-cliquer sur **`creer-raccourci-poste.bat`** (depuis le dossier
+partagé du serveur, ou une clé USB). Il pose sur le Bureau la même icône
+💊 **Pharmacie**, qui ouvre l'application du serveur dans le navigateur.
+
+Il trouve l'adresse tout seul si le dossier du serveur est partagé
+(`adresse-serveur.txt`, écrit à chaque démarrage) ; sinon il la demande, et
+accepte aussi bien `192.168.1.10` que l'adresse complète recopiée depuis le
+navigateur.
+
+### Les postes déjà équipés
+
+Il n'y a pas de désinstallation au sens Windows : **supprimez le dossier
+`pharmacie-ruptures/` du poste et son icône du Bureau**. Le laisser en
+place, c'est risquer qu'un jour on lance la copie locale par erreur et
+qu'on alimente une base que personne d'autre ne voit.
+
+**Avant de supprimer**, récupérez les fichiers de ce poste — ce qui y a été
+scanné ne se trouve nulle part ailleurs :
+
+- `stock_ferme.csv` (l'inventaire) ;
+- `stock_ferme_produits.csv` (les produits mémorisés) ;
+- `config.yaml` et `historique_commandes.csv` si le poste servait aussi aux
+  modules cadencier.
+
+### Ce que le partage change (et ce qu'il ne change pas)
+
+- **Écritures simultanées.** Deux comptoirs peuvent scanner en même temps.
+  L'inventaire n'est jamais réécrit « en bloc » depuis la mémoire d'un
+  poste : chaque geste est appliqué au fichier **relu à l'instant**, sous
+  verrou. Une boîte scannée ne peut donc pas être effacée par le poste
+  d'à côté (`tests/test_concurrence.py`, et deux navigateurs réels dans
+  `tests/test_interface.py`).
+- **Écran à jour.** Chaque poste relit l'inventaire dès que le fichier a
+  changé : il voit les boîtes des autres sans recharger sa page.
+- **Correction dans le tableau.** Elle remplace l'inventaire entier — c'est
+  sa nature. Si un autre poste a scanné pendant la saisie, la correction
+  est **refusée** et annoncée, plutôt que d'effacer son travail en
+  silence.
+- **Mise à jour.** Une seule à faire, sur le serveur. Passez par
+  `mettre-a-jour.bat` : `lancer-serveur.bat` ne met pas à jour une
+  application déjà démarrée.
+- **Pas de mot de passe.** Quiconque atteint le réseau de la pharmacie
+  atteint l'application. C'est acceptable sur un réseau d'officine fermé ;
+  ne l'exposez pas sur Internet.
+- **Sauvegarde.** Tout est dans un seul dossier sur le serveur, ce qui
+  simplifie la sauvegarde — et la rend indispensable : il n'y a plus de
+  copie sur les postes.
+
 ## Mise à jour automatique
 
 L'utilitaire se met à jour **tout seul**, à deux moments :
