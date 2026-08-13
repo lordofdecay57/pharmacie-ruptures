@@ -740,14 +740,87 @@ données : ils reçoivent une icône, qui n'est qu'une adresse.
    donner aux postes, par exemple `http://192.168.1.10:8501`.
 3. Autoriser le **port 8501** dans le pare-feu Windows du serveur — c'est
    l'oubli qui explique presque tous les « ça ne marche pas ».
-4. Donner au serveur une **adresse IP fixe** (réservation dans la box ou le
-   routeur). Sans cela l'adresse change au redémarrage, et toutes les
-   icônes des postes pointent dans le vide.
+4. Donner au serveur une **adresse IP fixe**. Sans cela l'adresse change au
+   redémarrage, et toutes les icônes des postes pointent dans le vide.
+5. Empêcher le serveur de **se mettre en veille**.
+
+Les trois réglages Windows sont détaillés ci-dessous.
 
 > ⚠️ La **fenêtre noire du serveur EST l'application**. La fermer arrête
 > l'utilitaire pour toute la pharmacie. Sur un serveur qui redémarre la
 > nuit, placez un raccourci vers `lancer-serveur.bat` dans le dossier
 > `shell:startup` pour qu'il reparte tout seul.
+
+#### Ouvrir le port 8501 dans le pare-feu
+
+**Le plus simple : laisser Windows le demander.** Au tout premier
+`lancer-serveur.bat`, une fenêtre apparaît — « Autoriser Python à
+communiquer sur ces réseaux ». Cochez **Réseaux privés**, décochez Réseaux
+publics, puis **Autoriser l'accès**. Il n'y a rien d'autre à faire.
+
+Si la fenêtre n'est pas apparue, ou si on a cliqué « Annuler » : menu
+Démarrer → `cmd` → clic droit sur **Invite de commandes** → **Exécuter en
+tant qu'administrateur**, puis :
+
+```
+netsh advfirewall firewall add rule name="Pilotage pharmacie (8501)" dir=in action=allow protocol=TCP localport=8501 profile=private
+```
+
+- vérifier : `netsh advfirewall firewall show rule name="Pilotage pharmacie (8501)"`
+- annuler : `netsh advfirewall firewall delete rule name="Pilotage pharmacie (8501)"`
+
+Par les fenêtres : Windows + R → `wf.msc` → **Règles de trafic entrant** →
+clic droit → **Nouvelle règle** → **Port** → TCP, ports locaux `8501` →
+**Autoriser la connexion** → cocher **Privé** seulement → nommer la règle.
+
+> ⚠️ Une règle « privé » ne s'applique que si Windows classe le réseau
+> comme privé. Vérifiez avec `netsh advfirewall show currentprofile` ; si
+> c'est « Public », passez **Paramètres → Réseau et Internet → Ethernet →
+> Type de profil réseau** sur **Privé**. Sur un réseau public, Windows
+> bloque tout, règle ou pas.
+
+#### Donner une IP fixe au serveur
+
+**La bonne méthode : la réservation dans la box.** Elle ne peut pas entrer
+en conflit et survit à une réinstallation de Windows.
+
+1. Sur le serveur : `ipconfig /all`.
+2. Relever l'**Adresse physique** de la carte active (`A1-B2-C3-D4-E5-F6`)
+   — c'est son adresse MAC.
+3. Ouvrir la page d'administration de la box (souvent `http://192.168.1.1`).
+4. Chercher **DHCP** → « Baux statiques », « Réservation d'adresse » ou
+   « Adresse IP fixe », et associer cette adresse MAC à l'IP voulue.
+
+Sinon, directement sur Windows : `ipconfig /all` d'abord, pour noter
+l'**Adresse IPv4**, la **Passerelle par défaut** et les **Serveurs DNS**.
+Puis **Paramètres → Réseau et Internet → Ethernet** → à côté de
+« Attribution IP », **Modifier** → **Manuel** → activer **IPv4** :
+
+- **Adresse IP** : une adresse **hors de la plage distribuée par la box**
+  (si elle donne de .100 à .150, prenez `192.168.1.200`) — sinon la box la
+  donnera un jour à un autre appareil, et les deux se gêneront ;
+- **Longueur du préfixe de sous-réseau** : `24` (l'équivalent de
+  255.255.255.0, que demande l'ancien panneau `ncpa.cpl`) ;
+- **Passerelle** et **DNS préféré** : l'adresse de la box.
+
+En ligne de commande (invite en administrateur) :
+
+```
+netsh interface ip show config
+netsh interface ip set address name="Ethernet" static 192.168.1.200 255.255.255.0 192.168.1.1
+netsh interface ip set dns name="Ethernet" static 192.168.1.1
+```
+
+Ensuite, relancez `lancer-serveur.bat` pour lire l'adresse définitive, puis
+repassez sur les postes avec `creer-raccourci-poste.bat` si elle a changé.
+
+#### Empêcher la mise en veille
+
+C'est l'oubli auquel personne ne pense : un serveur endormi ne répond
+plus, et les postes affichent une page blanche sans explication.
+
+**Paramètres → Système → Alimentation** → « Veille » → **Jamais**. Le
+réglage de l'écran, lui, n'a aucune importance.
 
 ### Sur chaque poste, une fois
 
