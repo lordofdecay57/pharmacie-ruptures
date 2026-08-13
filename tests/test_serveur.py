@@ -136,6 +136,27 @@ class TestDocumentation:
                         "port 8501", "adresse IP fixe"):
             assert attendu in texte, f"« {attendu} » absent du README"
 
+    def test_les_reglages_windows_sont_donnes_pas_seulement_nommes(self):
+        """« Autorisez le port dans le pare-feu » n'aide personne devant la
+        machine : il faut la commande, le chemin des fenêtres, et le piège
+        qui va avec."""
+        texte = README.read_text(encoding="utf-8")
+        for attendu in ("netsh advfirewall firewall add rule",
+                        "wf.msc",
+                        "show currentprofile",       # profil public = tout bloqué
+                        "ipconfig /all",
+                        "netsh interface ip set address",
+                        "Longueur du préfixe de sous-réseau",
+                        "hors de la plage distribuée par la box"):
+            assert attendu in texte, f"« {attendu} » absent du README"
+
+    def test_le_readme_previent_de_la_mise_en_veille(self):
+        """Un serveur endormi ne répond plus, et les postes affichent une
+        page blanche sans explication."""
+        texte = README.read_text(encoding="utf-8")
+        assert "mise en veille" in texte.lower()
+        assert "Alimentation" in texte
+
     def test_le_readme_previent_de_recuperer_les_donnees(self):
         """Supprimer l'installation d'un poste sans récupérer son
         inventaire, c'est perdre ce qui n'existe nulle part ailleurs."""
