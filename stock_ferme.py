@@ -25,13 +25,17 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 import re
+import threading
+import time
 import unicodedata
 from calendar import monthrange
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import NamedTuple, Optional, Sequence
 
 import pandas as pd
 
@@ -555,6 +559,23 @@ def ajouter_entree(inventaire: pd.DataFrame, entree: EntreeStock,
     return pd.concat([inventaire, ligne], ignore_index=True)
 
 
+def stock_du_lot(inventaire: pd.DataFrame, cip: str, nom: str,
+                 peremption: Optional[date], lot: str) -> int:
+    """Boîtes réellement en stock pour ce lot précis, 0 s'il a disparu.
+
+    Sert à ne pas promettre une sortie que l'inventaire ne peut plus
+    honorer : entre l'affichage d'une liste et le clic, un autre poste a pu
+    retirer les dernières boîtes.
+    """
+    if inventaire is None or inventaire.empty:
+        return 0
+    cible = cle_lot(cip, nom, peremption, lot)
+    for i, cle in zip(inventaire.index, _cles(inventaire)):
+        if cle == cible:
+            return int(inventaire.at[i, "Boîtes"] or 0)
+    return 0
+
+
 def retirer_entree(inventaire: pd.DataFrame, cip: str, nom: str,
                    peremption: Optional[date], lot: str, boites: int = 1,
                    unites_vrac: int = 0) -> pd.DataFrame:
@@ -871,14 +892,157 @@ def _date_iso(valeur) -> str:
     return peremption.isoformat() if peremption else ""
 
 
+def _ecrire_atomiquement(tableau: pd.DataFrame, chemin: Path) -> None:
+    """Écrit à côté, puis remplace d'un bloc.
+
+    Une écriture directe laisse le fichier à moitié rempli si le poste
+    s'éteint au mauvais moment — et l'inventaire d'un stock fermé n'a pas
+    de seconde copie. ``os.replace`` est atomique : le fichier passe d'une
+    version complète à l'autre, jamais par un entre-deux.
+    """
+    chemin = Path(chemin)
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    # Nom unique par PROCESSUS **et par fil** : le serveur traite chaque
+    # poste dans son propre fil, et deux fichiers de travail homonymes se
+    # voleraient mutuellement leur contenu à mi-écriture.
+    provisoire = chemin.with_name(
+        f"{chemin.name}.{os.getpid()}-{threading.get_ident()}.tmp")
+    try:
+        tableau.to_csv(provisoire, index=False, sep=";",
+                       encoding="utf-8-sig")
+        os.replace(provisoire, chemin)
+    finally:
+        if provisoire.exists():
+            try:
+                provisoire.unlink()
+            except OSError:                       # pragma: no cover
+                pass
+
+
 def sauver_inventaire(inventaire: pd.DataFrame, chemin: Path) -> None:
     """Écrit l'inventaire sur disque (dates en ISO, séparateur ``;``)."""
     tableau = (inventaire_vide() if inventaire is None or inventaire.empty
                else inventaire.reindex(columns=COLONNES_STOCK_FERME).copy())
     for colonne in ("Péremption", "Enregistré le"):
         tableau[colonne] = tableau[colonne].map(_date_iso)
-    Path(chemin).parent.mkdir(parents=True, exist_ok=True)
-    tableau.to_csv(chemin, index=False, sep=";", encoding="utf-8-sig")
+    _ecrire_atomiquement(tableau, chemin)
+
+
+# ---------------------------------------------------------------------------
+# Écriture partagée entre plusieurs postes
+# ---------------------------------------------------------------------------
+#
+# Plusieurs comptoirs peuvent scanner en même temps sur la même application.
+# Sans précaution, chacun réécrit le fichier entier depuis la version qu'il
+# avait en mémoire à l'ouverture de sa page : la boîte enregistrée par le
+# poste d'à côté disparaît, sans message. Le remède tient en deux règles —
+# on ne réécrit JAMAIS une photo, on relit puis on applique le mouvement ;
+# et on le fait sous verrou, pour que deux postes ne se croisent pas.
+
+#: Attente maximale du verrou. Au-delà on renonce plutôt que de bloquer le
+#: comptoir : une erreur visible vaut mieux qu'un écran figé.
+DELAI_VERROU_S = 10.0
+#: Un verrou plus vieux que cela vient d'un poste qui a planté ou a été
+#: éteint pendant l'écriture : on le reprend.
+AGE_VERROU_ABANDONNE_S = 30.0
+_ATTENTE_VERROU_S = 0.05
+
+
+class VerrouIndisponible(RuntimeError):
+    """Un autre poste écrit depuis trop longtemps."""
+
+
+@contextmanager
+def verrou_fichier(chemin: Path, delai_s: float = DELAI_VERROU_S):
+    """Empêche deux postes d'écrire le même fichier en même temps.
+
+    Le verrou est un fichier créé en mode « exclusif » : sa création est
+    atomique, y compris sur un dossier partagé en réseau — c'est ce qui la
+    rend préférable aux verrous du système, dont le comportement sur un
+    partage Windows n'est pas garanti.
+    """
+    verrou = Path(chemin).with_name(Path(chemin).name + ".verrou")
+    verrou.parent.mkdir(parents=True, exist_ok=True)
+    fin = time.monotonic() + delai_s
+    descripteur = None
+    while descripteur is None:
+        try:
+            descripteur = os.open(verrou, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                abandonne = (time.time() - verrou.stat().st_mtime
+                             > AGE_VERROU_ABANDONNE_S)
+            except OSError:                       # il vient de disparaître
+                abandonne = False
+            if abandonne:
+                _journal.warning("Verrou abandonné repris : %s", verrou)
+                try:
+                    verrou.unlink()
+                except OSError:                   # pragma: no cover
+                    pass
+                continue
+            if time.monotonic() > fin:
+                raise VerrouIndisponible(
+                    f"Un autre poste écrit encore dans {Path(chemin).name}.")
+            time.sleep(_ATTENTE_VERROU_S)
+    try:
+        os.write(descripteur, str(os.getpid()).encode())
+        yield
+    finally:
+        os.close(descripteur)
+        try:
+            verrou.unlink()
+        except OSError:                           # pragma: no cover
+            pass
+
+
+def empreinte_fichier(chemin: Path) -> tuple:
+    """Signature bon marché d'un fichier : (date de modification, taille).
+
+    Sert à savoir si un AUTRE poste a écrit depuis notre dernière lecture,
+    sans relire le fichier à chaque interaction.
+    """
+    try:
+        etat = Path(chemin).stat()
+    except OSError:
+        return (0, 0)
+    return (etat.st_mtime_ns, etat.st_size)
+
+
+class Ecriture(NamedTuple):
+    """Ce qui a été écrit, et l'empreinte du fichier au même instant.
+
+    Les deux voyagent ensemble parce qu'ils doivent être relevés **sous le
+    même verrou**. Prendre l'empreinte après coup ouvre une fenêtre : un
+    autre poste écrit entre-temps, on retient SON empreinte avec NOTRE
+    tableau, et le poste se croit à jour alors qu'il ne l'est pas — l'écran
+    reste en retard, et une correction du tableau effacerait la boîte du
+    voisin sans que rien ne le signale.
+    """
+    tableau: pd.DataFrame
+    empreinte: tuple
+
+
+def appliquer_a_l_inventaire(chemin: Path, mouvement,
+                             delai_s: float = DELAI_VERROU_S) -> Ecriture:
+    """Relit l'inventaire, applique ``mouvement``, réécrit — sous verrou.
+
+    ``mouvement`` reçoit l'inventaire **tel qu'il est sur le disque à cet
+    instant** et rend celui à enregistrer, ou ``None`` pour ne rien écrire.
+    C'est la seule façon d'ajouter une boîte sans effacer celle qu'un autre
+    poste vient d'ajouter : on n'écrase pas, on ajoute à ce qui est là.
+
+    Renvoie l'inventaire enregistré (ou celui relu, si rien n'a changé) et
+    l'empreinte du fichier, relevée sous le verrou.
+    """
+    chemin = Path(chemin)
+    with verrou_fichier(chemin, delai_s):
+        inventaire = charger_inventaire(chemin)
+        nouveau = mouvement(inventaire)
+        if nouveau is None:
+            return Ecriture(inventaire, empreinte_fichier(chemin))
+        sauver_inventaire(nouveau, chemin)
+        return Ecriture(nouveau, empreinte_fichier(chemin))
 
 
 def charger_inventaire(chemin: Path) -> pd.DataFrame:
@@ -1031,8 +1195,25 @@ def produit_connu(repertoire: pd.DataFrame, cip: str) -> Optional[dict]:
 def sauver_repertoire(repertoire: pd.DataFrame, chemin: Path) -> None:
     tableau = (repertoire_vide() if repertoire is None or repertoire.empty
                else repertoire.reindex(columns=COLONNES_REPERTOIRE))
-    Path(chemin).parent.mkdir(parents=True, exist_ok=True)
-    tableau.to_csv(chemin, index=False, sep=";", encoding="utf-8-sig")
+    _ecrire_atomiquement(tableau, Path(chemin))
+
+
+def appliquer_au_repertoire(chemin: Path, mouvement,
+                            delai_s: float = DELAI_VERROU_S) -> Ecriture:
+    """Même précaution que pour l'inventaire, pour les produits mémorisés.
+
+    Deux postes qui découvrent chacun un produit inconnu au même moment
+    doivent en garder DEUX : sans cela le second réenregistre le répertoire
+    qu'il avait en mémoire, et le produit du premier n'est plus reconnu.
+    """
+    chemin = Path(chemin)
+    with verrou_fichier(chemin, delai_s):
+        repertoire = charger_repertoire(chemin)
+        nouveau = mouvement(repertoire)
+        if nouveau is None:
+            return Ecriture(repertoire, empreinte_fichier(chemin))
+        sauver_repertoire(nouveau, chemin)
+        return Ecriture(nouveau, empreinte_fichier(chemin))
 
 
 def charger_repertoire(chemin: Path) -> pd.DataFrame:
