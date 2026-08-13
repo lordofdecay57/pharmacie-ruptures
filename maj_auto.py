@@ -49,6 +49,7 @@ RACINE_ARCHIVE = "pharmacie-ruptures-main"
 #: mettre-a-jour.bat — un test le vérifie.
 FICHIERS_PROTEGES = (
     "mettre-a-jour.bat",
+    "mettre-a-jour-serveur.bat",
     "config.yaml",
     "historique_commandes.csv",
     "etat_stock_precedent.csv",
