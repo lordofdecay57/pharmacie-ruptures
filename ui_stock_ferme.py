@@ -210,6 +210,14 @@ MESSAGE_VERROU = (
     "Un autre poste enregistre au même instant — rien n'a été modifié. "
     "Refaites le geste dans un instant.")
 
+#: Le cas le plus fréquent, et de loin : le fichier est ouvert dans Excel.
+#: Windows refuse alors de le remplacer, et sans ce message l'écran
+#: afficherait une trace d'erreur en anglais au milieu du comptoir.
+MESSAGE_FICHIER_BLOQUE = (
+    "Impossible d'enregistrer : le fichier `{fichier}` est ouvert dans un "
+    "autre programme (Excel, le plus souvent). Fermez-le, puis refaites le "
+    "geste — rien n'a été perdu.")
+
 
 def _memoriser_produit(**produit) -> None:
     """Ajoute un produit au répertoire du disque, sans écraser les autres."""
@@ -219,6 +227,11 @@ def _memoriser_produit(**produit) -> None:
             lambda courant: stock_ferme.memoriser_produit(courant, **produit))
     except stock_ferme.VerrouIndisponible:                   # pragma: no cover
         _journal.warning("Verrou du répertoire indisponible")
+        return
+    except OSError as erreur:
+        # Le nom du produit n'est pas mémorisé, mais la boîte, elle, va
+        # entrer au stock : on ne bloque pas le comptoir pour cela.
+        _journal.error("Répertoire non enregistré : %s", erreur)
         return
     st.session_state["sf_repertoire"] = ecriture.tableau
     st.session_state["sf_empreinte_repertoire"] = ecriture.empreinte
@@ -242,6 +255,12 @@ def _appliquer(mouvement, produit=None):
         _journal.warning("Verrou de l'inventaire indisponible")
         st.session_state["sf_message"] = ("avertissement", MESSAGE_VERROU)
         return None
+    except OSError as erreur:
+        _journal.error("Inventaire non enregistré : %s", erreur)
+        st.session_state["sf_message"] = (
+            "avertissement",
+            MESSAGE_FICHIER_BLOQUE.format(fichier=INVENTAIRE_PATH.name))
+        return None
     _memoriser(ecriture.tableau, ecriture.empreinte)
     return ecriture.tableau
 
@@ -262,6 +281,12 @@ def _enregistrer(inventaire=None, repertoire=None) -> None:
         except stock_ferme.VerrouIndisponible:
             st.session_state["sf_message"] = ("avertissement", MESSAGE_VERROU)
             return
+        except OSError as erreur:
+            _journal.error("Inventaire non enregistré : %s", erreur)
+            st.session_state["sf_message"] = (
+                "avertissement",
+                MESSAGE_FICHIER_BLOQUE.format(fichier=INVENTAIRE_PATH.name))
+            return
         _memoriser(inventaire, empreinte)
     if repertoire is not None:
         st.session_state["sf_repertoire"] = repertoire
@@ -271,6 +296,12 @@ def _enregistrer(inventaire=None, repertoire=None) -> None:
                 empreinte = stock_ferme.empreinte_fichier(REPERTOIRE_PATH)
         except stock_ferme.VerrouIndisponible:      # pragma: no cover
             _journal.warning("Verrou du répertoire indisponible")
+            return
+        except OSError as erreur:
+            _journal.error("Répertoire non enregistré : %s", erreur)
+            st.session_state["sf_message"] = (
+                "avertissement",
+                MESSAGE_FICHIER_BLOQUE.format(fichier=REPERTOIRE_PATH.name))
             return
         st.session_state["sf_empreinte_repertoire"] = empreinte
 
@@ -868,7 +899,7 @@ def _base_publique() -> None:
         st.rerun()
 
 
-def _import_repertoire(repertoire: pd.DataFrame) -> None:
+def _import_repertoire() -> None:
     """Pré-remplissage du répertoire depuis un fichier de la pharmacie.
 
     Le nom du médicament ne peut PAS venir du code-barres. Il doit venir
@@ -920,14 +951,33 @@ def _import_repertoire(repertoire: pd.DataFrame) -> None:
                    "dosage": (ligne[col_dosage]
                               if col_dosage != "(aucune)" else "")}
                   for _, ligne in tableau.iterrows()]
-        nouveau, ajoutes, ignores = stock_ferme.importer_repertoire(
-            repertoire, lignes)
-        _enregistrer(repertoire=nouveau)
+        # L'import s'applique au répertoire RELU sous verrou : le faire sur
+        # celui qu'on avait en mémoire effacerait les produits qu'un autre
+        # poste a nommés pendant qu'on choisissait ses colonnes.
+        compte = {}
+
+        def mouvement(courant):
+            nouveau, ajoutes, ignores = stock_ferme.importer_repertoire(
+                courant, lignes)
+            compte.update(ajoutes=ajoutes, ignores=ignores,
+                          total=len(nouveau))
+            return nouveau
+
+        try:
+            ecriture = stock_ferme.appliquer_au_repertoire(REPERTOIRE_PATH,
+                                                           mouvement)
+        except (stock_ferme.VerrouIndisponible, OSError) as erreur:
+            _journal.error("Import du répertoire abandonné : %s", erreur)
+            st.error(MESSAGE_FICHIER_BLOQUE.format(
+                fichier=REPERTOIRE_PATH.name))
+            return
+        st.session_state["sf_repertoire"] = ecriture.tableau
+        st.session_state["sf_empreinte_repertoire"] = ecriture.empreinte
         st.session_state["sf_message"] = (
-            "ok", f"📇 {ajoutes} produit(s) ajouté(s) au répertoire"
-                  + (f" · {ignores} ligne(s) sans code ou sans nom ignorée(s)"
-                     if ignores else "")
-                  + f" · {len(nouveau)} produit(s) reconnus désormais.")
+            "ok", f"📇 {compte['ajoutes']} produit(s) ajouté(s) au répertoire"
+                  + (f" · {compte['ignores']} ligne(s) sans code ou sans nom "
+                     "ignorée(s)" if compte["ignores"] else "")
+                  + f" · {compte['total']} produit(s) reconnus désormais.")
         st.rerun()
 
 
@@ -1147,7 +1197,7 @@ def rendre(etape, tuile_kpi) -> None:
 
     if mode == MODE_ENTREE:
         _base_publique()
-        _import_repertoire(repertoire)
+        _import_repertoire()
         inventaire, repertoire = _etat()
 
     if "sf_en_attente" in st.session_state and mode == MODE_ENTREE:

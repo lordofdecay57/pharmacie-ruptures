@@ -789,9 +789,15 @@ scanné ne se trouve nulle part ailleurs :
   sa nature. Si un autre poste a scanné pendant la saisie, la correction
   est **refusée** et annoncée, plutôt que d'effacer son travail en
   silence.
-- **Mise à jour.** Une seule à faire, sur le serveur. Passez par
-  `mettre-a-jour.bat` : `lancer-serveur.bat` ne met pas à jour une
-  application déjà démarrée.
+- **Mise à jour.** Une seule à faire, sur le serveur — mais elle ne se
+  fera **pas toute seule** : la mise à jour automatique n'a lieu qu'au
+  démarrage, et un serveur qui tourne en permanence ne redémarre jamais.
+  Passez par **`mettre-a-jour.bat`**, qui arrête l'application, remplace
+  les fichiers et la relance. Prévenez les postes : ils perdent la page
+  quelques secondes.
+- **Fichier ouvert dans Excel.** Windows refuse alors de le remplacer.
+  L'application le dit en une phrase et n'enregistre rien plutôt que de
+  laisser croire que c'est fait ; fermez Excel et refaites le geste.
 - **Pas de mot de passe.** Quiconque atteint le réseau de la pharmacie
   atteint l'application. C'est acceptable sur un réseau d'officine fermé ;
   ne l'exposez pas sur Internet.

@@ -20,8 +20,16 @@ REM  1. L'adresse donnee en parametre l'emporte.
 REM  2. Sinon celle laissee par le serveur a cote de ce script
 REM     (dossier partage) : personne n'a de chiffres a recopier.
 REM  3. Sinon on la demande.
+REM  La lecture est sur sa propre ligne : une redirection accrochee a un
+REM  "if" d'une seule ligne est l'un des pieges classiques de cmd. Elle
+REM  est traitee AVANT le test, et affiche une erreur quand le fichier
+REM  n'est pas la - c'est-a-dire dans le cas normal, hors dossier partage.
 set "ADRESSE=%~1"
-if not defined ADRESSE if exist "%~dp0adresse-serveur.txt" set /p ADRESSE=<"%~dp0adresse-serveur.txt"
+if defined ADRESSE goto adresse_connue
+if not exist "%~dp0adresse-serveur.txt" goto sans_fichier
+set /p ADRESSE=<"%~dp0adresse-serveur.txt"
+:sans_fichier
+:adresse_connue
 if not defined ADRESSE (
     echo.
     echo  Adresse du serveur de la pharmacie.

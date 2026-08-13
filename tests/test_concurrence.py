@@ -298,3 +298,108 @@ class TestStockDuLot:
     def test_un_inventaire_vide_vaut_zero(self):
         assert stock_ferme.stock_du_lot(
             stock_ferme.inventaire_vide(), "", "X", None, "") == 0
+
+
+class _FauxStreamlit:
+    """Le strict nécessaire pour exercer les fonctions d'écriture de l'écran.
+
+    Elles ne dessinent rien : elles écrivent un fichier et posent un
+    message. Un vrai Streamlit demanderait un navigateur pour vérifier deux
+    lignes de gestion d'erreur.
+    """
+
+    def __init__(self):
+        self.session_state = {}
+
+
+@pytest.fixture
+def ecran(tmp_path, monkeypatch):
+    """L'écran du stock fermé, branché sur des fichiers jetables."""
+    pytest.importorskip("streamlit")
+    import ui_stock_ferme
+
+    faux = _FauxStreamlit()
+    monkeypatch.setattr(ui_stock_ferme, "st", faux)
+    monkeypatch.setattr(ui_stock_ferme, "INVENTAIRE_PATH",
+                        tmp_path / "stock.csv")
+    monkeypatch.setattr(ui_stock_ferme, "REPERTOIRE_PATH",
+                        tmp_path / "produits.csv")
+    return ui_stock_ferme, faux
+
+
+class TestEcritureImpossible:
+    """Le fichier ouvert dans Excel : Windows refuse de le remplacer.
+
+    C'est le cas le plus fréquent, et il le devient davantage avec un
+    serveur — tout tient sur une seule machine. Sans traitement, l'écran
+    affichait une trace d'erreur en anglais au milieu du comptoir.
+    """
+
+    def test_le_comptoir_recoit_une_phrase_et_non_une_trace(
+            self, ecran, monkeypatch):
+        ui, faux = ecran
+
+        def refuser(*_args, **_kwargs):
+            raise PermissionError(13, "fichier utilise par un autre programme")
+
+        monkeypatch.setattr(os, "replace", refuser)
+        entree = _entree("PARACETAMOL")
+        assert ui._appliquer(
+            lambda courant: stock_ferme.ajouter_entree(courant, entree)) is None
+        niveau, texte = faux.session_state["sf_message"]
+        assert niveau == "avertissement"
+        assert "Excel" in texte and "stock.csv" in texte
+
+    def test_l_attente_du_verrou_a_son_propre_message(self, ecran,
+                                                      monkeypatch):
+        """Deux causes, deux remèdes : refaire le geste dans un instant, ou
+        aller fermer Excel. Un message unique enverrait chercher au mauvais
+        endroit."""
+        ui, faux = ecran
+
+        def occupe(*_args, **_kwargs):
+            raise stock_ferme.VerrouIndisponible("un autre poste écrit")
+
+        monkeypatch.setattr(stock_ferme, "appliquer_a_l_inventaire", occupe)
+        assert ui._appliquer(lambda courant: courant) is None
+        _, texte = faux.session_state["sf_message"]
+        assert "Un autre poste enregistre" in texte
+        assert "Excel" not in texte
+
+    def test_le_stock_reste_intact(self, ecran, monkeypatch):
+        """Rien n'a été perdu : c'est ce que le message promet."""
+        ui, faux = ecran
+        entree = _entree("PARACETAMOL")
+        ui._appliquer(
+            lambda courant: stock_ferme.ajouter_entree(courant, entree))
+
+        def refuser(*_args, **_kwargs):
+            raise PermissionError(13, "fichier utilise par un autre programme")
+
+        monkeypatch.setattr(os, "replace", refuser)
+        ui._appliquer(lambda courant: stock_ferme.ajouter_entree(
+            courant, _entree("IBUPROFENE")))
+        inventaire = stock_ferme.charger_inventaire(ui.INVENTAIRE_PATH)
+        assert list(inventaire["Nom du produit"]) == ["PARACETAMOL"]
+
+
+class TestEcranAJour:
+    def test_l_empreinte_retenue_est_celle_de_notre_ecriture(self, ecran):
+        """Sans quoi le poste se croirait à jour en affichant autre chose."""
+        ui, faux = ecran
+        ui._appliquer(lambda courant: stock_ferme.ajouter_entree(
+            courant, _entree("PARACETAMOL")))
+        assert (faux.session_state["sf_empreinte"]
+                == stock_ferme.empreinte_fichier(ui.INVENTAIRE_PATH))
+
+    def test_l_editeur_change_de_cle_a_chaque_ecriture(self, ecran):
+        """Ses corrections en cours repèrent les lignes par POSITION : les
+        rejouer sur un tableau réécrit recopierait un comptage sur le
+        mauvais médicament."""
+        ui, faux = ecran
+        ui._appliquer(lambda courant: stock_ferme.ajouter_entree(
+            courant, _entree("PARACETAMOL")))
+        premiere = faux.session_state["sf_generation"]
+        ui._appliquer(lambda courant: stock_ferme.ajouter_entree(
+            courant, _entree("IBUPROFENE")))
+        assert faux.session_state["sf_generation"] > premiere
