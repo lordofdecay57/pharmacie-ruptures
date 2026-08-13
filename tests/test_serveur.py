@@ -145,20 +145,25 @@ class TestMiseAJourDuServeur:
     """
 
     def test_relance_en_mode_serveur(self):
-        """Le défaut qui rendrait le serveur inaccessible en silence :
-        relancer avec les réglages d'un poste isolé. Les postes verraient
-        leur page mourir sans comprendre pourquoi."""
+        """Écrit noir sur blanc plutôt que laissé au défaut de Streamlit
+        (qui écoute aujourd'hui sur toutes les cartes réseau) : un serveur
+        ne doit pas dépendre d'un défaut susceptible de changer, et
+        l'intention doit se lire dans le script."""
         texte = _texte(MAJ_SERVEUR)
         assert "--server.address 0.0.0.0" in texte
         assert "--server.headless true" in texte
         assert f"--server.port {PORT}" in texte
 
-    def test_le_readme_deconseille_le_script_du_poste_isole(self):
-        """`mettre-a-jour.bat` relance sans `--server.address` : l'employer
-        sur un serveur le remettrait en marche avec les réglages d'un poste
-        isolé. Les deux noms se ressemblent trop pour laisser deviner."""
+    def test_le_readme_situe_les_deux_scripts_l_un_par_rapport_a_l_autre(self):
+        """Les deux noms se ressemblent trop pour laisser deviner. Et la
+        différence doit être dite JUSTE : employer celui du poste isolé sur
+        un serveur n'est pas une catastrophe — les postes retrouveraient
+        l'application — c'est simplement moins propre et sans journal."""
         texte = README.read_text(encoding="utf-8")
-        assert "n'utilisez **pas** `mettre-a-jour.bat`" in texte
+        situe = texte.split("préférez `mettre-a-jour-serveur.bat`", 1)
+        assert len(situe) > 1, "le README doit comparer les deux scripts"
+        assert "**fonctionnerait**" in situe[1][:600], (
+            "ne pas laisser croire que le mauvais script coupe la pharmacie")
 
     def test_silencieux_ne_bloque_sur_aucune_touche(self):
         """La tâche de nuit lance le script sans personne devant : un
