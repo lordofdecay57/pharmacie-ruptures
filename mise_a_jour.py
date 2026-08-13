@@ -26,9 +26,12 @@ from typing import Optional
 
 #: Sur un poste isolé : relance l'application pour ce poste.
 NOM_SCRIPT_POSTE = "mettre-a-jour.bat"
-#: Sur un serveur : relance en écoutant le réseau, pour tous les postes.
-#: Se tromper de script sur un serveur le remettrait en marche avec les
-#: réglages d'un poste isolé, et couperait les comptoirs sans un mot.
+#: Sur un serveur : relance en annonçant explicitement qu'on écoute le
+#: réseau, journalise, et sait rendre la main à la tâche de nuit.
+#: `mettre-a-jour.bat` marcherait aussi — Streamlit écoute par défaut sur
+#: toutes les cartes — mais il relance avec les réglages d'un poste isolé :
+#: navigateur ouvert sur l'écran du serveur, icône du mauvais lanceur posée
+#: sur son Bureau, et rien dans le journal.
 NOM_SCRIPT_SERVEUR = "mettre-a-jour-serveur.bat"
 
 #: Combien de temps l'application met à revenir, à annoncer avant le clic.

@@ -55,9 +55,9 @@ class TestChoixDuScript:
         assert script.name == mise_a_jour.NOM_SCRIPT_POSTE
 
     def test_un_serveur_prend_le_sien(self, installation):
-        """`mettre-a-jour.bat` relance sans `--server.address` : l'employer
-        sur un serveur le remettrait en marche avec les réglages d'un poste
-        isolé, et couperait tous les comptoirs sans un mot."""
+        """Les deux scripts marcheraient, mais celui du poste isolé
+        relance sans journal, ouvre un navigateur sur l'écran du serveur et
+        y pose l'icône du mauvais lanceur. Un serveur mérite le sien."""
         script = mise_a_jour.script_a_lancer(installation, mode_serveur=True)
         assert script.name == mise_a_jour.NOM_SCRIPT_SERVEUR
 

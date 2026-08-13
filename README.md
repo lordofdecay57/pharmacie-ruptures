@@ -921,9 +921,14 @@ déconnecter les postes.
 **`mettre-a-jour-serveur.bat`** : il arrête l'application, remplace les
 fichiers et **la relance en mode serveur**.
 
-> ⚠️ Sur un serveur, n'utilisez **pas** `mettre-a-jour.bat` : il relance
-> l'application avec les réglages d'un poste isolé. `mettre-a-jour-serveur.bat`
-> est le seul à repasser `--server.address 0.0.0.0`.
+> Sur un serveur, préférez `mettre-a-jour-serveur.bat`. `mettre-a-jour.bat`
+> **fonctionnerait** — les postes retrouveraient l'application, car
+> Streamlit écoute par défaut sur toutes les cartes réseau — mais il
+> relance avec les réglages d'un poste isolé : un navigateur s'ouvre sur
+> l'écran du serveur, une icône pointant vers le mauvais lanceur atterrit
+> sur son Bureau, et rien n'est écrit dans `maj_serveur.log`. Surtout, il
+> ne sait ni se taire ni rendre la main : c'est pourquoi la tâche de nuit
+> ne peut pas l'employer.
 
 #### Savoir ce qui s'est passé cette nuit
 
