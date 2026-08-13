@@ -732,19 +732,39 @@ ordinateur serveur et les postes s'y connectent par leur navigateur.
 **Rien n'est installé sur les postes.** Ni Python, ni l'application, ni
 données : ils reçoivent une icône, qui n'est qu'une adresse.
 
-### Sur le serveur, une fois
+### La procédure complète, dans l'ordre
+
+Rien d'autre à faire que ces huit points, et rien à sauter : chacun
+correspond à une panne qui, sinon, se découvre en pleine journée.
+
+**Sur le serveur**
 
 1. Installer Python et le dossier `pharmacie-ruptures/` comme sur un poste
    normal (voir [Installation](#installation-une-seule-fois)).
 2. Double-cliquer sur **`lancer-serveur.bat`**. Il affiche l'adresse à
    donner aux postes, par exemple `http://192.168.1.10:8501`.
-3. Autoriser le **port 8501** dans le pare-feu Windows du serveur — c'est
-   l'oubli qui explique presque tous les « ça ne marche pas ».
-4. Donner au serveur une **adresse IP fixe**. Sans cela l'adresse change au
-   redémarrage, et toutes les icônes des postes pointent dans le vide.
-5. Empêcher le serveur de **se mettre en veille**.
+3. Autoriser le **port 8501** dans le pare-feu Windows —
+   [comment faire](#ouvrir-le-port-8501-dans-le-pare-feu). C'est l'oubli
+   qui explique presque tous les « ça ne marche pas ».
+4. Donner au serveur une **adresse IP fixe** —
+   [comment faire, et comment savoir s'il en a déjà une](#donner-une-ip-fixe-au-serveur).
+   Sans cela l'adresse change, et toutes les icônes des postes pointent
+   dans le vide.
+5. Empêcher le serveur de **se mettre en veille** —
+   [comment faire](#empêcher-la-mise-en-veille). Endormi, il ne répond
+   plus.
+6. Lancer **`planifier-maj-serveur.bat`** —
+   [pourquoi c'est indispensable](#tenir-le-serveur-à-jour). Un serveur
+   allumé en permanence ne se met **jamais** à jour tout seul.
 
-Les trois réglages Windows sont détaillés ci-dessous.
+**Sur chaque poste**
+
+7. Lancer **`creer-raccourci-poste.bat`** —
+   [détail](#sur-chaque-poste-une-fois). Il pose l'icône du Bureau. Rien
+   n'est installé sur le poste.
+8. **Avant** de supprimer l'ancienne installation d'un poste, récupérer ses
+   fichiers — [lesquels et pourquoi](#les-postes-déjà-équipés). Ce qui y a
+   été scanné n'existe nulle part ailleurs.
 
 > ⚠️ La **fenêtre noire du serveur EST l'application**. La fermer arrête
 > l'utilitaire pour toute la pharmacie. Sur un serveur qui redémarre la
@@ -893,7 +913,7 @@ Deux conditions à connaître :
 #### À la main, quand le bandeau le signale
 
 Le plus simple est le **bouton de la barre latérale** (voir
-[Le bouton d'installation](#️-le-bouton-dinstallation-le-chemin-normal)) :
+[Le bouton d'installation](#-le-bouton-dinstallation-le-chemin-normal)) :
 sur un serveur, il lance le bon script et demande confirmation avant de
 déconnecter les postes.
 
