@@ -90,6 +90,15 @@ class TestRaccourciPoste:
     def test_lit_l_adresse_laissee_par_le_serveur(self):
         assert "adresse-serveur.txt" in _texte(POSTE)
 
+    def test_la_lecture_n_est_pas_accrochee_a_un_if(self):
+        """Piège classique de cmd : une redirection sur un « if » d'une seule
+        ligne est traitée AVANT le test, et se plaint quand le fichier n'est
+        pas là — c'est-à-dire dans le cas normal, hors dossier partagé."""
+        for ligne in _texte(POSTE).splitlines():
+            nu = ligne.strip().lower()
+            if nu.startswith("if ") and "set /p" in nu and "<" in nu:
+                pytest.fail(f"redirection accrochée à un « if » : {ligne}")
+
     def test_accepte_une_adresse_deja_complete(self):
         """On ne va pas reprocher à quelqu'un d'avoir collé ce qu'il voyait
         dans la barre du navigateur."""
