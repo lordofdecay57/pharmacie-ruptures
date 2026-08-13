@@ -15,7 +15,12 @@ import pytest
 RACINE = Path(__file__).resolve().parent.parent
 SERVEUR = RACINE / "lancer-serveur.bat"
 POSTE = RACINE / "creer-raccourci-poste.bat"
+MAJ_SERVEUR = RACINE / "mettre-a-jour-serveur.bat"
+PLANIFIER = RACINE / "planifier-maj-serveur.bat"
 README = RACINE / "README.md"
+
+#: Tous les scripts d'installation serveur, pour les contrôles communs.
+SCRIPTS = [SERVEUR, POSTE, MAJ_SERVEUR, PLANIFIER]
 
 PORT = "8501"
 
@@ -25,11 +30,11 @@ def _texte(chemin: Path) -> str:
 
 
 class TestScriptsPresents:
-    @pytest.mark.parametrize("chemin", [SERVEUR, POSTE])
+    @pytest.mark.parametrize("chemin", SCRIPTS)
     def test_le_script_existe(self, chemin):
         assert chemin.is_file(), f"{chemin.name} manquant à la racine"
 
-    @pytest.mark.parametrize("chemin", [SERVEUR, POSTE])
+    @pytest.mark.parametrize("chemin", SCRIPTS)
     def test_sans_accent(self, chemin):
         """cmd lit ces fichiers dans une page de codes qui n'est pas celle
         de l'éditeur : un « é » y devient un caractère illisible, au milieu
@@ -129,6 +134,140 @@ class TestRaccourciPoste:
         assert "streamlit run" not in texte
 
 
+class TestMiseAJourDuServeur:
+    """Un serveur qui tourne en continu ne se met jamais à jour tout seul.
+
+    La mise à jour automatique n'a lieu qu'au démarrage, et elle se reporte
+    tant que l'application répond : deux conditions qu'une machine allumée
+    en permanence ne remplit jamais. Ces scripts sont la seule voie qui
+    reste — s'ils se trompent, la pharmacie reste sur sa version du premier
+    jour sans que rien ne le signale.
+    """
+
+    def test_relance_en_mode_serveur(self):
+        """Le défaut qui rendrait le serveur inaccessible en silence :
+        relancer avec les réglages d'un poste isolé. Les postes verraient
+        leur page mourir sans comprendre pourquoi."""
+        texte = _texte(MAJ_SERVEUR)
+        assert "--server.address 0.0.0.0" in texte
+        assert "--server.headless true" in texte
+        assert f"--server.port {PORT}" in texte
+
+    def test_le_readme_deconseille_le_script_du_poste_isole(self):
+        """`mettre-a-jour.bat` relance sans `--server.address` : l'employer
+        sur un serveur le remettrait en marche avec les réglages d'un poste
+        isolé. Les deux noms se ressemblent trop pour laisser deviner."""
+        texte = README.read_text(encoding="utf-8")
+        assert "n'utilisez **pas** `mettre-a-jour.bat`" in texte
+
+    def test_silencieux_ne_bloque_sur_aucune_touche(self):
+        """La tâche de nuit lance le script sans personne devant : un
+        « Appuyez sur une touche » laisserait l'application arrêtée jusqu'au
+        matin, pharmacie hors service.
+
+        On ne regarde que le chemin RÉELLEMENT parcouru en mode silencieux :
+        le script saute la branche du double-clic, qui a le droit d'attendre
+        une touche puisque quelqu'un est devant.
+        """
+        lignes = _texte(MAJ_SERVEUR).splitlines()
+        saute, silencieux = False, []
+        for ligne in lignes:
+            nu = ligne.strip().lower()
+            if nu.startswith("if defined silence goto "):
+                saute = True                       # début de la branche écran
+                continue
+            if saute and nu.startswith(":"):
+                saute = False                      # la branche muette reprend
+            if not saute:
+                silencieux.append(ligne)
+
+        assert len(silencieux) < len(lignes), (
+            "aucun embranchement trouvé : le test ne vérifierait rien")
+        for ligne in silencieux:
+            nu = ligne.strip().lower()
+            if nu == "pause" or nu.startswith("pause "):
+                pytest.fail(f"pause atteignable sans personne devant : "
+                            f"{ligne!r}")
+            if nu.startswith("timeout ") and "/nobreak" not in nu:
+                pytest.fail(f"attente interruptible au clavier : {ligne!r}")
+
+    def test_la_tache_de_nuit_ne_retient_pas_l_application(self):
+        """Le planificateur de Windows arrête par défaut toute tâche qui
+        dépasse 72 heures. Si la tâche gardait l'application au premier
+        plan, le serveur mourrait tous les trois jours, en pleine journée,
+        sans que rien ne l'explique. En mode silencieux, l'application doit
+        donc partir dans son propre processus."""
+        texte = _texte(MAJ_SERVEUR)
+        detache = texte.split(":detache", 1)
+        assert len(detache) > 1, "il faut un chemin distinct pour la tâche"
+        assert "start " in detache[1], (
+            "l'application doit être lancée détachée, pas tenue par la tâche")
+        assert "streamlit run" in detache[1]
+
+    def test_ne_pose_pas_d_icone_sur_le_serveur(self):
+        """Personne ne s'assoit devant le serveur : une icône de Bureau y
+        est du bruit."""
+        assert "creer-raccourci.bat" not in _texte(MAJ_SERVEUR)
+
+    def test_journalise_chaque_execution(self):
+        """Une mise à jour faite à 5 h du matin doit rester explicable au
+        matin."""
+        texte = _texte(MAJ_SERVEUR)
+        assert "maj_serveur.log" in texte
+        assert "VERSION_APP" in texte, "le journal doit dire d'où l'on part"
+
+    def test_aucun_message_ne_se_transforme_en_redirection(self):
+        """``:dire`` affiche ``%~1``, ce qui RETIRE les guillemets : un
+        message contenant ``<``, ``>``, ``|`` ou ``&`` serait alors compris
+        comme une redirection, et cmd irait écrire dans un fichier au lieu
+        d'afficher la phrase. Le cas s'est produit avec un
+        « http://<ce serveur>:8501 » d'apparence inoffensive."""
+        for numero, ligne in enumerate(_texte(MAJ_SERVEUR).splitlines(), 1):
+            nu = ligne.strip()
+            if not nu.lower().startswith("call :dire"):
+                continue
+            message = nu.split('"', 1)[-1].rsplit('"', 1)[0]
+            interdits = [c for c in "<>|&" if c in message]
+            assert not interdits, (
+                f"ligne {numero} : {interdits} dans un message affiché "
+                f"sans guillemets — {ligne}")
+
+    def test_un_echec_ne_ferme_pas_la_pharmacie(self):
+        """Internet coupé, archive illisible : rien n'est modifié et
+        l'application en cours continue de tourner."""
+        assert ":echec" in _texte(MAJ_SERVEUR)
+
+
+class TestPlanification:
+    def test_enregistre_verifie_et_sait_se_retirer(self):
+        texte = _texte(PLANIFIER)
+        assert "schtasks /create" in texte
+        assert "schtasks /delete" in texte
+        assert "schtasks /query" in texte, (
+            "afficher la fiche de Windows vaut mieux qu'affirmer que "
+            "la tâche existe")
+
+    def test_tourne_dans_la_session_de_l_utilisateur(self):
+        """Sous ``SYSTEM``, la nouvelle instance démarrerait dans une
+        session invisible : plus personne ne pourrait l'arrêter, et la
+        fenêtre noire de l'application aurait disparu."""
+        for ligne in _texte(PLANIFIER).splitlines():
+            nu = ligne.strip().lower()
+            if nu.startswith("rem"):        # le commentaire l'explique
+                continue
+            assert "/ru system" not in nu, ligne
+
+    def test_lance_le_script_serveur_en_silencieux(self):
+        texte = _texte(PLANIFIER)
+        assert "mettre-a-jour-serveur.bat" in texte
+        assert "/silencieux" in texte
+
+    def test_une_heure_par_defaut_en_creux(self):
+        """Une mise à jour redémarre l'application : elle ne doit pas
+        tomber en pleine journée."""
+        assert "05:00" in _texte(PLANIFIER)
+
+
 class TestDocumentation:
     def test_le_readme_explique_l_installation_serveur(self):
         texte = README.read_text(encoding="utf-8")
@@ -148,6 +287,34 @@ class TestDocumentation:
                         "netsh interface ip set address",
                         "Longueur du préfixe de sous-réseau",
                         "hors de la plage distribuée par la box"):
+            assert attendu in texte, f"« {attendu} » absent du README"
+
+    def test_le_readme_dit_comment_savoir_si_l_ip_est_deja_fixe(self):
+        """Une réservation dans la box donne toujours la même adresse tout
+        en passant par le DHCP : « DHCP activé : Oui » ne prouve donc pas
+        que l'adresse bouge. Sans cette nuance, on refait un réglage déjà
+        fait — ou on croit à tort être tranquille."""
+        texte = README.read_text(encoding="utf-8")
+        for attendu in ("DHCP activé", "Baux statiques", "sans** réservation"):
+            assert attendu in texte, f"« {attendu} » absent du README"
+
+    def test_le_readme_dit_comment_reparer_une_adresse_changee(self):
+        """Les icônes des postes sont du texte : personne ne doit croire
+        qu'il faut tout réinstaller."""
+        texte = README.read_text(encoding="utf-8")
+        assert "Pharmacie.url" in texte and "Bloc-notes" in texte
+
+    def test_le_readme_explique_la_mise_a_jour_du_serveur(self):
+        """C'est le point sur lequel une pharmacie peut rester bloquée des
+        mois sans s'en apercevoir : rien ne signale qu'on ne se met plus à
+        jour, sinon un bandeau que personne ne lit deux fois."""
+        texte = README.read_text(encoding="utf-8")
+        for attendu in ("planifier-maj-serveur.bat",
+                        "mettre-a-jour-serveur.bat",
+                        "05:00",
+                        "maj_serveur.log",
+                        "session Windows du serveur doit rester ouverte",
+                        "redémarre l'application"):
             assert attendu in texte, f"« {attendu} » absent du README"
 
     def test_le_readme_previent_de_la_mise_en_veille(self):

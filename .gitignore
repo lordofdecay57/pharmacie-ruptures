@@ -24,3 +24,6 @@ web/.vercel/
 web/.env*.local
 # Adresse du serveur, ecrite par lancer-serveur.bat (propre a chaque reseau)
 adresse-serveur.txt
+
+# Journal des mises a jour du serveur (propre a chaque installation)
+maj_serveur.log

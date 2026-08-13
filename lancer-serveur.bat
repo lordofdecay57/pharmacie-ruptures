@@ -67,6 +67,10 @@ echo.
 echo    Sur chaque poste, lancez une seule fois
 echo    creer-raccourci-poste.bat : il pose l'icone du Bureau.
 echo.
+echo    Un serveur qui tourne en continu ne se met JAMAIS a jour
+echo    tout seul. Lancez une fois planifier-maj-serveur.bat :
+echo    Windows s'en chargera chaque nuit.
+echo.
 echo    NE FERMEZ PAS cette fenetre : elle EST l'application.
 echo  ============================================================
 echo.

@@ -781,8 +781,32 @@ clic droit → **Nouvelle règle** → **Port** → TCP, ports locaux `8501` →
 
 #### Donner une IP fixe au serveur
 
-**La bonne méthode : la réservation dans la box.** Elle ne peut pas entrer
-en conflit et survit à une réinstallation de Windows.
+**D'abord : en a-t-il déjà une ?** Il y a deux façons d'avoir une IP fixe,
+et l'une des deux ressemble à une IP dynamique quand on regarde vite.
+`ipconfig /all`, puis la ligne **`DHCP activé`** de la carte active :
+
+| Ce qu'on lit | Ce que ça veut dire |
+|---|---|
+| `DHCP activé : Non` | IP fixe réglée **sur le poste**. C'est fait. |
+| `DHCP activé : Oui` | L'adresse vient de la box — cela ne dit pas encore si elle est fixe. |
+
+Le second cas est ambigu parce qu'une **réservation dans la box** donne
+toujours la même adresse *tout en passant par le DHCP* : Windows affiche
+`Oui` alors que l'adresse ne bougera jamais. Pour trancher, ouvrez la page
+d'administration de la box → **DHCP → Baux statiques / Réservations**, et
+vérifiez que l'adresse MAC du serveur y figure.
+
+- `Non`, ou `Oui` **avec** réservation → rien à faire.
+- `Oui` **sans** réservation → l'adresse peut changer : agissez.
+
+Dans les deux cas où il n'y a rien à faire, une seule vérification reste
+utile : que l'adresse soit **hors de la plage distribuée par la box**. Le
+cas qui se voit en officine, c'est une IP fixe posée *dans* cette plage —
+cela marche des mois, puis un poste neuf reçoit la même adresse et les
+deux tombent le même matin.
+
+**Pour en poser une, la bonne méthode : la réservation dans la box.** Elle
+ne peut pas entrer en conflit et survit à une réinstallation de Windows.
 
 1. Sur le serveur : `ipconfig /all`.
 2. Relever l'**Adresse physique** de la carte active (`A1-B2-C3-D4-E5-F6`)
@@ -814,6 +838,12 @@ netsh interface ip set dns name="Ethernet" static 192.168.1.1
 Ensuite, relancez `lancer-serveur.bat` pour lire l'adresse définitive, puis
 repassez sur les postes avec `creer-raccourci-poste.bat` si elle a changé.
 
+> Si l'adresse change un jour malgré tout, rien n'est perdu : les icônes
+> des postes sont de simples fichiers texte. Relancez
+> `creer-raccourci-poste.bat` avec la nouvelle adresse, ou ouvrez
+> `Pharmacie.url` du Bureau avec le Bloc-notes et corrigez la ligne
+> `URL=`.
+
 #### Empêcher la mise en veille
 
 C'est l'oubli auquel personne ne pense : un serveur endormi ne répond
@@ -821,6 +851,71 @@ plus, et les postes affichent une page blanche sans explication.
 
 **Paramètres → Système → Alimentation** → « Veille » → **Jamais**. Le
 réglage de l'écran, lui, n'a aucune importance.
+
+### Tenir le serveur à jour
+
+**Un serveur qui tourne en continu ne se met JAMAIS à jour tout seul.** La
+mise à jour automatique n'a lieu qu'au **démarrage** de l'application, et
+elle se reporte tant que celle-ci répond sur le port 8501 — pour ne pas
+interrompre une session en cours. Une machine allumée en permanence ne
+remplit jamais ces deux conditions : sans le réglage ci-dessous, la
+pharmacie resterait indéfiniment sur sa version du premier jour.
+
+#### Chaque nuit, sans y penser (recommandé)
+
+Sur le serveur, **une seule fois** :
+
+```
+planifier-maj-serveur.bat
+```
+
+Windows lancera la mise à jour tous les jours à **05:00**. Pour une autre
+heure : `planifier-maj-serveur.bat 04:30`. Pour retirer la tâche :
+`planifier-maj-serveur.bat /supprimer`.
+
+Le script **affiche** la fiche enregistrée par Windows plutôt que d'affirmer
+que c'est fait. Pour la revoir plus tard :
+
+```
+schtasks /query /tn "Pilotage pharmacie - mise a jour" /v /fo list
+```
+
+Deux conditions à connaître :
+
+- la **session Windows du serveur doit rester ouverte** — écran verrouillé,
+  c'est parfait ; déconnecté, la tâche ne partira pas. C'est aussi pour cela
+  que la tâche s'exécute sous votre compte et non sous `SYSTEM` : c'est dans
+  votre session que vit la fenêtre noire de l'application ;
+- la mise à jour **redémarre l'application**. Les postes perdent leur page
+  quelques secondes, et une fiche de complément en cours de saisie est
+  perdue. D'où l'heure creuse.
+
+#### À la main, quand le bandeau le signale
+
+Le bandeau de l'application affiche « ⬆️ v5.8 disponible » dès qu'une
+version est publiée. Sur le serveur, double-cliquez sur
+**`mettre-a-jour-serveur.bat`** : il arrête l'application, remplace les
+fichiers et **la relance en mode serveur**.
+
+> ⚠️ Sur un serveur, n'utilisez **pas** `mettre-a-jour.bat` : il relance
+> l'application avec les réglages d'un poste isolé. `mettre-a-jour-serveur.bat`
+> est le seul à repasser `--server.address 0.0.0.0`.
+
+#### Savoir ce qui s'est passé cette nuit
+
+Chaque exécution écrit dans **`maj_serveur.log`**, à côté de l'application :
+horodatage, version avant et après, et la raison en cas d'abandon. Une mise
+à jour faite à 5 h du matin doit rester explicable au matin.
+
+En cas d'échec (Internet coupé, archive illisible), **rien n'est modifié** et
+l'application en cours continue de tourner : une mise à jour ratée ne doit
+jamais fermer la pharmacie.
+
+> Comme `mettre-a-jour.bat`, le script `mettre-a-jour-serveur.bat` n'est
+> **jamais remplacé** par une mise à jour — il est en cours d'exécution
+> pendant que les fichiers sont copiés, et cmd relit le fichier au fil des
+> lignes. Ses propres améliorations n'atteignent donc que les installations
+> neuves.
 
 ### Sur chaque poste, une fois
 
@@ -862,12 +957,9 @@ scanné ne se trouve nulle part ailleurs :
   sa nature. Si un autre poste a scanné pendant la saisie, la correction
   est **refusée** et annoncée, plutôt que d'effacer son travail en
   silence.
-- **Mise à jour.** Une seule à faire, sur le serveur — mais elle ne se
-  fera **pas toute seule** : la mise à jour automatique n'a lieu qu'au
-  démarrage, et un serveur qui tourne en permanence ne redémarre jamais.
-  Passez par **`mettre-a-jour.bat`**, qui arrête l'application, remplace
-  les fichiers et la relance. Prévenez les postes : ils perdent la page
-  quelques secondes.
+- **Mise à jour.** Une seule à faire, sur le serveur — mais elle ne se fera
+  pas toute seule sans un réglage à poser une fois : voir
+  [Tenir le serveur à jour](#tenir-le-serveur-à-jour) ci-dessous.
 - **Fichier ouvert dans Excel.** Windows refuse alors de le remplacer.
   L'application le dit en une phrase et n'enregistre rien plutôt que de
   laisser croire que c'est fait ; fermez Excel et refaites le geste.

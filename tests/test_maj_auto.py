@@ -250,15 +250,23 @@ class TestApplicationEnCours:
 # ---------------------------------------------------------------------------
 
 class TestCoherence:
-    def test_meme_liste_de_fichiers_proteges_que_le_script_manuel(self):
-        """Deux chemins de mise à jour, une seule liste de fichiers à
-        préserver : si elles divergent, une des deux voies écrasera les
+    @pytest.mark.parametrize("nom", ["mettre-a-jour.bat",
+                                     "mettre-a-jour-serveur.bat"])
+    def test_meme_liste_de_fichiers_proteges_que_le_script_manuel(self, nom):
+        """Trois chemins de mise à jour, une seule liste de fichiers à
+        préserver : si elles divergent, une des trois voies écrasera les
         données de la pharmacie."""
-        script = (RACINE / "mettre-a-jour.bat").read_text(encoding="utf-8",
-                                                          errors="replace")
+        script = (RACINE / nom).read_text(encoding="utf-8", errors="replace")
         ligne = next(l for l in script.splitlines() if "/XF" in l)
         exclus = ligne.split("/XF", 1)[1].split(">nul")[0].split()
         assert set(exclus) == set(FICHIERS_PROTEGES)
+
+    def test_les_scripts_de_mise_a_jour_se_protegent_eux_memes(self):
+        """Chacun est en cours d'exécution pendant que robocopy réécrit le
+        dossier, et cmd relit le fichier au fil des lignes : le remplacer
+        sous ses pieds lui ferait exécuter n'importe quoi."""
+        for nom in ("mettre-a-jour.bat", "mettre-a-jour-serveur.bat"):
+            assert nom in FICHIERS_PROTEGES, f"{nom} doit être protégé"
 
     def test_le_journal_est_protege_des_ecrasements(self):
         """maj_auto.log est produit sur le poste ; il n'est pas dans le

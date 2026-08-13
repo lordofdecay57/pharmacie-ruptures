@@ -57,7 +57,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "5.6"
+VERSION_APP = "5.7"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -243,8 +243,13 @@ def _version_publiee_cache() -> str:
 _maj = ""
 if st.session_state.get("verifier_version", True):
     if ui_commun.mise_a_jour_disponible(VERSION_APP, _version_publiee_cache()):
+        # Le bandeau est lu depuis N'IMPORTE QUEL poste, y compris ceux qui
+        # n'ont pas l'application chez eux : dire « lancez mettre-a-jour.bat »
+        # sans dire OÙ envoie chercher un fichier qui n'existe pas sur leur
+        # machine.
         _maj = (f'<span class="maj">⬆️ v{_version_publiee_cache()} disponible '
-                "— lancez <b>mettre-a-jour.bat</b></span>")
+                "— lancez <b>mettre-a-jour.bat</b> (sur un serveur : "
+                "<b>mettre-a-jour-serveur.bat</b>, sur le serveur)</span>")
 
 st.markdown(f"""
 <div class="hero">
