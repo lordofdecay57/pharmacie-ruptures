@@ -550,6 +550,95 @@ péremption**, plus le n° de lot. Dans le PDF, le statut est écrit en toutes
 lettres (les polices PDF standard n'ont pas de glyphe d'émoji) : la liste
 reste lisible imprimée en noir et blanc.
 
+## 💠 Module 4 — Commandes spéciales
+
+En Nouvelle-Calédonie, les médicaments très chers ne sont pas au stock : ils
+sont commandés à l'unité, par mail, et **importés du continent**. Le délai
+est de trois semaines à un mois.
+
+### Deux horloges, et tout l'intérêt est dans leur décalage
+
+| Horloge | Part de | Dure | Ce qu'elle décide |
+|---|---|---|---|
+| **Approvisionnement** | l'envoi du mail | le délai d'import | quand la boîte arrivera |
+| **Facturation** | la dernière facturation | **22 jours** (minimum imposé par la caisse) | quand on peut encaisser |
+
+Facturer tous les 22 jours va **plus vite** que la consommation réelle (une
+boîte par mois environ). Ce décalage est exactement ce qui permet :
+
+- d'**avancer la trésorerie** — indispensable sur des produits payés au
+  grossiste bien avant d'être remboursés ;
+- de constituer la **boîte d'avance** qui absorbe le mois d'import. Sans
+  elle, le patient attend l'avion.
+
+Un **dossier** = un patient + un médicament, suivi dans le temps. Le couple
+est ce qui porte les 22 jours : deux dossiers pour la même personne et le
+même produit feraient repartir le compteur à zéro, donc facturer trop tôt,
+donc un refus de la caisse. Le nom est comparé **sans accent ni casse** pour
+que « Mme Léa DUPONT » et « lea dupont » restent la même personne.
+
+### Ce qui est saisi, et ce qui se déduit
+
+**Saisi à la main** : patient, médicament, boîtes en main, date d'envoi du
+mail, date de réception, date de dernière facturation. Le **code CIP se
+remplit tout seul** : tapez les premières lettres du médicament, choisissez
+la boîte dans la liste, le code arrive avec (les 41 000 codes de la base
+publique, comme dans le module 3).
+
+**Déduit** — c'est là qu'un tableur s'arrête et qu'un module commence :
+
+- **Facturable le** = dernière facturation + 22 j, avec le compte à rebours ;
+- **Délai réellement observé** = réception − envoi. Au bout de quelques
+  mois, vous ne dites plus « trois semaines à un mois » : vous savez que *ce*
+  produit met 26 jours. C'est la **médiane** qui est retenue, pas la
+  moyenne — une commande oubliée trois mois dans un carton ferait sinon
+  commander bien trop tôt pour tous les autres patients ;
+- **En attente depuis N jours**, et 🔴 **en retard** au-delà du délai
+  habituel (plus cinq jours de marge : les imports ne sont pas réguliers) ;
+- **À commander** : si la prochaine boîte ne peut pas arriver avant la
+  facturation suivante, il faut commander **aujourd'hui**.
+
+### L'écran du matin : trois listes avant tout le reste
+
+1. **💰 À facturer aujourd'hui** — les 22 jours sont écoulés ;
+2. **📦 À commander maintenant** — sinon le patient attendra l'avion ;
+3. **⏰ Commandes en retard** — mail parti, rien reçu : relancez.
+
+Un même dossier peut tomber dans **deux listes à la fois**, et c'est le cas
+normal : s'il ne reste qu'une boîte et qu'elle part aujourd'hui à la
+facturation, il faut facturer **et** commander. Des listes rendues
+artificiellement exclusives cacheraient l'une des deux actions.
+
+### Les trois gestes du comptoir
+
+**Facturé et délivré**, **Boîte reçue**, **Mail de commande envoyé** : chacun
+met à jour la date **et** le nombre de boîtes, parce que ce sont les mêmes
+gestes dans la réalité. Facturer sort une boîte du stock ; recevoir en fait
+entrer une. Laisser corriger deux cases à la main laisserait l'avance
+fausse.
+
+### Rapprochement avec le stock fermé
+
+Les boîtes de commandes spéciales sont aussi scannées au stock fermé
+(module 3). Le module compare, **par code CIP**, ce que les dossiers
+annoncent et ce qui est physiquement là — et signale les écarts : une boîte
+reçue mais jamais scannée, ou scannée sans être rattachée à un dossier.
+
+> ⚠️ Ce que ce rapprochement ne peut **pas** faire : le code CIP identifie un
+> produit, pas une boîte. Si deux patients suivent le même médicament, rien
+> dans l'inventaire ne dit laquelle des boîtes est pour qui. On compare donc
+> des **totaux par produit**. Prétendre attribuer les boîtes une à une
+> serait inventer une information que les données ne contiennent pas.
+
+### Données nominatives
+
+C'est le **seul** module qui contient des noms de patients associés à des
+traitements. Le fichier `commandes_speciales.csv` ne quitte jamais la
+pharmacie (il n'est pas versionné, et une mise à jour ne l'écrase jamais).
+Mais sur un serveur en réseau local **sans mot de passe**, quiconque atteint
+le réseau atteint l'application : c'est acceptable sur un réseau d'officine
+fermé, ce ne l'est pas sur un réseau ouvert. Ne l'exposez pas sur Internet.
+
 ## Architecture
 
 Une seule règle : **la logique métier est strictement séparée de
@@ -579,24 +668,43 @@ base_medicaments.py   Identification d'un CIP via la base publique des
   (aucun autre module)  médicaments. Ne sait répondre qu'à « quel
                         médicament porte ce code ? ».
 
+stockage_partage.py   Écriture d'un fichier PARTAGÉ entre plusieurs postes :
+  (aucun autre module)  verrou, écriture atomique, empreinte relevée sous le
+                        verrou. Ne connaît aucun métier. Partagé par les
+                        modules 3 et 4 — cette mécanique délicate n'existe
+                        qu'à un seul endroit, la dupliquer serait la voir
+                        diverger, et une divergence ici perd des données.
+
 stock_ferme.py        MODULE 3 — logique métier pure du stock fermé.
-  (n'importe RIEN     Lecture des codes scannés (Data Matrix GS1, CIP13,
-   du projet)          CIP7), inventaire par lot, péremptions, exports
+  (stockage_partage   Lecture des codes scannés (Data Matrix GS1, CIP13,
+   seulement)          CIP7), inventaire par lot, péremptions, exports
                        CSV et PDF. Ne lit aucun fichier déposé.
 
 ui_stock_ferme.py     Interface Streamlit du MODULE 3, isolée dans son
   (import stock_ferme) propre fichier — reçoit d'app.py ses seules
                        fonctions d'habillage, en paramètres.
 
+commandes_speciales.py MODULE 4 — logique métier pure des commandes
+  (stockage_partage    spéciales. Les deux horloges (22 jours de la caisse,
+   seulement)          délai d'import mesuré), la décision de commander, le
+                       rapprochement par CIP. Ne va RIEN chercher tout seul :
+                       l'inventaire du stock fermé lui est passé en
+                       paramètre.
+
+ui_commandes_speciales.py Interface Streamlit du MODULE 4.
+  (+ base_medicaments)
+
 app.py                 Interface Streamlit UNIQUEMENT — importe les modules
-  (import les 4)        ci-dessus, propose le sélecteur d'espace de travail
+  (import les 6)        ci-dessus, propose le sélecteur d'espace de travail
                         puis les 2 onglets du parcours « cadencier ».
 ```
 
 `stock_rotation.py` et `moteur_ruptures.py` n'importent **jamais** l'un de
 l'autre : la mutualisation passe exclusivement par `commun.py`.
-`stock_ferme.py`, lui, n'importe aucun module du projet — un test le
-vérifie. C'est ce qui
+`stock_ferme.py` et `commandes_speciales.py` n'importent que
+`stockage_partage.py`, et jamais l'un l'autre — un test le vérifie. Le
+rapprochement du module 4 avec les boîtes du stock fermé se fait donc en
+LISANT son fichier, sans dépendre de son code. C'est ce qui
 garantit qu'on peut faire évoluer la politique de stock sans risquer de
 casser le calcul des ruptures, et inversement.
 

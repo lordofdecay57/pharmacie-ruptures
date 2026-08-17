@@ -56,6 +56,7 @@ FICHIERS_PROTEGES = (
     "etat_stock_precedent.sig",
     "stock_ferme.csv",
     "stock_ferme_produits.csv",
+    "commandes_speciales.csv",
     "base_medicaments.csv",
 )
 
