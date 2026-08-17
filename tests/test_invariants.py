@@ -10,7 +10,9 @@ Ces contrôles sont nés d'un audit du code : ils y restent pour que ce qui a
 été vérifié une fois le soit à chaque exécution.
 """
 
+import ast
 import itertools
+import pathlib
 import random
 from datetime import date, timedelta
 
@@ -250,3 +252,69 @@ class TestModuleStockFerme:
             tout = sf.filtrer_inventaire(inventaire, aujourdhui=AUJOURDHUI,
                                          tri=tri)
             assert len(tout) == len(inventaire)
+
+
+class TestIsolationDesModules:
+    """Les modules métier ne s'importent jamais l'un l'autre.
+
+    C'est ce qui garantit qu'on peut faire évoluer la politique de stock
+    sans risquer de casser les ruptures, et le stock fermé sans toucher aux
+    commandes spéciales. Une dépendance ajoutée par commodité un jour de
+    hâte se paie des mois plus tard, et rien ne la signale — sauf ce test.
+    """
+
+    #: Le seul module de service que les moteurs ont le droit d'importer.
+    #: Il ne connaît aucun métier : verrou, écriture atomique, empreinte.
+    SERVICES_AUTORISES = {"stockage_partage"}
+
+    #: Modules du projet, tels qu'ils vivent à la racine.
+    def _modules_du_projet(self) -> set:
+        racine = pathlib.Path(__file__).resolve().parent.parent
+        return {f.stem for f in racine.glob("*.py")}
+
+    def _imports(self, nom: str) -> set:
+        """Modules du projet importés par ce fichier, quel que soit le style
+        (``import x``, ``import x as y``, ``from x import z``)."""
+        racine = pathlib.Path(__file__).resolve().parent.parent
+        arbre = ast.parse((racine / f"{nom}.py").read_text(encoding="utf-8"))
+        projet = self._modules_du_projet()
+        trouves = set()
+        for noeud in ast.walk(arbre):
+            if isinstance(noeud, ast.Import):
+                trouves |= {a.name.split(".")[0] for a in noeud.names}
+            elif isinstance(noeud, ast.ImportFrom) and noeud.module:
+                trouves.add(noeud.module.split(".")[0])
+        return trouves & projet
+
+    @pytest.mark.parametrize("moteur", ["stock_ferme", "commandes_speciales"])
+    def test_un_moteur_n_importe_que_le_service_de_stockage(self, moteur):
+        interdits = self._imports(moteur) - self.SERVICES_AUTORISES
+        assert not interdits, (
+            f"{moteur}.py importe {sorted(interdits)} : la logique métier "
+            "doit rester indépendante")
+
+    def test_le_stock_ferme_et_les_commandes_s_ignorent(self):
+        """Le rapprochement du module 4 lit le FICHIER du stock fermé, pas
+        son code : c'est ce qui permet de faire évoluer l'un sans l'autre."""
+        assert "stock_ferme" not in self._imports("commandes_speciales")
+        assert "commandes_speciales" not in self._imports("stock_ferme")
+
+    def test_les_deux_modules_du_cadencier_s_ignorent(self):
+        """La mutualisation passe exclusivement par ``commun.py``."""
+        assert "moteur_ruptures" not in self._imports("stock_rotation")
+        assert "stock_rotation" not in self._imports("moteur_ruptures")
+
+    def test_le_service_de_stockage_ne_connait_aucun_metier(self):
+        """S'il importait un module métier, il ne serait plus partageable —
+        et la mécanique du verrou finirait dupliquée."""
+        assert self._imports("stockage_partage") == set()
+
+    @pytest.mark.parametrize("moteur", ["stock_ferme", "commandes_speciales",
+                                        "stock_rotation", "moteur_ruptures",
+                                        "stockage_partage"])
+    def test_aucun_moteur_n_importe_streamlit(self, moteur):
+        """La logique métier doit être testable sans navigateur ni session :
+        c'est ce qui rend possible les 700 tests qui tournent en 30 s."""
+        racine = pathlib.Path(__file__).resolve().parent.parent
+        source = (racine / f"{moteur}.py").read_text(encoding="utf-8")
+        assert "import streamlit" not in source

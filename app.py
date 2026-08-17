@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "5.8"
+VERSION_APP = "6.0"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -182,6 +182,7 @@ st.markdown("""
 .espace { border-left: 5px solid #0f766e; padding: 2px 0 2px 14px;
   margin: 4px 0 16px 0; }
 .espace.ferme { border-left-color: #7c3aed; }
+.espace.speciales { border-left-color: #b45309; }
 .espace .titre { font-size: 1.3rem; font-weight: 700; color: #0b0b0b; }
 .espace .sous  { font-size: .88rem; color: #6b6a66; margin-top: 2px; }
 
@@ -289,6 +290,7 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 
 ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "🔒  Stock fermé — inventaire scanné"
+ESPACE_COMMANDES = "💠  Commandes spéciales — patients & facturation"
 
 DOSSIER_APP = Path(__file__).resolve().parent
 
@@ -415,11 +417,18 @@ _proposer_mise_a_jour()
 _proposer_raccourci()
 
 espace = st.segmented_control(
-    "Espace de travail", [ESPACE_CADENCIER, ESPACE_STOCK_FERME],
+    "Espace de travail",
+    [ESPACE_CADENCIER, ESPACE_STOCK_FERME, ESPACE_COMMANDES],
     default=ESPACE_CADENCIER, label_visibility="collapsed",
     key="espace_travail", width="stretch", on_change=_garder_espace)
 if espace is None:  # premier rendu suivant une déselection
     espace = st.session_state.get("espace_retenu", ESPACE_CADENCIER)
+
+if espace == ESPACE_COMMANDES:
+    import ui_commandes_speciales
+    _entete_espace("💠 Commandes spéciales", variante="speciales")
+    ui_commandes_speciales.rendre(_etape, _tuile_kpi)
+    st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
 if espace == ESPACE_STOCK_FERME:
     import ui_stock_ferme

@@ -24,11 +24,12 @@ RACINE = Path(__file__).resolve().parent.parent
 NAVIGATEUR = "/opt/pw-browsers/chromium"
 DEMARRAGE_MAX_S = 60
 
-#: Libellés des deux espaces de travail, tels qu'affichés dans les onglets.
+#: Libellés des TROIS espaces de travail, tels qu'affichés dans les onglets.
 #: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
 ESPACE_CADENCIER = "Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "Stock fermé — inventaire scanné"
+ESPACE_COMMANDES = "Commandes spéciales — patients & facturation"
 
 
 def _port_libre() -> int:
@@ -566,3 +567,89 @@ class TestPostesSimultanes:
         poste_a.wait_for_timeout(4000)
         _sans_exception(poste_a)
         assert "PRODUIT DU POSTE B" in poste_a.content()
+
+
+# ---------------------------------------------------------------------------
+# Module 4 — Commandes spéciales
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def page_commandes(tmp_path_factory, pilote):
+    """Onglet ouvert sur les commandes spéciales, deux dossiers en place.
+
+    Les dossiers sont posés AVANT le démarrage : l'écran doit montrer ses
+    trois listes tout de suite, c'est son unique raison d'être. Un module
+    vide ne prouverait rien.
+    """
+    travail = tmp_path_factory.mktemp("appli_commandes")
+    (travail / "base_medicaments.csv").write_text(
+        "Code CIP;Nom du produit;Présentation\n"
+        "3400930000019;KEYTRUDA 100 mg, solution;flacon de 4 mL\n",
+        encoding="utf-8-sig")
+    (travail / "commandes_speciales.csv").write_text(
+        "Patient;Nom du produit;Code CIP;Boîtes en main;Envoi du mail;"
+        "Réception;Dernière facturation;Notes\n"
+        "Mme LEA DUPONT;KEYTRUDA 100 mg;3400930000019;1;2026-07-10;"
+        "2026-08-05;2026-07-20;\n"
+        "M. PAUL MARTIN;OPDIVO 40 mg;3400930000026;0;;;2026-08-10;urgent\n",
+        encoding="utf-8-sig")
+    lanceur = _lancer(travail)
+    url = next(lanceur)
+
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1500, "height": 1200})
+    onglet.goto(url, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    onglet.get_by_text(ESPACE_COMMANDES).first.click()
+    onglet.wait_for_timeout(8000)
+    yield onglet
+    navigateur.close()
+    for _ in lanceur:                       # referme Streamlit
+        pass
+
+
+class TestCommandesSpeciales:
+    def test_l_espace_est_propose_des_l_arrivee(self, page, application):
+        """Trois espaces, trois onglets visibles : savoir dans lequel on se
+        trouve est la première chose à voir. La page est ouverte ICI : un
+        test qui dépend de l'ordre d'exécution ne prouve rien."""
+        _ouvrir(page, application)
+        assert page.get_by_text(ESPACE_COMMANDES).count() >= 1
+
+    def test_l_ecran_s_ouvre_sans_exception(self, page_commandes):
+        _sans_exception(page_commandes)
+        assert "Commandes spéciales" in page_commandes.content()
+
+    def test_les_trois_questions_du_matin_sont_posees(self, page_commandes):
+        """C'est l'unique raison d'être de l'écran : dire quoi faire
+        aujourd'hui avant de montrer un tableau."""
+        contenu = page_commandes.content()
+        assert "À facturer aujourd'hui" in contenu
+        assert "À commander maintenant" in contenu
+
+    def test_les_dossiers_en_place_sont_affiches(self, page_commandes):
+        contenu = page_commandes.content()
+        assert "LEA DUPONT" in contenu
+        assert "PAUL MARTIN" in contenu
+
+    def test_aucune_mention_anglaise_ne_traine(self, page_commandes):
+        """« None » dans une colonne serait la seule note anglo-saxonne d'un
+        écran entièrement en français."""
+        tableaux = page_commandes.locator('[data-testid="stDataFrame"]')
+        for i in range(tableaux.count()):
+            assert "None" not in tableaux.nth(i).inner_text()
+
+    def test_les_trois_gestes_du_comptoir_sont_la(self, page_commandes):
+        contenu = page_commandes.content()
+        for geste in ("Facturé et délivré", "Boîte reçue",
+                      "Mail de commande envoyé"):
+            assert geste in contenu, geste
+
+    def test_facturer_relance_les_22_jours(self, page_commandes):
+        """Le geste complet : la date repart, et une boîte sort du stock.
+        Les séparer laisserait l'avance fausse."""
+        page_commandes.get_by_role(
+            "button", name="Facturé et délivré").first.click()
+        page_commandes.wait_for_timeout(6000)
+        _sans_exception(page_commandes)
+        assert "facturé le" in page_commandes.content()

@@ -78,7 +78,7 @@ REM  les donnees de la pharmacie. Cette liste doit rester identique a
 REM  celle de mettre-a-jour.bat et a maj_auto.FICHIERS_PROTEGES : un
 REM  test le verifie.
 call :dire "[3/5] Installation des fichiers..."
-robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv base_medicaments.csv >nul
+robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
 if %ERRORLEVEL% GEQ 8 (
     call :dire "[ERREUR] Copie des fichiers impossible."
     goto echec

@@ -27,3 +27,6 @@ adresse-serveur.txt
 
 # Journal des mises a jour du serveur (propre a chaque installation)
 maj_serveur.log
+
+# Module 4 — Commandes speciales (dossiers patients, donnees nominatives)
+commandes_speciales.csv

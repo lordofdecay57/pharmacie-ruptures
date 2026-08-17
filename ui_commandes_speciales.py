@@ -1,0 +1,552 @@
+# -*- coding: utf-8 -*-
+"""Interface du Module 4 — Commandes spéciales.
+
+Écran autonome : il ne dépend d'aucun fichier déposé. Toute la logique est
+dans ``commandes_speciales.py`` ; ce fichier ne fait que l'habillage
+Streamlit.
+
+Ergonomie visée : **répondre à trois questions avant tout le reste** — qui
+puis-je facturer aujourd'hui, pour qui faut-il commander, quelle commande
+est en retard. Le tableau complet vient après : c'est la référence, pas le
+geste du matin.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date
+
+import pandas as pd
+import streamlit as st
+
+import base_medicaments
+import commandes_speciales as cs
+import ui_commun
+
+_journal = logging.getLogger("pharmacie.commandes_speciales.ui")
+
+DOSSIERS_PATH = ui_commun.dossier_donnees() / "commandes_speciales.csv"
+INVENTAIRE_PATH = ui_commun.dossier_donnees() / "stock_ferme.csv"
+BASE_MEDICAMENTS_PATH = ui_commun.dossier_donnees() / "base_medicaments.csv"
+
+_MIME_CSV = "text/csv"
+_MIME_PDF = "application/pdf"
+
+#: Colonnes que l'on peut corriger directement dans le tableau. Les statuts
+#: et les comptes à rebours n'en font pas partie : ils se déduisent.
+_COLONNES_EDITABLES = ("Patient", "Nom du produit", "Boîtes en main",
+                       "Envoi du mail", "Réception", "Dernière facturation",
+                       "Notes")
+
+MESSAGE_VERROU = (
+    "Un autre poste enregistre au même instant — rien n'a été modifié. "
+    "Refaites le geste dans un instant.")
+MESSAGE_FICHIER_BLOQUE = (
+    "Impossible d'enregistrer : le fichier `{fichier}` est ouvert dans un "
+    "autre programme (Excel, le plus souvent). Fermez-le, puis refaites le "
+    "geste — rien n'a été perdu.")
+
+
+def _colonnes_vue() -> dict:
+    """Mise en forme du tableau, partagée par toutes ses apparitions.
+
+    Tout est centré, comme dans le stock fermé : sur des colonnes larges,
+    un nombre collé au bord droit finit loin de son en-tête.
+    """
+    jour = dict(format="DD/MM/YYYY", width="small", alignment="center")
+    nombre = dict(min_value=0, step=1, width="small", alignment="center")
+    return {
+        "Facturation": st.column_config.TextColumn(
+            "Facturation", width="small", alignment="center"),
+        "Patient": st.column_config.TextColumn("Patient", alignment="center"),
+        "Nom du produit": st.column_config.TextColumn(
+            "Produit", alignment="center"),
+        "Code CIP": st.column_config.TextColumn(
+            "Code CIP", alignment="center", disabled=True),
+        "Boîtes en main": st.column_config.NumberColumn("En main", **nombre),
+        "Facturable le": st.column_config.DateColumn("Facturable le", **jour),
+        "Jours avant facturation": st.column_config.NumberColumn(
+            "J avant fact.", width="small", alignment="center"),
+        "Commande": st.column_config.TextColumn(
+            "Commande", width="small", alignment="center"),
+        "Envoi du mail": st.column_config.DateColumn("Mail envoyé", **jour),
+        "Réception": st.column_config.DateColumn("Reçu le", **jour),
+        "Attente (j)": st.column_config.NumberColumn(
+            "Attente (j)", width="small", alignment="center"),
+        "Délai observé (j)": st.column_config.NumberColumn(
+            "Délai réel (j)", width="small", alignment="center"),
+        "À commander": st.column_config.TextColumn(
+            "À commander", width="small", alignment="center"),
+        "Dernière facturation": st.column_config.DateColumn(
+            "Dern. facturation", **jour),
+        "Notes": st.column_config.TextColumn("Notes", alignment="center"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mémoire de session
+# ---------------------------------------------------------------------------
+
+def _etat() -> pd.DataFrame:
+    """Les dossiers, relus dès qu'un autre poste écrit.
+
+    Même précaution que le stock fermé : sur un serveur partagé, garder la
+    photo prise à l'ouverture ferait réenregistrer plus tard une version qui
+    ignore la facturation saisie au comptoir d'à côté.
+    """
+    empreinte = cs.empreinte_fichier(DOSSIERS_PATH)
+    if ("cs_dossiers" not in st.session_state
+            or st.session_state.get("cs_empreinte") != empreinte):
+        premiere = "cs_dossiers" not in st.session_state
+        st.session_state["cs_dossiers"] = cs.charger(DOSSIERS_PATH)
+        st.session_state["cs_empreinte"] = empreinte
+        if not premiere:
+            st.session_state["cs_generation"] = (
+                st.session_state.get("cs_generation", 0) + 1)
+        _journal.info("Commandes spéciales — %d dossier(s) relus depuis %s",
+                      len(st.session_state["cs_dossiers"]), DOSSIERS_PATH)
+    return st.session_state["cs_dossiers"]
+
+
+def _memoriser(dossiers, empreinte=None) -> None:
+    st.session_state["cs_dossiers"] = dossiers
+    st.session_state["cs_empreinte"] = (
+        empreinte if empreinte is not None
+        else cs.empreinte_fichier(DOSSIERS_PATH))
+    st.session_state["cs_generation"] = (
+        st.session_state.get("cs_generation", 0) + 1)
+
+
+def _appliquer(mouvement):
+    """Applique un mouvement aux dossiers **du disque**, sous verrou.
+
+    Deux comptoirs peuvent enregistrer une facturation au même instant :
+    sans cela, la seconde effacerait la première et les 22 jours
+    repartiraient de la mauvaise date — donc un refus de la caisse.
+    """
+    try:
+        ecriture = cs.appliquer_aux_dossiers(DOSSIERS_PATH, mouvement)
+    except cs.VerrouIndisponible:
+        st.session_state["cs_message"] = ("avertissement", MESSAGE_VERROU)
+        return None
+    except OSError as erreur:
+        _journal.error("Dossiers non enregistrés : %s", erreur)
+        st.session_state["cs_message"] = (
+            "avertissement",
+            MESSAGE_FICHIER_BLOQUE.format(fichier=DOSSIERS_PATH.name))
+        return None
+    _memoriser(ecriture.tableau, ecriture.empreinte)
+    return ecriture.tableau
+
+
+def _catalogue() -> list:
+    """Le catalogue des boîtes de la base publique, figé par session.
+
+    Recalculé à chaque interaction, il repartirait en entier dans le
+    navigateur au lieu d'une simple référence.
+    """
+    empreinte = (BASE_MEDICAMENTS_PATH.stat().st_mtime
+                 if BASE_MEDICAMENTS_PATH.exists() else 0)
+    if st.session_state.get("cs_base_empreinte") != empreinte:
+        table = base_medicaments.charger_table(BASE_MEDICAMENTS_PATH)
+        catalogue = base_medicaments.catalogue(
+            base_medicaments.index_par_nom(table))
+        st.session_state["cs_base_catalogue"] = catalogue
+        st.session_state["cs_base_par_libelle"] = {
+            m["libelle"]: m for m in catalogue}
+        st.session_state["cs_base_empreinte"] = empreinte
+    return st.session_state["cs_base_catalogue"]
+
+
+def _inventaire_stock_ferme() -> pd.DataFrame:
+    """L'inventaire du stock fermé, lu SANS importer son module.
+
+    Le rapprochement a besoin des boîtes physiques, mais ce module n'a pas à
+    dépendre du stock fermé : on lit son fichier, colonnes utiles seulement.
+    S'il n'existe pas, le rapprochement dira simplement « 0 au stock ».
+    """
+    if not INVENTAIRE_PATH.exists():
+        return pd.DataFrame(columns=["Code CIP", "Boîtes"])
+    try:
+        tableau = pd.read_csv(INVENTAIRE_PATH, sep=";", dtype=str,
+                              encoding="utf-8-sig").fillna("")
+    except Exception:
+        _journal.warning("Inventaire du stock fermé illisible : %s",
+                         INVENTAIRE_PATH)
+        return pd.DataFrame(columns=["Code CIP", "Boîtes"])
+    return tableau.reindex(columns=["Code CIP", "Boîtes"]).fillna("")
+
+
+# ---------------------------------------------------------------------------
+# Saisie
+# ---------------------------------------------------------------------------
+
+def _medicament_choisi() -> None:
+    """Une boîte vient d'être choisie : nom et CIP sont renseignés."""
+    libelle = st.session_state.get("cs_auto_nom")
+    st.session_state["cs_auto_nom"] = None
+    medicament = st.session_state.get("cs_base_par_libelle", {}).get(libelle)
+    if medicament:
+        st.session_state["cs_nouveau_produit"] = medicament["nom"]
+        st.session_state["cs_nouveau_cip"] = medicament["cip"]
+
+
+def _formulaire_nouveau() -> None:
+    """Ouvrir un dossier : un patient, un produit, et les dates connues."""
+    catalogue = _catalogue()
+    if catalogue:
+        st.selectbox(
+            "Médicament", [m["libelle"] for m in catalogue], index=None,
+            key="cs_auto_nom", on_change=_medicament_choisi,
+            label_visibility="collapsed",
+            placeholder="🔎 Tapez le nom du médicament, puis le dosage pour "
+                        f"affiner ({len(catalogue)} boîtes référencées)")
+    else:
+        st.caption("Base publique des médicaments absente : le nom et le "
+                   "code CIP sont à taper à la main. Installez-la depuis "
+                   "l'espace « Stock fermé » pour les voir se remplir seuls.")
+
+    with st.form("cs_nouveau", clear_on_submit=True):
+        c1, c2, c3 = st.columns([2, 3, 2])
+        patient = c1.text_input("Patient", key="cs_nouveau_patient",
+                               placeholder="Nom du patient")
+        produit = c2.text_input("Médicament", key="cs_nouveau_produit",
+                                placeholder="Dénomination")
+        cip = c3.text_input("Code CIP", key="cs_nouveau_cip",
+                            placeholder="13 chiffres")
+        c4, c5, c6, c7 = st.columns(4)
+        boites = c4.number_input("Boîtes en main", min_value=0, step=1,
+                                 value=0, key="cs_nouveau_boites")
+        envoi = c5.text_input("Envoi du mail", key="cs_nouveau_envoi",
+                              placeholder="jj/mm/aaaa")
+        reception = c6.text_input("Réception", key="cs_nouveau_reception",
+                                  placeholder="jj/mm/aaaa")
+        facturation = c7.text_input("Dernière facturation",
+                                    key="cs_nouveau_facturation",
+                                    placeholder="jj/mm/aaaa")
+        notes = st.text_input("Notes", key="cs_nouveau_notes",
+                              placeholder="Facultatif")
+        valide = st.form_submit_button("➕ Ouvrir le dossier", type="primary",
+                                       use_container_width=True)
+
+    if not valide:
+        return
+    if not patient.strip() or not produit.strip():
+        st.error("**Patient et médicament sont indispensables.** C'est le "
+                 "couple qui identifie un dossier — et c'est lui qui porte "
+                 "les 22 jours entre deux facturations.")
+        return
+
+    resultat = _appliquer(lambda courant: cs.ajouter_dossier(
+        courant, patient, produit, cip, boites=int(boites), envoi=envoi,
+        reception=reception, facturation=facturation, notes=notes))
+    if resultat is None:
+        return
+    st.session_state["cs_message"] = (
+        "ok", f"📁 {patient} — {produit} : dossier enregistré.")
+    st.rerun()
+
+
+def _actions_rapides(dossiers: pd.DataFrame, aujourdhui: date) -> None:
+    """Les trois gestes du comptoir, sans passer par le tableau.
+
+    Facturer, recevoir, commander : chacun met à jour la bonne date ET le
+    nombre de boîtes, parce que ce sont les mêmes gestes dans la réalité.
+    Laisser corriger deux cases à la main serait laisser l'avance fausse.
+    """
+    if dossiers.empty:
+        return
+    vue = cs.vue_affichable(dossiers, aujourdhui, cs.TRI_PATIENT)
+    libelles = [f"{l['Patient']} — {l['Nom du produit']}"
+                for _, l in vue.iterrows()]
+
+    with st.container(border=True):
+        st.markdown("**Enregistrer un geste**")
+        choix = st.selectbox("Dossier", range(len(libelles)),
+                             format_func=lambda i: libelles[i],
+                             key="cs_geste_dossier",
+                             label_visibility="collapsed")
+        ligne = vue.iloc[choix]
+        jour = st.date_input("Date du geste", value=aujourdhui,
+                            format="DD/MM/YYYY", key="cs_geste_date")
+        c1, c2, c3 = st.columns(3)
+        patient, cip = ligne["Patient"], ligne["Code CIP"]
+        produit = ligne["Nom du produit"]
+
+        if c1.button("💰 Facturé et délivré", use_container_width=True,
+                     type="primary"):
+            if _appliquer(lambda courant: cs.enregistrer_facturation(
+                    courant, patient, cip, produit, jour)) is not None:
+                st.session_state["cs_message"] = (
+                    "ok", f"💰 {patient} — facturé le {jour:%d/%m/%Y}, une "
+                          "boîte sortie. Prochaine facturation possible le "
+                          f"{cs.facturable_le(jour):%d/%m/%Y}.")
+            st.rerun()
+
+        if c2.button("📥 Boîte reçue", use_container_width=True):
+            if _appliquer(lambda courant: cs.enregistrer_reception(
+                    courant, patient, cip, produit, jour)) is not None:
+                st.session_state["cs_message"] = (
+                    "ok", f"📥 {patient} — boîte reçue le {jour:%d/%m/%Y}, "
+                          "elle entre en avance.")
+            st.rerun()
+
+        if c3.button("📧 Mail de commande envoyé", use_container_width=True):
+            if _appliquer(lambda courant: cs.enregistrer_envoi(
+                    courant, patient, cip, produit, jour)) is not None:
+                st.session_state["cs_message"] = (
+                    "ok", f"📧 {patient} — commande partie le "
+                          f"{jour:%d/%m/%Y}.")
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Les trois listes du matin
+# ---------------------------------------------------------------------------
+
+def _liste(titre: str, aide: str, tableau: pd.DataFrame,
+           colonnes: list, vide: str) -> None:
+    """Une des trois listes. Vide, elle le dit — et c'est une bonne
+    nouvelle, pas une absence de données."""
+    st.markdown(f"**{titre}**")
+    if tableau.empty:
+        st.caption(vide)
+        return
+    st.caption(aide)
+    st.dataframe(tableau[colonnes], use_container_width=True,
+                 hide_index=True, column_config=_colonnes_vue())
+
+
+def _listes_du_matin(dossiers: pd.DataFrame, aujourdhui: date,
+                     avance: int) -> None:
+    facturer = cs.a_facturer_aujourdhui(dossiers, aujourdhui)
+    commander = cs.a_commander_maintenant(dossiers, aujourdhui, avance)
+    retard = cs.commandes_en_retard(dossiers, aujourdhui)
+
+    colonne_gauche, colonne_droite = st.columns(2)
+    with colonne_gauche:
+        _liste("💰 À facturer aujourd'hui",
+               "Les 22 jours sont écoulés : la caisse acceptera.",
+               facturer,
+               ["Patient", "Nom du produit", "Boîtes en main",
+                "Dernière facturation"],
+               "Personne à facturer aujourd'hui.")
+    with colonne_droite:
+        _liste("📦 À commander maintenant",
+               "Sans quoi la boîte n'arrivera pas avant la facturation "
+               "suivante.",
+               commander,
+               ["Patient", "Nom du produit", "Boîtes en main",
+                "Jours avant facturation", "Délai observé (j)"],
+               "Rien à commander : les avances tiennent.")
+
+    if not retard.empty:
+        _liste("⏰ Commandes en retard",
+               "Mail parti, rien reçu, délai habituel dépassé : relancez.",
+               retard,
+               ["Patient", "Nom du produit", "Envoi du mail", "Attente (j)"],
+               "")
+
+
+# ---------------------------------------------------------------------------
+# Tableau complet
+# ---------------------------------------------------------------------------
+
+def _tableau_editable(dossiers: pd.DataFrame, aujourdhui: date, tri: str,
+                      avance: int):
+    vue = cs.vue_affichable(dossiers, aujourdhui, tri, avance)
+    if vue.empty:
+        st.info("Aucun dossier — ouvrez-en un ci-dessus.")
+        return None
+
+    # La clé porte la génération ET l'ordre affiché : l'éditeur repère ses
+    # corrections par POSITION de ligne, et les rejouer sur un tableau
+    # reclassé recopierait une date sur le mauvais patient.
+    edite = st.data_editor(
+        vue, hide_index=True, use_container_width=True, num_rows="dynamic",
+        key=f"cs_editeur_{st.session_state.get('cs_generation', 0)}"
+            f"_{cs.TRIS.index(tri)}",
+        disabled=["Facturation", "Code CIP", "Facturable le",
+                  "Jours avant facturation", "Commande", "Attente (j)",
+                  "Délai observé (j)", "À commander"],
+        column_config=_colonnes_vue())
+    st.caption("Corrigez une date ou un nombre de boîtes directement dans le "
+               "tableau ; une ligne peut être supprimée (sélection puis "
+               "touche Suppr). Tout est enregistré automatiquement.")
+
+    colonnes = [c for c in _COLONNES_EDITABLES if c in edite.columns]
+    if len(edite) == len(vue) and edite[colonnes].equals(vue[colonnes]):
+        return None
+    return cs.normaliser_tableau_edite(edite)
+
+
+def _enregistrer_corrections(corrige: pd.DataFrame) -> None:
+    """Le tableau remplace tout : refuser plutôt qu'écraser un voisin."""
+    attendu = st.session_state.get("cs_empreinte")
+    conflit = []
+
+    def mouvement(courant):
+        if cs.empreinte_fichier(DOSSIERS_PATH) != attendu:
+            conflit.append(True)
+            return None
+        return corrige
+
+    if _appliquer(mouvement) is None or not conflit:
+        return
+    st.session_state["cs_message"] = (
+        "avertissement",
+        "Un autre poste a modifié les dossiers pendant votre correction : "
+        "elle n'a pas été enregistrée, pour ne pas effacer son travail. Le "
+        "tableau est à jour — refaites la correction.")
+
+
+def _rapprochement(dossiers: pd.DataFrame) -> None:
+    """Ce que les dossiers annoncent, face aux boîtes réellement scannées."""
+    rapprochement = cs.rapprochement_stock(dossiers,
+                                           _inventaire_stock_ferme())
+    if rapprochement.empty:
+        return
+    ecarts = cs.ecarts_a_verifier(rapprochement)
+    titre = ("✅ Dossiers et stock fermé d'accord" if ecarts.empty else
+             f"⚠️ {len(ecarts)} écart(s) entre les dossiers et le stock fermé")
+    with st.expander(titre, expanded=not ecarts.empty):
+        st.caption(
+            "Le code CIP identifie un produit, pas une boîte : si deux "
+            "patients suivent le même médicament, rien ne dit laquelle des "
+            "boîtes est pour qui. On compare donc des totaux par produit — "
+            "cela suffit à repérer une boîte reçue mais jamais scannée, ou "
+            "scannée sans dossier.")
+        st.dataframe(rapprochement if ecarts.empty else ecarts,
+                     use_container_width=True, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Écran
+# ---------------------------------------------------------------------------
+
+def _bandeau(resume: dict, tuile) -> None:
+    st.markdown('<div class="kpi-row">' + "".join([
+        tuile("Dossiers suivis", resume["dossiers"], "accent",
+              sous=f'{resume["patients"]} patient(s)'),
+        tuile("💰 À facturer", resume["a_facturer"],
+              "accent" if resume["a_facturer"] else "",
+              sous="les 22 jours sont écoulés"),
+        tuile("📦 À commander", resume["a_commander"],
+              "critical" if resume["a_commander"] else "",
+              sous="sinon le patient attendra"),
+        tuile("⏰ En retard", resume["en_retard"],
+              "critical" if resume["en_retard"] else "",
+              sous="à relancer"),
+    ]) + "</div>", unsafe_allow_html=True)
+
+
+def _barre_laterale(dossiers: pd.DataFrame, aujourdhui: date) -> tuple:
+    with st.sidebar:
+        st.markdown("### 💠 Commandes spéciales")
+        st.caption("Produits chers importés du continent : deux horloges par "
+                   "patient — l'import, et les "
+                   f"{cs.DELAI_FACTURATION_J} jours de la caisse.")
+        aujourdhui = st.date_input("Date du jour", value=aujourdhui,
+                                   format="DD/MM/YYYY", key="cs_date")
+        avance = st.number_input(
+            "Boîtes d'avance visées", min_value=0, max_value=10,
+            value=cs.AVANCE_CIBLE_DEFAUT, step=1, key="cs_avance",
+            help="L'avance qui absorbe le délai d'import. En dessous, le "
+                 "dossier passe dans « à commander ».")
+        st.divider()
+        st.markdown("#### Mémoire")
+        st.caption(f"{len(dossiers)} dossier(s)\n\n`{DOSSIERS_PATH.name}`")
+        with st.expander("🗑️ Vider les dossiers"):
+            st.warning("Supprime tous les dossiers de commandes spéciales.")
+            if st.button("Confirmer la remise à zéro",
+                         use_container_width=True, key="cs_vider"):
+                if _appliquer(lambda _: cs.dossier_vide()) is not None:
+                    st.session_state["cs_message"] = (
+                        "ok", "Dossiers remis à zéro.")
+                st.rerun()
+    return aujourdhui, int(avance)
+
+
+def _zone_impression(dossiers: pd.DataFrame, aujourdhui: date,
+                     tri: str) -> None:
+    colonne_csv, colonne_pdf = st.columns(2)
+    colonne_csv.download_button(
+        "📄 Exporter en CSV", cs.exporter_csv(dossiers, aujourdhui, tri),
+        file_name=f"commandes-speciales-{aujourdhui:%Y-%m-%d}.csv",
+        mime=_MIME_CSV, use_container_width=True)
+    try:
+        pdf = cs.exporter_pdf(dossiers, aujourdhui=aujourdhui, tri=tri)
+    except ValueError as erreur:
+        colonne_pdf.button("🖨️ Imprimer (PDF)", disabled=True,
+                           use_container_width=True, help=str(erreur))
+        return
+    colonne_pdf.download_button(
+        "🖨️ Imprimer (PDF)", pdf,
+        file_name=f"commandes-speciales-{aujourdhui:%Y-%m-%d}.pdf",
+        mime=_MIME_PDF, use_container_width=True, type="primary")
+
+
+def rendre(etape, tuile_kpi) -> None:
+    """Affiche l'écran complet du module.
+
+    ``etape`` et ``tuile_kpi`` sont les fonctions d'habillage de ``app.py``,
+    passées en paramètre pour garder ce module indépendant de l'application.
+    """
+    dossiers = _etat()
+    aujourdhui, avance = _barre_laterale(dossiers, date.today())
+
+    message = st.session_state.pop("cs_message", None)
+    if message:
+        niveau, texte = message
+        (st.success if niveau == "ok" else st.warning)(texte)
+
+    _bandeau(cs.resume(dossiers, aujourdhui, avance), tuile_kpi)
+
+    # --- Le matin ----------------------------------------------------------
+    etape("1", "Ce qu'il y a à faire aujourd'hui",
+          "Trois questions, trois listes — le reste peut attendre.")
+    _listes_du_matin(dossiers, aujourdhui, avance)
+
+    st.divider()
+    etape("2", "Enregistrez un geste",
+          "Facturer, recevoir, commander : la date et les boîtes bougent "
+          "ensemble.")
+    _actions_rapides(dossiers, aujourdhui)
+
+    st.divider()
+    etape("3", "Ouvrez un dossier",
+          "Un dossier par patient et par médicament, suivi dans le temps.")
+    _formulaire_nouveau()
+
+    # --- La référence ------------------------------------------------------
+    st.divider()
+    etape("4", "Tous les dossiers", "La référence, corrigeable à la main.")
+    colonne_recherche, colonne_tri = st.columns([3, 2])
+    recherche = colonne_recherche.text_input(
+        "🔍 Rechercher", key="cs_recherche",
+        placeholder="Nom du patient, médicament ou code CIP")
+    tri = colonne_tri.selectbox("↕️ Classer par", cs.TRIS, key="cs_tri")
+
+    if recherche.strip():
+        vue = cs.vue_affichable(dossiers, aujourdhui, tri, avance)
+        motif = recherche.strip().lower()
+        garde = vue.apply(
+            lambda l: motif in f"{l['Patient']} {l['Nom du produit']} "
+                               f"{l['Code CIP']}".lower(), axis=1)
+        filtree = vue[garde]
+        st.dataframe(filtree, use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
+        st.caption(f"{len(filtree)} dossier(s) affiché(s). Videz la "
+                   "recherche pour corriger le tableau.")
+    else:
+        corrige = _tableau_editable(dossiers, aujourdhui, tri, avance)
+        if corrige is not None:
+            _enregistrer_corrections(corrige)
+            st.rerun()
+
+    _rapprochement(dossiers)
+
+    st.divider()
+    etape("5", "Imprimez ou exportez",
+          "La liste du matin, à poser à côté du téléphone.")
+    _zone_impression(dossiers, aujourdhui, tri)
