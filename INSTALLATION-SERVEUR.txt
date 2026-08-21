@@ -6,6 +6,13 @@
 
 A imprimer et a poser a cote de l'ordinateur serveur.
 
+Si vous preferez une version mise en page, avec UNE ETAPE PAR PAGE
+et des cases a cocher, ouvrez plutot :
+
+       Guide-installation-serveur.pdf
+
+(meme procedure, meme ordre, dans ce meme dossier).
+
 Ce document remplace INSTALLATION.txt lorsque vous voulez que
 TOUS les postes travaillent sur le MEME stock. Si vous installez
 l'utilitaire sur un seul ordinateur, utilisez INSTALLATION.txt.
