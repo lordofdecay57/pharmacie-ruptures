@@ -21,6 +21,9 @@ README = RACINE / "README.md"
 #: La procédure imprimable, en texte brut : elle s'ouvre au Bloc-notes,
 #: se pose à côté du serveur, et ne suppose pas de savoir lire un Markdown.
 CONSIGNE = RACINE / "INSTALLATION-SERVEUR.txt"
+#: Le même parcours en PDF : une étape par page, à imprimer
+#: et à cocher au fur et à mesure devant la machine.
+GUIDE = RACINE / "Guide-installation-serveur.pdf"
 
 #: Tous les scripts d'installation serveur, pour les contrôles communs.
 SCRIPTS = [SERVEUR, POSTE, MAJ_SERVEUR, PLANIFIER]
@@ -367,6 +370,101 @@ class TestConsigneImprimable:
         être redirigé, pas installer un poste isolé de plus."""
         simple = (RACINE / "INSTALLATION.txt").read_text(encoding="ascii")
         assert CONSIGNE.name in simple
+
+
+class TestGuideImprimable:
+    """Le PDF : une étape par page, avec des cases à cocher.
+
+    Il ne remplace pas le texte brut, il répond à une autre situation : le
+    .txt s'ouvre sans rien installer et se copie ; le PDF **s'imprime**, se
+    coche, et se lit debout devant la machine sans perdre sa place au milieu
+    d'une installation qui dure trois quarts d'heure.
+
+    Le risque, avec deux documents : qu'ils divergent en silence. Ces tests
+    comparent ce qui est vérifiable entre les deux.
+    """
+
+    def _texte_pdf(self) -> str:
+        fitz = pytest.importorskip("pymupdf",
+                                   reason="lecture PDF indisponible")
+        if not GUIDE.is_file():
+            pytest.fail("Guide-installation-serveur.pdf manquant")
+        with fitz.open(GUIDE) as document:
+            pages = [page.get_text() for page in document]
+        return " ".join(" ".join(pages).split())
+
+    def test_le_guide_est_livre_avec_le_dossier(self):
+        """Comme pharmacie.ico : le poste de la pharmacie n'a pas forcément
+        ReportLab pour le fabriquer."""
+        assert GUIDE.is_file()
+        assert GUIDE.read_bytes().startswith(b"%PDF")
+
+    def test_une_page_par_etape(self):
+        fitz = pytest.importorskip("pymupdf")
+        with fitz.open(GUIDE) as document:
+            pages = document.page_count
+        # couverture + 9 étapes (dont l'étape 0) + quotidien + dépannage
+        assert pages >= 12, f"{pages} pages : une étape s'est fait écraser"
+
+    def test_les_neuf_etapes_y_sont(self):
+        texte = self._texte_pdf()
+        assert "AVANT DE COMMENCER" in texte
+        for numero in range(1, 9):
+            assert f"ÉTAPE {numero}" in texte, f"ÉTAPE {numero} manquante"
+
+    def test_il_dit_la_meme_chose_que_le_texte_brut(self):
+        """Deux documents, une seule procédure. Les faits sur lesquels on se
+        trompe le plus cher doivent figurer dans les deux."""
+        pdf, txt = self._texte_pdf(), _phrase()
+        for fait in ("lancer-serveur.bat", "creer-raccourci-poste.bat",
+                     "planifier-maj-serveur.bat", "8501",
+                     "show currentprofile", "Baux statiques",
+                     "maj_serveur.log", "NOMS DE PATIENTS"):
+            assert fait in pdf, f"« {fait} » absent du PDF"
+            assert fait in txt, f"« {fait} » absent du texte brut"
+
+    def test_la_recuperation_des_donnees_precede_l_installation(self):
+        """Comme dans le texte brut : la seule étape irréversible se lit
+        AVANT d'installer, pas après."""
+        texte = self._texte_pdf()
+        assert texte.index("stock_ferme.csv") < texte.index("ÉTAPE 1")
+        assert "NE SUPPRIMEZ RIEN" in texte
+
+    def test_la_commande_longue_est_annoncee_dans_son_encadre(self):
+        """Imprimée, elle tient sur deux lignes. Sans ce rappel sous les
+        yeux, on la recopie avec un retour à la ligne au milieu."""
+        texte = self._texte_pdf()
+        avant = texte.split("netsh advfirewall firewall add rule", 1)[0]
+        assert "UNE SEULE LIGNE" in avant
+
+    def test_aucun_emoji_ne_s_y_est_glisse(self):
+        """Les polices PDF standard n'en ont pas le glyphe : ils sortiraient
+        en carrés noirs à l'impression."""
+        texte = self._texte_pdf()
+        egares = {c for c in texte if ord(c) > 0x2100}
+        assert not egares, f"caractères sans glyphe PDF : {egares}"
+
+    def test_le_generateur_et_le_guide_livre_ne_divergent_pas(self, tmp_path):
+        """Le PDF est versionné, mais il se régénère : si quelqu'un modifie
+        le générateur sans relancer, les deux se contredisent."""
+        pytest.importorskip("reportlab")
+        pytest.importorskip("pymupdf")
+        import importlib.util
+
+        chemin = RACINE / "outils" / "creer_guide_serveur.py"
+        spec = importlib.util.spec_from_file_location("gen_guide", chemin)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        refait = module.creer(tmp_path / "guide.pdf")
+
+        import pymupdf
+        with pymupdf.open(refait) as neuf, pymupdf.open(GUIDE) as livre:
+            assert neuf.page_count == livre.page_count
+            for numero, (a, b) in enumerate(zip(neuf, livre), 1):
+                assert " ".join(a.get_text().split()) == \
+                       " ".join(b.get_text().split()), (
+                    f"page {numero} : relancez "
+                    "« python outils/creer_guide_serveur.py »")
 
 
 class TestLiensDuReadme:

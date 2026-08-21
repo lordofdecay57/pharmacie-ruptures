@@ -718,10 +718,14 @@ casser le calcul des ruptures, et inversement.
 > (installation de Python, téléchargement, premier lancement, mise à jour,
 > dépannage).
 >
-> 🖧 **Pour toute la pharmacie sur une seule base** :
-> [`INSTALLATION-SERVEUR.txt`](INSTALLATION-SERVEUR.txt) — la même chose
-> pour une installation serveur, en huit étapes, à **imprimer et poser à
-> côté de la machine**. Elle contient tout ce que la section
+> 🖧 **Pour toute la pharmacie sur une seule base**, deux documents qui
+> disent la même procédure et répondent à deux situations :
+> [`INSTALLATION-SERVEUR.txt`](INSTALLATION-SERVEUR.txt) s'ouvre au
+> Bloc-notes sans rien installer et se copie ;
+> [`Guide-installation-serveur.pdf`](Guide-installation-serveur.pdf)
+> **s'imprime et se coche**, une étape par page, pour se lire debout devant
+> la machine sans perdre sa place. Un test compare les deux pour qu'ils ne
+> divergent pas. Ils contiennent tout ce que la section
 > [Installation sur un serveur](#-installation-sur-un-serveur-toute-la-pharmacie-sur-une-seule-base)
 > détaille ci-dessous, mais en texte brut : pas besoin de savoir ouvrir un
 > fichier Markdown le jour où l'on est devant le serveur.
