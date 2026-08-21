@@ -11,6 +11,16 @@ Suivez les 3 etapes ci-dessous, DANS L'ORDRE. Cela prend environ
 15 minutes la premiere fois. Ensuite, l'utilitaire s'ouvrira en un
 simple double-clic.
 
+  >> POUR TOUTE LA PHARMACIE SUR UNE SEULE BASE : si vous voulez
+     que TOUS les postes travaillent sur le meme stock, ce n'est
+     pas ce document qu'il faut suivre, mais :
+
+         INSTALLATION-SERVEUR.txt
+
+     (dans ce meme dossier). L'utilitaire n'est alors installe
+     que sur un ordinateur serveur ; les postes recoivent une
+     simple icone, et rien n'est installe chez eux.
+
 
 ---------------------------------------------------------------
 ETAPE 1 - Installer Python (une seule fois)

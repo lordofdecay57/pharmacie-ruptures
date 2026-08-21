@@ -1,0 +1,386 @@
+===============================================================
+  PILOTAGE PHARMACIE
+  Installation sur un SERVEUR (toute la pharmacie sur
+  une seule base)
+===============================================================
+
+A imprimer et a poser a cote de l'ordinateur serveur.
+
+Ce document remplace INSTALLATION.txt lorsque vous voulez que
+TOUS les postes travaillent sur le MEME stock. Si vous installez
+l'utilitaire sur un seul ordinateur, utilisez INSTALLATION.txt.
+
+
+---------------------------------------------------------------
+CE QUE CELA CHANGE
+---------------------------------------------------------------
+
+Aujourd'hui, chaque poste a SA base : ce qui est scanne au
+comptoir 1 n'existe pas au comptoir 2.
+
+Apres cette installation :
+
+  - l'utilitaire est installe sur UN SEUL ordinateur, le serveur ;
+  - les postes s'y connectent par leur navigateur ;
+  - une seule base, une seule mise a jour, une seule sauvegarde.
+
+RIEN n'est installe sur les postes. Ni Python, ni l'application,
+ni donnees. Ils recoivent une icone, qui n'est qu'une adresse.
+
+Comptez environ 45 minutes la premiere fois.
+
+
+===============================================================
+  AVANT DE COMMENCER - A NE PAS SAUTER
+===============================================================
+
+Si des postes ont DEJA l'utilitaire installe, ils contiennent du
+travail qui n'existe nulle part ailleurs. Recuperez-le AVANT
+d'installer le serveur : c'est la seule etape de ce document
+qu'on ne peut pas rattraper.
+
+Sur chaque poste deja equipe, ouvrez le dossier de l'utilitaire
+(celui qui contient lancer.bat) et copiez sur une cle USB :
+
+       stock_ferme.csv            (l'inventaire scanne)
+       stock_ferme_produits.csv   (les produits memorises)
+       commandes_speciales.csv    (les dossiers patients)
+       config.yaml                (vos reglages)
+       historique_commandes.csv   (l'historique des analyses)
+
+Tous ne seront pas forcement presents : copiez ceux qui le sont.
+
+  - UN SEUL poste avait des donnees ?
+    Vous les remettrez a l'ETAPE 1, et tout sera conserve.
+
+  - PLUSIEURS postes avaient des donnees ?
+    Elles ne peuvent pas etre simplement recopiees les unes sur
+    les autres : le dernier fichier copie effacerait les autres.
+    Gardez les cles USB de cote, installez le serveur avec le
+    poste le plus complet, et demandez la fusion des autres.
+
+NE SUPPRIMEZ RIEN sur les postes avant l'ETAPE 8.
+
+
+===============================================================
+  SUR LE SERVEUR
+===============================================================
+
+---------------------------------------------------------------
+ETAPE 1 - Installer Python et le dossier
+---------------------------------------------------------------
+
+1. Installez Python en suivant l'ETAPE 1 de INSTALLATION.txt.
+   N'oubliez pas de cocher "Add python.exe to PATH".
+
+2. Copiez le dossier "pharmacie-ruptures" sur le serveur, par
+   exemple dans Documents.
+
+3. Si vous avez recupere des fichiers de donnees (voir plus
+   haut), copiez-les MAINTENANT dans ce dossier, a cote de
+   lancer.bat. C'est le moment : une fois l'utilitaire demarre,
+   il creerait ses propres fichiers vides.
+
+
+---------------------------------------------------------------
+ETAPE 2 - Premier demarrage, et l'adresse a noter
+---------------------------------------------------------------
+
+1. Double-cliquez sur :
+
+       lancer-serveur.bat
+
+   (et NON sur lancer.bat, qui est pour un poste isole).
+
+2. Une fenetre noire s'ouvre. La premiere fois, elle installe
+   quelques complements : du texte defile pendant une a deux
+   minutes, c'est normal - NE FERMEZ PAS la fenetre.
+
+3. Elle affiche ensuite l'adresse a donner aux postes, par
+   exemple :
+
+       http://192.168.1.10:8501
+
+   NOTEZ CETTE ADRESSE. Vous en aurez besoin a l'ETAPE 7.
+
+4. Windows peut demander : "Autoriser Python a communiquer sur
+   ces reseaux ?". Cochez "Reseaux prives", decochez "Reseaux
+   publics", puis "Autoriser l'acces". Si cette fenetre
+   apparait, l'ETAPE 3 est deja faite.
+
+IMPORTANT : cette fenetre noire EST l'application. La fermer
+arrete l'utilitaire pour TOUTE la pharmacie.
+
+
+---------------------------------------------------------------
+ETAPE 3 - Ouvrir le port 8501 dans le pare-feu
+---------------------------------------------------------------
+
+C'est l'oubli qui explique presque tous les "ca ne marche pas".
+
+Si la fenetre de l'ETAPE 2 point 4 est apparue et que vous avez
+clique "Autoriser l'acces", passez a l'ETAPE 4.
+
+Sinon :
+
+1. Menu Demarrer, tapez :  cmd
+2. Clic DROIT sur "Invite de commandes", puis
+   "Executer en tant qu'administrateur".
+3. Copiez-collez la ligne ci-dessous, puis Entree. C'est UNE
+   SEULE LIGNE, meme si elle apparait coupee a l'ecran ou a
+   l'impression : ne tapez pas de retour a la ligne au milieu.
+
+netsh advfirewall firewall add rule name="Pilotage pharmacie (8501)" dir=in action=allow protocol=TCP localport=8501 profile=private
+
+ATTENTION AU PIEGE : cette regle ne s'applique que si Windows
+considere votre reseau comme "prive". Pour le verifier, dans la
+meme fenetre :
+
+       netsh advfirewall show currentprofile
+
+Si la reponse parle de "Public", allez dans
+Parametres > Reseau et Internet > Ethernet, et passez
+"Type de profil reseau" sur "Prive". Sur un reseau public,
+Windows bloque tout, regle ou pas.
+
+
+---------------------------------------------------------------
+ETAPE 4 - Donner une adresse IP fixe au serveur
+---------------------------------------------------------------
+
+Sans cela, l'adresse du serveur change et TOUTES les icones des
+postes pointent dans le vide.
+
+D'ABORD : en a-t-il deja une ? Dans l'invite de commandes :
+
+       ipconfig /all
+
+Cherchez la ligne "DHCP active" de la carte reseau utilisee :
+
+  - "DHCP active : Non"
+    L'adresse est deja fixe. Passez a l'ETAPE 5.
+
+  - "DHCP active : Oui"
+    Cela ne prouve PAS que l'adresse bouge : une reservation
+    faite dans la box donne toujours la meme adresse tout en
+    passant par le DHCP. Ouvrez la page d'administration de la
+    box (souvent http://192.168.1.1), rubrique DHCP >
+    "Baux statiques" ou "Reservation d'adresse", et regardez si
+    le serveur y figure. S'il y est : passez a l'ETAPE 5.
+
+SI L'ADRESSE PEUT CHANGER, deux facons de la fixer.
+
+  METHODE A - dans la box (la meilleure)
+  Elle ne peut pas entrer en conflit et survit a une
+  reinstallation de Windows.
+
+  1. "ipconfig /all" sur le serveur, relevez "Adresse physique"
+     (du type A1-B2-C3-D4-E5-F6) : c'est son adresse MAC.
+  2. Page d'administration de la box > DHCP >
+     "Baux statiques" / "Reservation d'adresse".
+  3. Associez cette adresse MAC a l'adresse voulue.
+
+  METHODE B - sur Windows
+  1. "ipconfig /all", notez l'Adresse IPv4, la Passerelle par
+     defaut et les Serveurs DNS.
+  2. Parametres > Reseau et Internet > Ethernet. A cote de
+     "Attribution IP", cliquez "Modifier", choisissez "Manuel"
+     et activez IPv4.
+  3. Renseignez :
+       Adresse IP : une adresse HORS de la plage distribuee par
+                    la box. Si elle donne de .100 a .150, prenez
+                    par exemple 192.168.1.200. Sinon la box la
+                    donnera un jour a un autre appareil, et les
+                    deux se generont un matin sans qu'on
+                    comprenne pourquoi.
+       Longueur du prefixe de sous-reseau : 24
+       Passerelle : l'adresse de la box
+       DNS prefere : l'adresse de la box
+  4. Enregistrez.
+
+Si l'adresse a change, relancez lancer-serveur.bat pour lire la
+nouvelle, et utilisez CELLE-LA a l'ETAPE 7.
+
+
+---------------------------------------------------------------
+ETAPE 5 - Empecher la mise en veille
+---------------------------------------------------------------
+
+C'est l'oubli auquel personne ne pense. Un serveur endormi ne
+repond plus, et les postes affichent une page blanche sans
+explication.
+
+       Parametres > Systeme > Alimentation
+       "Veille" : Jamais
+
+Le reglage de l'ecran n'a aucune importance.
+
+
+---------------------------------------------------------------
+ETAPE 6 - La mise a jour automatique
+---------------------------------------------------------------
+
+Un serveur allume en permanence ne se met JAMAIS a jour tout
+seul : la mise a jour automatique n'a lieu qu'au demarrage, et
+elle se reporte tant que l'application repond. Sans cette etape,
+la pharmacie resterait sur sa version d'aujourd'hui pour
+toujours.
+
+Double-cliquez UNE FOIS sur :
+
+       planifier-maj-serveur.bat
+
+Windows fera la mise a jour chaque nuit a 5h00. Le script
+affiche la fiche enregistree pour que vous puissiez la verifier.
+
+  - Une autre heure ?   planifier-maj-serveur.bat 04:30
+  - Annuler ?           planifier-maj-serveur.bat /supprimer
+
+Deux conditions a connaitre :
+  - la session Windows du serveur doit rester OUVERTE (ecran
+    verrouille, c'est parfait ; deconnecte, la tache ne partira
+    pas) ;
+  - la mise a jour redemarre l'application : les postes perdent
+    leur page une trentaine de secondes. D'ou l'heure creuse.
+
+Le compte rendu de chaque nuit est ecrit dans maj_serveur.log.
+
+
+===============================================================
+  SUR CHAQUE POSTE
+===============================================================
+
+---------------------------------------------------------------
+ETAPE 7 - Poser l'icone (rien n'est installe)
+---------------------------------------------------------------
+
+Sur chaque poste, UNE SEULE FOIS, double-cliquez sur :
+
+       creer-raccourci-poste.bat
+
+Trois facons d'y acceder, au choix :
+  a) depuis le dossier du serveur partage sur le reseau ;
+  b) en copiant ce seul fichier sur une cle USB ;
+  c) sans script du tout : ouvrez le navigateur, tapez
+     l'adresse notee a l'ETAPE 2, et mettez-la en favori.
+
+Le script trouve l'adresse tout seul si le dossier du serveur
+est partage. Sinon il la demande : tapez celle de l'ETAPE 2. Il
+accepte aussi bien "192.168.1.10" que l'adresse complete.
+
+Une icone "Pharmacie" apparait sur le Bureau. Double-cliquez :
+l'utilitaire du serveur s'ouvre dans le navigateur.
+
+VERIFIEZ TOUT DE SUITE que cela fonctionne depuis ce poste. Si
+la page ne s'ouvre pas, c'est presque toujours l'ETAPE 3 (le
+pare-feu) ou le profil reseau "Public".
+
+
+---------------------------------------------------------------
+ETAPE 8 - Retirer les anciennes installations
+---------------------------------------------------------------
+
+A faire seulement quand les ETAPES 1 a 7 fonctionnent, et quand
+vous avez verifie que les donnees recuperees sont bien visibles
+dans l'application du serveur.
+
+Il n'y a pas de desinstallation au sens Windows :
+
+  1. supprimez le dossier "pharmacie-ruptures" du poste ;
+  2. supprimez l'ancienne icone du Bureau (celle qui lancait la
+     copie locale), et gardez la nouvelle.
+
+POURQUOI C'EST IMPORTANT : si vous laissez la copie locale, un
+jour quelqu'un la lancera par erreur - l'ancienne icone est
+encore la - et scannera dans un stock fantome que personne
+d'autre ne voit. Rien ne plante, rien ne previent, et on s'en
+apercoit a l'inventaire.
+
+
+===============================================================
+  AU QUOTIDIEN
+===============================================================
+
+- La fenetre noire du serveur reste ouverte en permanence. On
+  peut la reduire, jamais la fermer.
+
+- Si le serveur redemarre (coupure de courant, mise a jour
+  Windows), quelqu'un doit relancer lancer-serveur.bat. Pour que
+  cela se fasse tout seul : placez un raccourci vers
+  lancer-serveur.bat dans le dossier "shell:startup" (touche
+  Windows + R, tapez shell:startup, Entree, et deposez-y le
+  raccourci).
+
+- Les postes n'ont rien a faire : ils ouvrent leur icone.
+
+- Plusieurs comptoirs peuvent scanner en meme temps sans rien
+  perdre : chaque geste est applique au fichier relu a
+  l'instant, sous verrou.
+
+- MISE A JOUR IMMEDIATE : quand le bandeau annonce une nouvelle
+  version, un encadre apparait en haut de la colonne de gauche
+  avec un bouton "Installer". Un clic depuis N'IMPORTE QUEL
+  poste met a jour le serveur. Il demande de cocher "J'ai
+  prevenu les autres postes" : tous perdront leur page une
+  trentaine de secondes.
+
+- SAUVEGARDE : tout tient dans le dossier du serveur. C'est plus
+  simple qu'avant - et c'est desormais indispensable, puisqu'il
+  n'y a plus de copie sur les postes. Copiez ce dossier sur un
+  disque externe regulierement.
+
+
+===============================================================
+  EN CAS DE PROBLEME
+===============================================================
+
+- UN POSTE N'OUVRE PAS LA PAGE
+  1. La fenetre noire du serveur est-elle toujours ouverte ?
+  2. Le pare-feu du serveur laisse-t-il passer le port 8501
+     (ETAPE 3) ?
+  3. Le reseau est-il bien "Prive" et non "Public" sur le
+     serveur (meme etape) ?
+  4. L'adresse de l'icone est-elle encore la bonne ? Elle change
+     si l'IP n'a pas ete fixee (ETAPE 4).
+
+- L'ADRESSE DU SERVEUR A CHANGE
+  Rien n'est perdu : l'icone d'un poste est un simple fichier
+  texte. Relancez creer-raccourci-poste.bat avec la nouvelle
+  adresse, ou ouvrez "Pharmacie.url" sur le Bureau avec le
+  Bloc-notes et corrigez la ligne "URL=".
+
+- "IMPOSSIBLE D'ENREGISTRER : LE FICHIER EST OUVERT DANS UN
+  AUTRE PROGRAMME"
+  Un fichier de donnees est ouvert dans Excel sur le serveur.
+  Fermez Excel et refaites le geste : rien n'a ete perdu.
+
+- LA MISE A JOUR DE LA NUIT NE S'EST PAS FAITE
+  Ouvrez maj_serveur.log dans le dossier du serveur : il dit ce
+  qui s'est passe et pourquoi. La cause la plus frequente est
+  une session Windows deconnectee (voir ETAPE 6).
+
+- LE SERVEUR NE REPOND PLUS LE MATIN
+  Verifiez d'abord la mise en veille (ETAPE 5), puis que la
+  fenetre noire est toujours la.
+
+
+===============================================================
+  CONFIDENTIALITE
+===============================================================
+
+L'utilitaire fonctionne sur le reseau local de la pharmacie. Vos
+donnees ne sont envoyees a aucun serveur exterieur : seules
+l'installation et les mises a jour utilisent Internet.
+
+A SAVOIR, ET A DECIDER EN CONNAISSANCE DE CAUSE :
+
+Le module "Commandes speciales" contient des NOMS DE PATIENTS
+associes a des traitements. L'application n'a PAS de mot de
+passe : toute personne qui atteint le reseau de la pharmacie
+peut l'ouvrir. C'est acceptable sur un reseau d'officine ferme,
+ce ne l'est pas sur un reseau ouvert au public ou accessible
+depuis Internet.
+
+N'exposez jamais le port 8501 sur Internet.
+
+===============================================================
