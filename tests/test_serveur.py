@@ -18,6 +18,9 @@ POSTE = RACINE / "creer-raccourci-poste.bat"
 MAJ_SERVEUR = RACINE / "mettre-a-jour-serveur.bat"
 PLANIFIER = RACINE / "planifier-maj-serveur.bat"
 README = RACINE / "README.md"
+#: La procédure imprimable, en texte brut : elle s'ouvre au Bloc-notes,
+#: se pose à côté du serveur, et ne suppose pas de savoir lire un Markdown.
+CONSIGNE = RACINE / "INSTALLATION-SERVEUR.txt"
 
 #: Tous les scripts d'installation serveur, pour les contrôles communs.
 SCRIPTS = [SERVEUR, POSTE, MAJ_SERVEUR, PLANIFIER]
@@ -27,6 +30,20 @@ PORT = "8501"
 
 def _texte(chemin: Path) -> str:
     return chemin.read_text(encoding="ascii")
+
+
+def _consigne() -> str:
+    return CONSIGNE.read_text(encoding="ascii")
+
+
+def _phrase() -> str:
+    """La consigne avec les espaces réduits à un seul.
+
+    Le document est enveloppé à 63 colonnes pour s'imprimer : une phrase
+    y est presque toujours coupée par un retour à la ligne. La chercher
+    telle quelle échouerait sur la mise en page, pas sur le fond.
+    """
+    return " ".join(_consigne().split())
 
 
 class TestScriptsPresents:
@@ -271,6 +288,85 @@ class TestPlanification:
         """Une mise à jour redémarre l'application : elle ne doit pas
         tomber en pleine journée."""
         assert "05:00" in _texte(PLANIFIER)
+
+
+class TestConsigneImprimable:
+    """La procédure serveur en texte brut, à poser à côté de la machine.
+
+    Le README la contient aussi, mais il fait mille lignes et suppose de
+    savoir ouvrir un fichier Markdown — ce qui n'est pas le cas de tout le
+    monde. Celle-ci s'ouvre au Bloc-notes et s'imprime.
+    """
+
+    def test_le_document_existe(self):
+        assert CONSIGNE.is_file(), "INSTALLATION-SERVEUR.txt manquant"
+
+    def test_il_est_lisible_par_le_bloc_notes(self):
+        """Un « é » dans un fichier texte lu avec la mauvaise page de codes
+        devient un caractère illisible — au milieu d'une consigne qu'on lit
+        justement quand on ne sait pas quoi faire."""
+        try:
+            CONSIGNE.read_text(encoding="ascii")
+        except UnicodeDecodeError as erreur:
+            pytest.fail(f"caractère non ASCII en position {erreur.start}")
+
+    def test_il_s_imprime_sans_se_couper(self):
+        """Une seule ligne a le droit d'être longue : la commande netsh, qui
+        doit rester d'un seul tenant pour être copiée."""
+        longues = [ligne for ligne in _consigne().splitlines()
+                   if len(ligne) > 66]
+        assert len(longues) == 1 and longues[0].startswith("netsh"), longues
+
+    def test_la_commande_longue_est_annoncee_comme_telle(self):
+        """Imprimée, elle apparaît coupée : sans avertissement, on la
+        recopie avec un retour à la ligne au milieu, et elle échoue."""
+        texte = _consigne()
+        avant = _phrase().split("netsh advfirewall firewall add rule", 1)[0]
+        assert "UNE SEULE LIGNE" in avant
+
+    def test_les_huit_etapes_y_sont_toutes(self):
+        texte = _phrase()
+        for numero in range(1, 9):
+            assert f"ETAPE {numero} " in texte, f"ETAPE {numero} manquante"
+
+    def test_elle_nomme_les_scripts_reellement_livres(self):
+        """Une consigne qui nomme un fichier absent du dossier envoie
+        chercher ce qui n'existe pas."""
+        texte = _phrase()
+        for script in (SERVEUR, POSTE, PLANIFIER):
+            assert script.name in texte, script.name
+
+    def test_la_recuperation_des_donnees_vient_en_premier(self):
+        """C'est la seule étape irréversible : elle doit être lue AVANT
+        d'installer quoi que ce soit, pas découverte à la fin."""
+        texte = _phrase()
+        assert "AVANT DE COMMENCER" in texte
+        assert texte.index("stock_ferme.csv") < texte.index("ETAPE 1 ")
+        assert "NE SUPPRIMEZ RIEN" in texte
+
+    def test_elle_previent_du_piege_du_profil_reseau(self):
+        """La règle de pare-feu ne s'applique pas sur un réseau « Public » :
+        c'est la cause la plus fréquente d'un « j'ai pourtant ouvert le
+        port »."""
+        assert "show currentprofile" in _phrase()
+
+    def test_elle_dit_comment_savoir_si_l_ip_est_deja_fixe(self):
+        texte = _phrase()
+        assert "DHCP active" in texte
+        assert "Baux statiques" in texte
+
+    def test_elle_signale_les_donnees_nominatives(self):
+        """Le module 4 porte des noms de patients, et l'application n'a pas
+        de mot de passe : cela se décide en connaissance de cause."""
+        texte = _phrase()
+        assert "NOMS DE PATIENTS" in texte
+        assert "n'a PAS de mot de passe" in texte
+
+    def test_le_guide_du_poste_isole_y_renvoie(self):
+        """Qui ouvre INSTALLATION.txt pour équiper toute la pharmacie doit
+        être redirigé, pas installer un poste isolé de plus."""
+        simple = (RACINE / "INSTALLATION.txt").read_text(encoding="ascii")
+        assert CONSIGNE.name in simple
 
 
 class TestLiensDuReadme:

@@ -717,6 +717,14 @@ casser le calcul des ruptures, et inversement.
 > plus détaillée : [`Guide-installation.pdf`](Guide-installation.pdf)
 > (installation de Python, téléchargement, premier lancement, mise à jour,
 > dépannage).
+>
+> 🖧 **Pour toute la pharmacie sur une seule base** :
+> [`INSTALLATION-SERVEUR.txt`](INSTALLATION-SERVEUR.txt) — la même chose
+> pour une installation serveur, en huit étapes, à **imprimer et poser à
+> côté de la machine**. Elle contient tout ce que la section
+> [Installation sur un serveur](#-installation-sur-un-serveur-toute-la-pharmacie-sur-une-seule-base)
+> détaille ci-dessous, mais en texte brut : pas besoin de savoir ouvrir un
+> fichier Markdown le jour où l'on est devant le serveur.
 
 1. **Installer Python** (3.10 ou plus récent) : <https://www.python.org/downloads/>
    — sous Windows, cochez bien **« Add Python to PATH »** pendant l'installation.
