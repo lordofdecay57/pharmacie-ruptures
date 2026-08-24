@@ -605,6 +605,78 @@ def retirer_entree(inventaire: pd.DataFrame, cip: str, nom: str,
     return inventaire.reset_index(drop=True)
 
 
+def unites_disponibles(inventaire: pd.DataFrame, cip: str, nom: str,
+                       peremption: Optional[date], lot: str) -> int:
+    """Unités réellement sortables de ce lot : le vrac plus les boîtes.
+
+    Sans conditionnement connu (``Unités par boîte = 0``), seules les unités
+    déjà en vrac comptent : on ne sait pas combien de comprimés contient une
+    boîte, et l'inventer donnerait un total faux.
+    """
+    if inventaire is None or inventaire.empty:
+        return 0
+    cible = cle_lot(cip, nom, peremption, lot)
+    for i, cle in zip(inventaire.index, _cles(inventaire)):
+        if cle == cible:
+            return total_unites(inventaire.at[i, "Boîtes"],
+                                inventaire.at[i, "Unités par boîte"],
+                                inventaire.at[i, "Unités en vrac"])
+    return 0
+
+
+def sortir_unites(inventaire: pd.DataFrame, cip: str, nom: str,
+                  peremption: Optional[date], lot: str,
+                  unites: int) -> tuple:
+    """Sortie à l'UNITÉ : on entame une boîte quand le vrac ne suffit pas.
+
+    C'est le geste réel du comptoir : dispenser dix comprimés d'une boîte de
+    trente laisse vingt comprimés en vrac. Retirer une boîte entière pour
+    dix comprimés fausserait l'inventaire des vingt autres.
+
+    L'ordre suit la réalité : on prend d'abord ce qui est **déjà entamé** —
+    une seconde boîte ouverte alors qu'un fond de boîte traîne, c'est du
+    périmé annoncé.
+
+    Renvoie ``(inventaire, unites_reellement_sorties)``. On ne sort jamais
+    plus que ce qui existe : promettre une sortie que le stock ne peut pas
+    honorer, c'est un inventaire faux le lendemain.
+    """
+    if inventaire is None or inventaire.empty or int(unites) <= 0:
+        return (inventaire if inventaire is not None else inventaire_vide()), 0
+    inventaire = inventaire.reindex(columns=COLONNES_STOCK_FERME).copy()
+    cible = cle_lot(cip, nom, peremption, lot)
+
+    for i, cle in zip(inventaire.index, _cles(inventaire)):
+        if cle != cible:
+            continue
+        boites = int(inventaire.at[i, "Boîtes"] or 0)
+        vrac = int(inventaire.at[i, "Unités en vrac"] or 0)
+        par_boite = int(inventaire.at[i, "Unités par boîte"] or 0)
+
+        reste = int(unites)
+        pris = min(reste, vrac)
+        vrac -= pris
+        reste -= pris
+        # Sans conditionnement connu, une boîte ne se convertit pas en
+        # comprimés : on s'arrête au vrac plutôt que d'inventer un compte.
+        while reste > 0 and boites > 0 and par_boite > 0:
+            boites -= 1
+            vrac += par_boite
+            entame = min(reste, vrac)
+            vrac -= entame
+            reste -= entame
+            pris += entame
+
+        inventaire.at[i, "Boîtes"] = boites
+        inventaire.at[i, "Unités en vrac"] = vrac
+        inventaire.at[i, "Total unités"] = total_unites(boites, par_boite,
+                                                        vrac)
+        if boites == 0 and vrac == 0:
+            inventaire = inventaire.drop(index=i)
+        return inventaire.reset_index(drop=True), pris
+    return inventaire.reset_index(drop=True), 0
+
+
 def lots_sortables(inventaire: pd.DataFrame,
                    aujourdhui: Optional[date] = None,
                    tri: str = TRI_PEREMPTION) -> list:
@@ -622,13 +694,20 @@ def lots_sortables(inventaire: pd.DataFrame,
     lots = []
     for _, ligne in tableau.iterrows():
         boites = int(pd.to_numeric(ligne["Boîtes"], errors="coerce") or 0)
-        if boites <= 0:
+        vrac = int(pd.to_numeric(ligne["Unités en vrac"],
+                                 errors="coerce") or 0)
+        par_boite = int(pd.to_numeric(ligne["Unités par boîte"],
+                                      errors="coerce") or 0)
+        # Une boîte entamée n'a plus de boîte pleine mais garde des unités :
+        # l'écarter rendrait ses comprimés impossibles à sortir.
+        if boites <= 0 and vrac <= 0:
             continue
         peremption = ligne["Péremption"]
         details = [f"{peremption:%d/%m/%Y}" if peremption else "sans date"]
         if _texte(ligne["Lot"]):
             details.append(f"lot {_texte(ligne['Lot'])}")
-        details.append(f"{boites} boîte(s)")
+        details.append(f"{boites} boîte(s)"
+                       + (f" + {vrac} unité(s)" if vrac else ""))
         # Le dosage fait déjà partie du nom affiché : rien à recoller ici.
         nom_complet = _texte(ligne["Nom du produit"])
         lots.append({
@@ -638,6 +717,9 @@ def lots_sortables(inventaire: pd.DataFrame,
             "peremption": peremption,
             "lot": _texte(ligne["Lot"]),
             "boites": boites,
+            "unites_vrac": vrac,
+            "unites_par_boite": par_boite,
+            "unites": total_unites(boites, par_boite, vrac),
             "statut": ligne["Statut"],
             "libelle": f"{ligne['Statut']}  {nom_complet} — "
                        + " · ".join(details),

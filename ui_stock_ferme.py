@@ -313,6 +313,11 @@ def _enregistrer(inventaire=None, repertoire=None) -> None:
 MODE_ENTREE = "➕ Entrée"
 MODE_SORTIE = "➖ Sortie"
 
+# Sortir une boîte entière ou quelques comprimés : ce n'est pas le même
+# geste au comptoir, et l'inventaire ne se décrémente pas pareil.
+UNITE_BOITE = "Boîtes entières"
+UNITE_UNITE = "Unités (comprimés)"
+
 
 def _garder_mode() -> None:
     """Empêche la déselection : recliquer le mode actif le laisse actif.
@@ -596,12 +601,17 @@ def _passer_en_entree() -> None:
 
 def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
                              tri: str) -> None:
-    """Retirer une boîte en la désignant dans la liste, sans douchette.
+    """Retirer une boîte — ou quelques unités — en la désignant dans la liste.
 
     Une étiquette abîmée, une boîte reconditionnée, un produit sans
     code-barres : la douchette ne lit pas tout, et il n'y avait alors
     aucune façon de sortir une boîte — le bouton de saisie manuelle était
     purement et simplement désactivé en mode Sortie.
+
+    C'est aussi le seul chemin pour une sortie **à l'unité** : la douchette
+    lit une boîte, pas dix comprimés. Dispenser à l'unité en retirant la
+    boîte entière ferait disparaître de l'inventaire les comprimés qui
+    restent réellement dans l'armoire.
     """
     lots = stock_ferme.lots_sortables(inventaire, aujourdhui, tri)
     if not lots:
@@ -615,12 +625,40 @@ def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
             format_func=lambda i: lots[i]["libelle"],
             key="sf_sortie_choix", label_visibility="collapsed")
         lot = lots[choix]
+
+        # Ce que ce lot permet réellement. Une boîte entamée n'a plus de
+        # boîte pleine mais garde des comprimés ; un produit sans
+        # conditionnement connu a des boîtes mais aucune unité comptable.
+        # Proposer les deux dans les deux cas mènerait à un maximum de zéro.
+        possibles = ([UNITE_BOITE] if lot["boites"] > 0 else []) + (
+            [UNITE_UNITE] if lot["unites"] > 0 else [])
+        if len(possibles) > 1:
+            unite = st.radio(
+                "Retirer en", possibles, horizontal=True,
+                key=f"sf_sortie_unite_{choix}",
+                help="À l'unité, on entame une boîte : dispenser 10 "
+                     "comprimés d'une boîte de 30 en laisse 20 en vrac.")
+        else:
+            unite = possibles[0]
+            st.caption(
+                f"Ce lot se sort {'à la boîte' if unite == UNITE_BOITE else 'à l’unité'}"
+                + (" (il ne reste que des unités en vrac)."
+                   if unite == UNITE_UNITE else
+                   " (le conditionnement de ce produit n'est pas renseigné, "
+                   "les unités ne peuvent pas être comptées)."))
+
+        a_l_unite = unite == UNITE_UNITE
+        maximum = lot["unites"] if a_l_unite else lot["boites"]
         colonne_nombre, colonne_bouton = st.columns([1, 2])
         # Le maximum est le stock du lot : proposer davantage, c'est
-        # promettre une sortie que l'inventaire ne peut pas honorer.
+        # promettre une sortie que l'inventaire ne peut pas honorer. La clé
+        # porte le lot ET l'unité : sans cela, « 12 » saisi sur un lot bien
+        # fourni resterait affiché sur le lot suivant, au-dessus de son
+        # propre maximum.
         combien = colonne_nombre.number_input(
-            "Boîtes à retirer", min_value=1, max_value=lot["boites"],
-            value=1, step=1, key="sf_sortie_combien")
+            "Unités à retirer" if a_l_unite else "Boîtes à retirer",
+            min_value=1, max_value=maximum, value=1, step=1,
+            key=f"sf_sortie_combien_{choix}_{a_l_unite:d}")
         colonne_bouton.markdown("<div style='height:1.8rem'></div>",
                                 unsafe_allow_html=True)
         if colonne_bouton.button("➖ Retirer du stock", type="primary",
@@ -629,14 +667,27 @@ def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
             # des boîtes depuis que cette liste s'est affichée. On retire ce
             # qu'on peut, et on annonce ce qui a été retiré — pas ce qui
             # avait été demandé.
-            retire = {"boites": 0, "reste": 0}
+            retire = {"nombre": 0, "reste": 0}
 
-            def mouvement(courant, lot=lot, combien=int(combien)):
+            def mouvement(courant, lot=lot, combien=int(combien),
+                          a_l_unite=a_l_unite):
+                if a_l_unite:
+                    disponible = stock_ferme.unites_disponibles(
+                        courant, lot["cip"], lot["nom"], lot["peremption"],
+                        lot["lot"])
+                    if disponible == 0:
+                        retire.update(nombre=0, reste=0)
+                        return None
+                    apres, pris = stock_ferme.sortir_unites(
+                        courant, lot["cip"], lot["nom"], lot["peremption"],
+                        lot["lot"], min(combien, disponible))
+                    retire.update(nombre=pris, reste=disponible - pris)
+                    return apres if pris else None
                 disponible = stock_ferme.stock_du_lot(
                     courant, lot["cip"], lot["nom"], lot["peremption"],
                     lot["lot"])
                 nombre = min(combien, disponible)
-                retire.update(boites=nombre, reste=disponible - nombre)
+                retire.update(nombre=nombre, reste=disponible - nombre)
                 if nombre == 0:
                     return None
                 return stock_ferme.retirer_entree(
@@ -647,19 +698,20 @@ def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
                 # Verrou indisponible : le panneau reste ouvert, avec le
                 # même choix déjà fait — il n'y a qu'à recliquer.
                 st.rerun()
-            sorties = retire["boites"]
+            sorties = retire["nombre"]
+            mot = "unité" if a_l_unite else "boîte"
             peremption = (f"{lot['peremption']:%d/%m/%Y}" if lot["peremption"]
                           else "sans date")
             if sorties == 0:
                 st.session_state["sf_message"] = (
                     "avertissement",
-                    f"{lot['nom']} — ce lot n'a plus de boîte à sortir "
+                    f"{lot['nom']} — ce lot n'a plus de {mot} à sortir "
                     "(un autre poste vient de le vider).")
             else:
                 st.session_state["sf_message"] = (
                     "ok", f"➖ {lot['nom']} {lot['dosage']} — {sorties} "
-                          f"boîte(s) sortie(s) ({peremption}) · reste "
-                          f"{retire['reste']} boîte(s) sur ce lot."
+                          f"{mot}(s) sortie(s) ({peremption}) · reste "
+                          f"{retire['reste']} {mot}(s) sur ce lot."
                           + ("" if sorties == int(combien) else
                              " ⚠️ Moins que demandé : le stock avait changé."))
             st.session_state["sf_sortie_manuelle"] = False
@@ -1145,25 +1197,15 @@ def rendre(etape, tuile_kpi) -> None:
     # ce qui s'est produit en officine : « DOLIPRA » écrit, aucune réaction.
     if mode == MODE_ENTREE:
         col_scan, col_valider, col_manuel = st.columns([4, 1.3, 1.7])
-    else:
-        col_scan, col_manuel = st.columns([3, 1])
-        col_valider = None
-    col_scan.text_input(
-        "Code scanné", key="sf_scan", on_change=_traiter_scan,
-        placeholder=("Douchez la boîte à ajouter — ou tapez un nom de "
-                     "médicament puis Entrée" if mode == MODE_ENTREE
-                     else "Douchez la boîte à sortir"
-                          " (le champ se vide tout seul)"),
-        label_visibility="collapsed")
-    if col_valider is not None:
+        col_scan.text_input(
+            "Code scanné", key="sf_scan", on_change=_traiter_scan,
+            placeholder="Douchez la boîte à ajouter — ou tapez un nom de "
+                        "médicament puis Entrée",
+            label_visibility="collapsed")
         col_valider.button("🔎 Chercher", use_container_width=True,
                            on_click=_traiter_scan,
                            help="Valide ce qui est écrit dans le champ — "
                                 "même chose que la touche Entrée.")
-    # Le bouton de droite sert dans LES DEUX sens. Il était désactivé en
-    # mode Sortie : une étiquette illisible, et il n'existait plus aucune
-    # façon de retirer une boîte.
-    if mode == MODE_ENTREE:
         col_manuel.button(
             "⌨️ Saisie manuelle", use_container_width=True,
             on_click=_saisie_manuelle_vierge,
@@ -1174,14 +1216,38 @@ def rendre(etape, tuile_kpi) -> None:
         # boîte scannée, il n'était plus lu — seulement contourné du regard.
         _saisie_assistee()
     else:
-        col_manuel.button(
-            "⌨️ Sortie manuelle", use_container_width=True,
-            on_click=_basculer_sortie_manuelle,
-            help="Choisir la boîte à retirer dans la liste, sans douchette.")
-        st.caption("Chaque scan retire **une boîte**. Le Data Matrix désigne "
-                   "la boîte exacte ; un code-barres linéaire ne donne que le "
-                   "produit, et c'est alors le lot qui **périme le plus tôt** "
-                   "qui sort.")
+        # Deux façons de sortir une boîte, deux encadrés de même poids. Le
+        # bouton « Sortie manuelle » était auparavant une case étroite collée
+        # au champ de scan : il ressemblait à un accessoire du champ, alors
+        # que c'est le seul chemin possible pour une étiquette illisible ou
+        # pour une dispensation à l'unité. Personne ne le voyait.
+        carte_bip, carte_main = st.columns(2)
+        with carte_bip:
+            with st.container(border=True):
+                st.markdown("#### 🔦 Le bip de la boîte")
+                st.text_input(
+                    "Code scanné", key="sf_scan", on_change=_traiter_scan,
+                    placeholder="Douchez la boîte à sortir"
+                                " (le champ se vide tout seul)",
+                    label_visibility="collapsed")
+                st.caption(
+                    "Chaque bip retire **une boîte entière**. Le Data Matrix "
+                    "désigne la boîte exacte ; un code-barres linéaire ne "
+                    "donne que le produit, et c'est alors le lot qui "
+                    "**périme le plus tôt** qui sort.")
+        with carte_main:
+            with st.container(border=True):
+                st.markdown("#### ⌨️ Sortie manuelle")
+                st.button(
+                    "Choisir la boîte dans la liste", use_container_width=True,
+                    key="sf_bouton_sortie_manuelle",
+                    on_click=_basculer_sortie_manuelle,
+                    help="Sans douchette : on désigne le lot, puis le "
+                         "nombre de boîtes ou d'unités.")
+                st.caption(
+                    "Pour une étiquette abîmée, une boîte sans code-barres — "
+                    "et pour sortir **quelques unités** plutôt qu'une boîte "
+                    "entière (le reste part en vrac, il reste à l'inventaire).")
 
     if mode == MODE_SORTIE:
         tri_courant = st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION)

@@ -512,13 +512,43 @@ un seul nombre possible, multiplicateur de tête pris en compte
 (« 3 piluliers de 30 comprimés » = 90). Dans le doute, la case reste à 0 —
 une quantité fausse sur un stock fermé ne se remarque pas.
 
+**Deux façons de sortir du stock**, présentées côte à côte en mode
+**Sortie**, dans deux encadrés de même poids :
+
+| Encadré | Ce qu'il fait | Quand s'en servir |
+|---|---|---|
+| **🔦 Le bip de la boîte** | chaque bip retire **une boîte entière** | le geste courant : la boîte part telle quelle |
+| **⌨️ Sortie manuelle** | on désigne le lot dans une liste, puis le nombre | étiquette illisible, ou sortie **à l'unité** |
+
+Le bouton de sortie manuelle était auparavant une case étroite collée au
+champ de scan : il ressemblait à un accessoire du champ, alors que c'est le
+seul chemin possible quand le code ne se lit pas.
+
 **Sortie manuelle** — la douchette ne lit pas tout : étiquette abîmée,
-boîte reconditionnée, produit sans code-barres. En mode **Sortie**, le
-bouton **« ⌨️ Sortie manuelle »** ouvre la liste des boîtes en stock
-(statut, nom, dosage, péremption, n° de lot, nombre de boîtes) : on désigne
-celle qui sort et on choisit combien. Le maximum proposé est le stock du
-lot — promettre davantage serait promettre une sortie que l'inventaire ne
-peut pas honorer.
+boîte reconditionnée, produit sans code-barres. Le bouton ouvre la liste
+des boîtes en stock (statut, nom, dosage, péremption, n° de lot, boîtes et
+unités en vrac) : on désigne celle qui sort et on choisit combien. Le
+maximum proposé est le stock du lot — promettre davantage serait promettre
+une sortie que l'inventaire ne peut pas honorer.
+
+**Sortie à l'unité** — une douchette lit une boîte, jamais dix comprimés.
+Le panneau de sortie manuelle propose donc **Boîtes entières** ou **Unités
+(comprimés)**. À l'unité, une boîte **s'entame** : sortir 10 comprimés d'un
+lot de 2 boîtes de 30 laisse **1 boîte + 20 unités en vrac**, et le lot
+reste à l'inventaire avec 50 unités. Retirer la boîte entière aurait fait
+disparaître des vingt comprimés réellement présents dans l'armoire — donc
+les recommander pour rien, ou les laisser périmer sans jamais les voir.
+
+Deux règles portent tout le reste :
+
+- **le vrac part avant qu'une boîte ne soit entamée.** Ouvrir une seconde
+  boîte pendant qu'un fond de boîte traîne, c'est du périmé annoncé ;
+- **sans conditionnement connu** (« unités par boîte » à 0), une boîte ne se
+  convertit pas en comprimés : seul le vrac déjà compté peut sortir. Inventer
+  un contenu donnerait un stock d'unités imaginaire.
+
+Un lot qui n'a plus de boîte pleine mais garde des unités en vrac **reste
+proposé** à la sortie : ces comprimés sont bien dans l'armoire.
 
 Et si l'inventaire est **vide** alors qu'on est en mode Sortie, l'écran le
 dit et propose un bouton pour repasser en Entrée : chaque scan répondrait
