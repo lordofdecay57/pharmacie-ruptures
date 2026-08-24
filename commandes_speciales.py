@@ -388,11 +388,17 @@ def vue_affichable(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
         })
 
     vue = pd.DataFrame(lignes)
-    # Colonnes ENTIÈRES pouvant être vides : sans le type « Int64 » de
-    # pandas, une case sans mesure s'affiche « None » en plein tableau —
-    # seule note anglo-saxonne d'un écran entièrement en français.
+    # Colonnes pouvant être VIDES. Sans un type qui connaît l'absence,
+    # pandas garde des objets Python et la case affiche « None » en plein
+    # tableau — seule note anglo-saxonne d'un écran entièrement en français.
+    # Les dates comptent autant que les nombres : un patient jamais facturé
+    # n'a pas de dernière facturation, et c'est le cas le plus courant à
+    # l'ouverture d'un dossier.
     for colonne in ("Attente (j)", "Délai observé (j)"):
         vue[colonne] = pd.array(vue[colonne], dtype="Int64")
+    for colonne in ("Facturable le", "Envoi du mail", "Réception",
+                    "Dernière facturation"):
+        vue[colonne] = pd.to_datetime(vue[colonne], errors="coerce")
     vue = vue.sort_values(_cle_tri(tri),
                           kind="stable").reset_index(drop=True)
     return vue[COLONNES_VUE]

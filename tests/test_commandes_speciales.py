@@ -221,18 +221,32 @@ class TestVueEtListesDuMatin:
     def test_la_vue_calcule_tout_ce_qui_se_deduit(self):
         vue = cs.vue_affichable(_dossier(), AUJOURDHUI)
         assert list(vue.columns) == cs.COLONNES_VUE
-        assert vue.iloc[0]["Facturable le"] == date(2026, 8, 23)
+        # Les colonnes de dates sont typées « datetime64 » pour qu'une case
+        # vide s'affiche vide plutôt que « None » : on compare donc à un
+        # Timestamp, pas à un date.
+        assert vue.iloc[0]["Facturable le"] == pd.Timestamp(2026, 8, 23)
         assert vue.iloc[0]["Jours avant facturation"] == 6
 
-    def test_une_mesure_absente_ne_s_affiche_pas_None(self):
+    def test_aucune_case_vide_ne_s_affiche_None(self):
         """« None » en plein tableau serait la seule note anglo-saxonne d'un
-        écran entièrement en français — et personne ne sait ce que c'est."""
-        vue = cs.vue_affichable(_dossier(), AUJOURDHUI)
+        écran entièrement en français — et personne ne sait ce que c'est.
+
+        Le dossier de ce test n'a AUCUNE date : c'est l'état d'un dossier
+        qu'on vient d'ouvrir, donc le plus courant. Le premier correctif
+        n'avait traité que les nombres, et « Dern. facturation » affichait
+        encore « None » à l'écran de la pharmacie.
+        """
+        neuf = cs.ajouter_dossier(cs.dossier_vide(), "NOUVEAU", "PRODUIT",
+                                  boites=1)
+        vue = cs.vue_affichable(neuf, AUJOURDHUI)
         for colonne in ("Attente (j)", "Délai observé (j)"):
             assert str(vue[colonne].dtype) == "Int64", colonne
-            assert pd.isna(vue.iloc[0][colonne])
-        assert "None" not in cs.exporter_csv(_dossier(),
-                                            AUJOURDHUI).decode("utf-8-sig")
+        for colonne in ("Facturable le", "Envoi du mail", "Réception",
+                        "Dernière facturation"):
+            assert "datetime64" in str(vue[colonne].dtype), colonne
+        assert vue.iloc[0].isna().any(), "ce dossier doit avoir des cases vides"
+        assert "None" not in cs.exporter_csv(neuf,
+                                             AUJOURDHUI).decode("utf-8-sig")
 
     def test_un_dossier_vide_ne_casse_rien(self):
         vue = cs.vue_affichable(cs.dossier_vide(), AUJOURDHUI)
