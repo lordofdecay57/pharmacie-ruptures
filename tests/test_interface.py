@@ -112,6 +112,38 @@ def application_avec_base(tmp_path_factory):
     yield from _lancer(travail)
 
 
+@pytest.fixture(scope="module")
+def application_avec_stock(tmp_path_factory):
+    """Même chose, mais avec un inventaire DÉJÀ rempli.
+
+    La sortie du stock ne se teste pas sur un inventaire vide : l'écran s'y
+    arrête très tôt (« il n'y a rien à sortir »). Il faut donc des boîtes
+    posées sur le disque avant que Streamlit ne démarre.
+    """
+    travail = tmp_path_factory.mktemp("appli_stock")
+    (travail / "stock_ferme.csv").write_text(
+        "Code CIP;Nom du produit;Péremption;Lot;Boîtes;Unités par boîte;"
+        "Unités en vrac;Total unités;Enregistré le\n"
+        "3400930000011;ZOLPIDEM 10 mg;2027-06-30;Z1;2;30;0;60;2026-07-01\n",
+        encoding="utf-8-sig")
+    yield from _lancer(travail)
+
+
+@pytest.fixture(scope="module")
+def page_avec_stock(application_avec_stock, pilote):
+    """Onglet ouvert sur le stock fermé, en mode Sortie, inventaire rempli."""
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1400, "height": 1100})
+    onglet.goto(application_avec_stock, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    _onglet(onglet, ESPACE_STOCK_FERME).first.click()
+    onglet.wait_for_timeout(6000)
+    onglet.get_by_text("Sortie", exact=False).first.click()
+    onglet.wait_for_timeout(4000)
+    yield onglet
+    navigateur.close()
+
+
 def _ouvrir(page, url: str) -> list:
     """Charge la page et renvoie les erreurs JavaScript observées.
 
@@ -364,9 +396,39 @@ class TestEspaceStockFerme:
         """Une étiquette abîmée, une boîte reconditionnée : la douchette ne
         lit pas tout. Le bouton était purement désactivé en mode Sortie —
         il n'existait alors AUCUNE façon de retirer une boîte."""
-        bouton = page.get_by_role("button", name="Sortie manuelle")
+        # « :visible » écarte le double de mesure que Streamlit rend en
+        # taille nulle à côté de chaque bouton porteur d'une bulle d'aide.
+        bouton = page.locator(
+            ".st-key-sf_bouton_sortie_manuelle button:visible")
         assert bouton.count() == 1
         assert bouton.first.is_enabled()
+
+    def test_les_deux_chemins_de_sortie_ont_le_meme_poids(self, page):
+        """Le bouton de sortie manuelle était une case étroite collée au
+        champ de scan : il passait pour un accessoire du champ. C'est
+        pourtant le SEUL chemin quand l'étiquette ne se lit pas, et le seul
+        pour sortir à l'unité. Deux encadrés titrés, de même largeur."""
+        contenu = page.content()
+        assert "Le bip de la boîte" in contenu
+        assert "Sortie manuelle" in contenu
+        # Même largeur : deux colonnes de poids égal, pas 3 contre 1.
+        largeurs = page.evaluate(
+            """() => {
+                const champ = document.querySelector('.st-key-sf_scan');
+                const bouton = document.querySelector(
+                    '.st-key-sf_bouton_sortie_manuelle');
+                if (!champ || !bouton) return null;
+                const col = (n) => {
+                    let e = n;
+                    while (e && e.getAttribute(
+                        'data-testid') !== 'stColumn') e = e.parentElement;
+                    return e ? e.getBoundingClientRect().width : 0;
+                };
+                return [col(champ), col(bouton)];
+            }""")
+        assert largeurs, "les deux encadrés ne sont pas dans des colonnes"
+        gauche, droite = largeurs
+        assert abs(gauche - droite) < 0.05 * gauche, largeurs
 
     def test_le_bouton_ramene_en_entree(self, page):
         """Le seul geste qui débloque l'écran doit tenir en un clic."""
@@ -376,6 +438,58 @@ class TestEspaceStockFerme:
         assert "Entrée" in _onglet_actif(page, "sf_mode")
         assert page.get_by_role("button",
                                 name="Saisie manuelle").first.is_enabled()
+
+
+class TestSortieALUnite:
+    """Dispenser dix comprimés d'une boîte de trente.
+
+    La douchette lit une boîte, jamais dix comprimés : sans ce chemin, la
+    seule sortie possible était la boîte entière, et les vingt comprimés
+    restés dans l'armoire disparaissaient de l'inventaire.
+    """
+
+    def _ouvrir_le_panneau(self, page_avec_stock):
+        page = page_avec_stock
+        if page.locator(".st-key-sf_sortie_choix").count() == 0:
+            page.locator(
+                ".st-key-sf_bouton_sortie_manuelle button:visible").click()
+            page.wait_for_timeout(4000)
+        return page
+
+    def test_le_panneau_s_ouvre_sur_l_inventaire_reel(self, page_avec_stock):
+        page = self._ouvrir_le_panneau(page_avec_stock)
+        _sans_exception(page)
+        assert page.locator(".st-key-sf_sortie_choix").count() == 1
+        # Le libellé doit permettre de choisir : nom, péremption, lot.
+        assert "ZOLPIDEM" in page.content()
+
+    def test_les_deux_unites_sont_proposees(self, page_avec_stock):
+        """Boîtes ou comprimés : c'est le choix qui manquait entièrement."""
+        page = self._ouvrir_le_panneau(page_avec_stock)
+        contenu = page.content()
+        assert "Boîtes entières" in contenu
+        assert "Unités (comprimés)" in contenu
+
+    def test_une_sortie_a_l_unite_entame_la_boite(self, page_avec_stock):
+        """Le tour complet : 10 comprimés sortis d'un lot de 2 × 30 doivent
+        laisser 1 boîte et 20 unités en vrac — pas 1 boîte tout court."""
+        page = self._ouvrir_le_panneau(page_avec_stock)
+        page.get_by_text("Unités (comprimés)", exact=True).first.click()
+        page.wait_for_timeout(3000)
+        _sans_exception(page)
+        champ = page.locator(
+            '[data-testid="stNumberInput"] input').first
+        champ.fill("10")
+        champ.press("Enter")
+        page.wait_for_timeout(2500)
+        page.get_by_role("button", name="Retirer du stock").click()
+        page.wait_for_timeout(5000)
+        _sans_exception(page)
+        contenu = page.content()
+        assert "10 unité(s) sortie(s)" in contenu
+        # Ce qui reste vraiment : 1 boîte de 30 + 20 en vrac. Annoncer
+        # « reste 1 boîte » aurait perdu les vingt comprimés de l'armoire.
+        assert "reste 50 unité(s)" in contenu
 
 
 class TestSaisieAssistee:

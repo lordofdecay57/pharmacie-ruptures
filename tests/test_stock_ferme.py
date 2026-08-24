@@ -35,7 +35,8 @@ from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          parser_peremption_saisie, produit_connu,
                          repertoire_vide, resume_inventaire, retirer_entree,
                          sauver_inventaire, sauver_repertoire,
-                         statut_peremption, total_unites)
+                         sortir_unites, statut_peremption, total_unites,
+                         unites_disponibles)
 
 AUJOURDHUI = date(2026, 7, 31)
 GS = "\x1d"
@@ -593,6 +594,99 @@ class TestDosageDansLeNom:
         assert relu.iloc[0]["Dosage"] == ""
 
 
+class TestSortieALUnite:
+    """Dispenser dix comprimés ne retire pas la boîte de trente.
+
+    Au comptoir, une boîte s'entame : les vingt comprimés qui restent sont
+    toujours dans l'armoire. Retirer la boîte entière les ferait disparaître
+    de l'inventaire — c'est-à-dire les recommander pour rien, ou les laisser
+    périmer sans jamais les voir.
+    """
+
+    def _lot(self, boites=2, par_boite=30, vrac=0):
+        return ajouter_entree(
+            inventaire_vide(),
+            _entree(nom="ZOLPIDEM", cip="3400930000011", lot="Z1",
+                    boites=boites, unites_par_boite=par_boite,
+                    unites_vrac=vrac, peremption=date(2027, 6, 30)),
+            AUJOURDHUI)
+
+    def _sortir(self, inv, unites):
+        return sortir_unites(inv, "3400930000011", "ZOLPIDEM",
+                             date(2027, 6, 30), "Z1", unites)
+
+    def _dispo(self, inv):
+        return unites_disponibles(inv, "3400930000011", "ZOLPIDEM",
+                                  date(2027, 6, 30), "Z1")
+
+    def test_le_vrac_part_avant_qu_une_boite_soit_entamee(self):
+        """Une seconde boîte ouverte pendant qu'un fond de boîte traîne,
+        c'est du périmé annoncé."""
+        apres, pris = self._sortir(self._lot(boites=2, vrac=5), 3)
+        assert pris == 3
+        assert int(apres.at[0, "Boîtes"]) == 2
+        assert int(apres.at[0, "Unités en vrac"]) == 2
+
+    def test_une_boite_s_entame_quand_le_vrac_ne_suffit_pas(self):
+        apres, pris = self._sortir(self._lot(boites=2, vrac=0), 10)
+        assert pris == 10
+        assert int(apres.at[0, "Boîtes"]) == 1
+        assert int(apres.at[0, "Unités en vrac"]) == 20
+        assert int(apres.at[0, "Total unités"]) == 50
+
+    def test_plusieurs_boites_s_enchainent(self):
+        apres, pris = self._sortir(self._lot(boites=3, vrac=0), 65)
+        assert pris == 65
+        assert int(apres.at[0, "Boîtes"]) == 0
+        assert int(apres.at[0, "Unités en vrac"]) == 25
+
+    def test_on_ne_sort_jamais_plus_que_le_stock(self):
+        """Promettre une sortie que l'inventaire ne peut pas honorer, c'est
+        un inventaire faux dès le lendemain."""
+        apres, pris = self._sortir(self._lot(boites=1, vrac=0), 45)
+        assert pris == 30
+        assert apres.empty
+
+    def test_la_ligne_disparait_une_fois_videe(self):
+        """Un stock fermé se contrôle boîte à boîte : une ligne à zéro n'est
+        que du bruit sur la liste imprimée."""
+        apres, pris = self._sortir(self._lot(boites=0, vrac=12), 12)
+        assert pris == 12
+        assert apres.empty
+
+    def test_sans_conditionnement_les_boites_ne_se_convertissent_pas(self):
+        """Sans « unités par boîte », on ne sait pas ce que contient une
+        boîte. L'inventer donnerait un stock d'unités imaginaire."""
+        apres, pris = self._sortir(self._lot(boites=2, par_boite=0, vrac=4), 10)
+        assert pris == 4
+        assert int(apres.at[0, "Boîtes"]) == 2
+        assert int(apres.at[0, "Unités en vrac"]) == 0
+
+    def test_un_lot_inconnu_ne_touche_a_rien(self):
+        inv = self._lot()
+        apres, pris = sortir_unites(inv, "3400999999999", "INCONNU",
+                                    date(2027, 6, 30), "X", 5)
+        assert pris == 0
+        assert int(apres.at[0, "Boîtes"]) == 2
+
+    def test_une_demande_nulle_ne_touche_a_rien(self):
+        apres, pris = self._sortir(self._lot(), 0)
+        assert pris == 0
+        assert int(apres.at[0, "Boîtes"]) == 2
+
+    def test_le_maximum_propose_est_le_stock_reel(self):
+        """C'est le plafond du champ de l'écran : au-dessus, on proposerait
+        une sortie impossible."""
+        assert self._dispo(self._lot(boites=2, par_boite=30, vrac=5)) == 65
+        assert self._dispo(self._lot(boites=2, par_boite=0, vrac=4)) == 4
+        assert self._dispo(inventaire_vide()) == 0
+
+    def test_le_disponible_suit_les_sorties(self):
+        inv = self._lot(boites=2, vrac=0)
+        apres, _ = self._sortir(inv, 10)
+        assert self._dispo(apres) == 50
+
+
 class TestLotsSortables:
     """Sortie sans douchette : désigner la boîte dans une liste.
 
@@ -661,6 +755,37 @@ class TestLotsSortables:
             assert attendu in zolpidem["libelle"], zolpidem["libelle"]
         sans_date = [l for l in lots if l["nom"] == "MORPHINE"][0]
         assert "sans date" in sans_date["libelle"]
+
+    def test_une_boite_entamee_reste_sortable(self):
+        """Zéro boîte pleine mais douze comprimés en vrac : les écarter de la
+        liste rendrait ces comprimés impossibles à sortir, alors qu'ils sont
+        bien dans l'armoire."""
+        inv = ajouter_entree(
+            inventaire_vide(),
+            _entree(nom="ZOLPIDEM", cip="3400930000011", lot="Z9", boites=0,
+                    unites_par_boite=30, unites_vrac=12,
+                    peremption=date(2027, 6, 30)),
+            AUJOURDHUI)
+        lots = lots_sortables(inv, AUJOURDHUI)
+        assert [l["nom"] for l in lots] == ["ZOLPIDEM"]
+        assert lots[0]["unites"] == 12
+
+    def test_chaque_lot_porte_de_quoi_sortir_a_l_unite(self):
+        """Sans le conditionnement ni le vrac, l'écran ne saurait pas quel
+        maximum proposer pour une sortie à l'unité."""
+        inv = ajouter_entree(
+            inventaire_vide(),
+            _entree(nom="ZOLPIDEM", cip="3400930000011", lot="Z1", boites=2,
+                    unites_par_boite=30, unites_vrac=5,
+                    peremption=date(2027, 6, 30)),
+            AUJOURDHUI)
+        lot = lots_sortables(inv, AUJOURDHUI)[0]
+        assert lot["unites_vrac"] == 5
+        assert lot["unites_par_boite"] == 30
+        assert lot["unites"] == 65
+        # Le libellé doit montrer le vrac : sinon deux lignes identiques à
+        # l'écran n'auraient pas le même stock réel.
+        assert "2 boîte(s) + 5 unité(s)" in lot["libelle"]
 
     def test_l_ordre_suit_le_classement_demande(self):
         lots = lots_sortables(self._inventaire(), AUJOURDHUI, TRI_NOM)
