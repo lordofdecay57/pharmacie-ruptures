@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.0"
+VERSION_APP = "6.1"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -290,7 +290,7 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 
 ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "🔒  Stock fermé — inventaire scanné"
-ESPACE_COMMANDES = "💠  Commandes spéciales — patients & facturation"
+ESPACE_COMMANDES = "💠  Commandes spéciales"
 
 DOSSIER_APP = Path(__file__).resolve().parent
 

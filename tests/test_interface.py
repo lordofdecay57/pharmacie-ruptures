@@ -29,7 +29,7 @@ DEMARRAGE_MAX_S = 60
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
 ESPACE_CADENCIER = "Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "Stock fermé — inventaire scanné"
-ESPACE_COMMANDES = "Commandes spéciales — patients & facturation"
+ESPACE_COMMANDES = "Commandes spéciales"
 
 
 def _port_libre() -> int:
@@ -156,10 +156,21 @@ def page_avec_base(application_avec_base, pilote):
     onglet = navigateur.new_page(viewport={"width": 1400, "height": 1100})
     onglet.goto(application_avec_base, wait_until="domcontentloaded")
     onglet.wait_for_selector(".hero", timeout=60000)
-    onglet.get_by_text(ESPACE_STOCK_FERME).first.click()
+    _onglet(onglet, ESPACE_STOCK_FERME).first.click()
     onglet.wait_for_timeout(6000)
     yield onglet
     navigateur.close()
+
+
+def _onglet(page, libelle: str):
+    """Le bouton d'onglet portant ce libellé, dans la barre des espaces.
+
+    Ciblé par la clé du widget plutôt que par le texte seul : « Commandes
+    spéciales » apparaît aussi dans le bandeau de l'espace et dans la barre
+    latérale, et « le premier trouvé » finirait par désigner l'un d'eux.
+    """
+    return page.locator(".st-key-espace_travail button").filter(
+        has_text=libelle)
 
 
 def _sans_exception(page) -> None:
@@ -498,7 +509,7 @@ def deux_postes(serveur_partage, pilote):
         onglet = contexte.new_page()
         onglet.goto(serveur_partage, wait_until="domcontentloaded")
         onglet.wait_for_selector(".hero", timeout=60000)
-        onglet.get_by_text(ESPACE_STOCK_FERME).first.click()
+        _onglet(onglet, ESPACE_STOCK_FERME).first.click()
         onglet.wait_for_timeout(6000)
         return onglet
 
@@ -600,7 +611,7 @@ def page_commandes(tmp_path_factory, pilote):
     onglet = navigateur.new_page(viewport={"width": 1500, "height": 1200})
     onglet.goto(url, wait_until="domcontentloaded")
     onglet.wait_for_selector(".hero", timeout=60000)
-    onglet.get_by_text(ESPACE_COMMANDES).first.click()
+    _onglet(onglet, ESPACE_COMMANDES).first.click()
     onglet.wait_for_timeout(8000)
     yield onglet
     navigateur.close()
@@ -614,7 +625,7 @@ class TestCommandesSpeciales:
         trouve est la première chose à voir. La page est ouverte ICI : un
         test qui dépend de l'ordre d'exécution ne prouve rien."""
         _ouvrir(page, application)
-        assert page.get_by_text(ESPACE_COMMANDES).count() >= 1
+        assert _onglet(page, ESPACE_COMMANDES).count() == 1
 
     def test_l_ecran_s_ouvre_sans_exception(self, page_commandes):
         _sans_exception(page_commandes)
