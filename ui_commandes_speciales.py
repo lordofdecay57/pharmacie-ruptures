@@ -191,6 +191,34 @@ def _medicament_choisi() -> None:
         st.session_state["cs_nouveau_cip"] = medicament["cip"]
 
 
+def _panneau_ajout(dossiers: pd.DataFrame) -> None:
+    """L'ajout d'un dossier, en haut de l'écran et prêt à enchaîner.
+
+    Trois décisions, chacune née d'un défaut constaté :
+
+    - **en haut**, avant les listes du matin. Placé en troisième position,
+      on ne le voyait pas sans faire défiler, et l'écran donnait
+      l'impression de ne gérer qu'un seul patient — celui de la liste
+      déroulante des gestes ;
+    - **ouvert d'office** tant qu'aucun dossier n'existe : un module vide
+      n'a que cette action-là. Et il **reste ouvert** après un ajout, pour
+      qu'on enchaîne les saisies sans le rouvrir à chaque fois ;
+    - **replié** ensuite, pour ne pas manger l'écran de l'usage quotidien.
+    """
+    vide = dossiers is None or dossiers.empty
+    ouvert = vide or st.session_state.get("cs_ajout_ouvert", False)
+    nombre = 0 if vide else len(dossiers)
+    titre = ("➕ Ouvrez un premier dossier" if vide else
+             f"➕ Ouvrir un dossier — {nombre} dossier"
+             f"{'s' if nombre > 1 else ''} déjà suivi"
+             f"{'s' if nombre > 1 else ''}")
+    with st.expander(titre, expanded=ouvert):
+        st.caption("Un dossier par patient ET par médicament. Le même "
+                   "patient peut en avoir plusieurs, et il n'y a pas de "
+                   "limite au nombre de dossiers.")
+        _formulaire_nouveau()
+
+
 def _formulaire_nouveau() -> None:
     """Ouvrir un dossier : un patient, un produit, et les dates connues."""
     catalogue = _catalogue()
@@ -242,8 +270,14 @@ def _formulaire_nouveau() -> None:
         reception=reception, facturation=facturation, notes=notes))
     if resultat is None:
         return
+    # Le panneau reste ouvert : on saisit rarement un seul dossier. Devoir
+    # le rouvrir entre chaque patient est ce qui donnait l'impression de ne
+    # pas pouvoir en ajouter d'autres.
+    st.session_state["cs_ajout_ouvert"] = True
     st.session_state["cs_message"] = (
-        "ok", f"📁 {patient} — {produit} : dossier enregistré.")
+        "ok", f"📁 {patient} — {produit} : dossier enregistré. "
+              f"{len(resultat)} dossier(s) suivi(s) — le formulaire est vide, "
+              "vous pouvez enchaîner avec le patient suivant.")
     st.rerun()
 
 
@@ -255,6 +289,8 @@ def _actions_rapides(dossiers: pd.DataFrame, aujourdhui: date) -> None:
     Laisser corriger deux cases à la main serait laisser l'avance fausse.
     """
     if dossiers.empty:
+        st.info("Aucun dossier pour l'instant — ouvrez-en un tout en haut "
+                "de l'écran, dans « ➕ Ouvrez un premier dossier ».")
         return
     vue = cs.vue_affichable(dossiers, aujourdhui, cs.TRI_PATIENT)
     libelles = [f"{l['Patient']} — {l['Nom du produit']}"
@@ -371,8 +407,9 @@ def _tableau_editable(dossiers: pd.DataFrame, aujourdhui: date, tri: str,
                   "Délai observé (j)", "À commander"],
         column_config=_colonnes_vue())
     st.caption("Corrigez une date ou un nombre de boîtes directement dans le "
-               "tableau ; une ligne peut être supprimée (sélection puis "
-               "touche Suppr). Tout est enregistré automatiquement.")
+               "tableau, **ajoutez un dossier** avec le « + » de la dernière "
+               "ligne, ou supprimez-en un (sélection puis touche Suppr). "
+               "Tout est enregistré automatiquement.")
 
     colonnes = [c for c in _COLONNES_EDITABLES if c in edite.columns]
     if len(edite) == len(vue) and edite[colonnes].equals(vue[colonnes]):
@@ -502,6 +539,13 @@ def rendre(etape, tuile_kpi) -> None:
 
     _bandeau(cs.resume(dossiers, aujourdhui, avance), tuile_kpi)
 
+    # --- Ajouter, tout en haut ---------------------------------------------
+    # L'ajout était en troisième position, sous deux sections : on ne le
+    # voyait pas sans faire défiler, et l'écran donnait l'impression de ne
+    # gérer qu'un seul patient — celui de la liste déroulante des gestes.
+    # C'est pourtant l'action de départ : un module vide n'a que celle-là.
+    _panneau_ajout(dossiers)
+
     # --- Le matin ----------------------------------------------------------
     etape("1", "Ce qu'il y a à faire aujourd'hui",
           "Trois questions, trois listes — le reste peut attendre.")
@@ -509,18 +553,13 @@ def rendre(etape, tuile_kpi) -> None:
 
     st.divider()
     etape("2", "Enregistrez un geste",
-          "Facturer, recevoir, commander : la date et les boîtes bougent "
-          "ensemble.")
+          "Facturer, recevoir, commander sur un dossier DÉJÀ ouvert : la "
+          "date et les boîtes bougent ensemble.")
     _actions_rapides(dossiers, aujourdhui)
-
-    st.divider()
-    etape("3", "Ouvrez un dossier",
-          "Un dossier par patient et par médicament, suivi dans le temps.")
-    _formulaire_nouveau()
 
     # --- La référence ------------------------------------------------------
     st.divider()
-    etape("4", "Tous les dossiers", "La référence, corrigeable à la main.")
+    etape("3", "Tous les dossiers", "La référence, corrigeable à la main.")
     colonne_recherche, colonne_tri = st.columns([3, 2])
     recherche = colonne_recherche.text_input(
         "🔍 Rechercher", key="cs_recherche",
@@ -547,6 +586,6 @@ def rendre(etape, tuile_kpi) -> None:
     _rapprochement(dossiers)
 
     st.divider()
-    etape("5", "Imprimez ou exportez",
+    etape("4", "Imprimez ou exportez",
           "La liste du matin, à poser à côté du téléphone.")
     _zone_impression(dossiers, aujourdhui, tri)

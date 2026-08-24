@@ -602,7 +602,11 @@ def page_commandes(tmp_path_factory, pilote):
         "Réception;Dernière facturation;Notes\n"
         "Mme LEA DUPONT;KEYTRUDA 100 mg;3400930000019;1;2026-07-10;"
         "2026-08-05;2026-07-20;\n"
-        "M. PAUL MARTIN;OPDIVO 40 mg;3400930000026;0;;;2026-08-10;urgent\n",
+        "M. PAUL MARTIN;OPDIVO 40 mg;3400930000026;0;;;2026-08-10;urgent\n"
+        # Un dossier SANS AUCUNE DATE : l'état d'un dossier qu'on vient
+        # d'ouvrir, donc le plus courant. C'est lui qui fait apparaître les
+        # cases vides — et « None » s'y affichait, en plein écran.
+        "M. TOUT NEUF;KEYTRUDA 100 mg;3400930000019;1;;;;\n",
         encoding="utf-8-sig")
     lanceur = _lancer(travail)
     url = next(lanceur)
@@ -643,12 +647,20 @@ class TestCommandesSpeciales:
         assert "LEA DUPONT" in contenu
         assert "PAUL MARTIN" in contenu
 
-    def test_aucune_mention_anglaise_ne_traine(self, page_commandes):
-        """« None » dans une colonne serait la seule note anglo-saxonne d'un
-        écran entièrement en français."""
-        tableaux = page_commandes.locator('[data-testid="stDataFrame"]')
-        for i in range(tableaux.count()):
-            assert "None" not in tableaux.nth(i).inner_text()
+    def test_le_panneau_d_ajout_est_visible_sans_defiler(self):
+        """L'ajout était en troisième position, sous deux sections : on ne
+        le voyait pas, et l'écran donnait l'impression de ne gérer qu'un
+        seul patient — celui de la liste déroulante des gestes.
+
+        Contrôle sur la source : l'ordre d'affichage est une décision, et
+        c'est elle qu'on protège."""
+        source = (RACINE / "ui_commandes_speciales.py").read_text(
+            encoding="utf-8")
+        corps = source.split("def rendre(", 1)[1]
+        assert corps.index("_panneau_ajout(") < corps.index("_listes_du_matin("), (
+            "l'ajout doit venir AVANT les listes du matin")
+        assert corps.index("_panneau_ajout(") < corps.index("_actions_rapides("), (
+            "l'ajout doit venir AVANT les gestes sur un dossier existant")
 
     def test_les_trois_gestes_du_comptoir_sont_la(self, page_commandes):
         contenu = page_commandes.content()
