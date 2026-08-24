@@ -668,6 +668,36 @@ class TestCommandesSpeciales:
                       "Mail de commande envoyé"):
             assert geste in contenu, geste
 
+    def test_l_import_est_propose_pour_les_trois_formats(self, page_commandes):
+        """Retaper trente patients qui existent déjà dans un tableur, c'est
+        une demi-journée et des fautes de frappe sur des noms."""
+        contenu = page_commandes.content()
+        assert "Importer depuis un fichier" in contenu
+        for format_ in ("Excel", "CSV", "PDF"):
+            assert format_ in contenu, format_
+
+    def test_un_fichier_importe_ouvre_les_dossiers(self, page_commandes,
+                                                   tmp_path):
+        """Le chemin complet, depuis le dépôt du fichier : c'est là que se
+        cachent les surprises d'un vrai tableur — en-têtes inattendus,
+        cellules vides, codes lus en décimal."""
+        fichier = tmp_path / "commandes.csv"
+        fichier.write_text(
+            "Nom du patient;Spécialité;Code CIP;Dernière délivrance\n"
+            "Mme IMPORTEE;HERCEPTIN 150 mg;3400930000057;01/08/2026\n",
+            encoding="utf-8-sig")
+        page_commandes.get_by_text("Importer depuis un fichier").first.click()
+        page_commandes.wait_for_timeout(1500)
+        page_commandes.locator('input[type="file"]').set_input_files(
+            str(fichier))
+        page_commandes.wait_for_timeout(6000)
+        _sans_exception(page_commandes)
+        page_commandes.get_by_role(
+            "button", name="Importer ces dossiers").click()
+        page_commandes.wait_for_timeout(6000)
+        _sans_exception(page_commandes)
+        assert "Mme IMPORTEE" in page_commandes.content()
+
     def test_facturer_relance_les_22_jours(self, page_commandes):
         """Le geste complet : la date repart, et une boîte sort du stock.
         Les séparer laisserait l'avance fausse."""

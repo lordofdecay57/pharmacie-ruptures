@@ -384,9 +384,16 @@ _MOTS_CLES = {
 }
 
 
-def _sans_accents(s: str) -> str:
+def sans_accents(s: str) -> str:
+    """Minuscules sans accent : la forme sous laquelle on COMPARE des noms
+    de colonnes. « Réception », « RECEPTION » et « reception » désignent la
+    même chose dans un fichier d'officine."""
     s = unicodedata.normalize("NFKD", s)
     return "".join(c for c in s if not unicodedata.combining(c)).lower()
+
+
+#: Ancien nom, gardé pour les appels internes déjà écrits.
+_sans_accents = sans_accents
 
 
 def detecter_colonne(colonnes, role: str) -> Optional[str]:

@@ -105,8 +105,22 @@ def _texte(valeur) -> str:
 
 
 def normaliser_cip(valeur) -> str:
-    """Ne garde que les chiffres : la douchette et le clavier convergent."""
-    return re.sub(r"\D", "", _texte(valeur))
+    """Ne garde que les chiffres : la douchette et le clavier convergent.
+
+    Le « .0 » est retiré AVANT : un tableur dont la colonne de codes
+    contient une seule cellule vide fait lire toute la colonne en décimal,
+    et « 3400930000019.0 » deviendrait « 34009300000190 » — un code qui ne
+    correspond plus à rien. À l'import, le dossier du patient était alors
+    dupliqué au lieu d'être complété, et les 22 jours repartaient de zéro.
+
+    Un code réduit à des zéros (remplissage fréquent des exports) est
+    traité comme absent : deux produits distincts s'y rapprocheraient.
+    """
+    texte = _texte(valeur)
+    if re.fullmatch(r"\d+\.0+", texte):          # code lu en décimal
+        texte = texte.split(".")[0]
+    chiffres = re.sub(r"\D", "", texte)
+    return "" if chiffres.strip("0") == "" else chiffres
 
 
 def cle_patient(valeur) -> str:
@@ -611,7 +625,7 @@ def _index_dossier(dossier: pd.DataFrame, patient: str, cip: str,
 
 
 def ajouter_dossier(dossier: pd.DataFrame, patient: str, produit: str,
-                    cip: str = "", boites: int = 0,
+                    cip: str = "", boites=0,
                     envoi=None, reception=None, facturation=None,
                     notes: str = "") -> pd.DataFrame:
     """Crée un dossier, ou complète celui qui existe déjà.
@@ -619,6 +633,11 @@ def ajouter_dossier(dossier: pd.DataFrame, patient: str, produit: str,
     Deux dossiers pour le même patient et le même produit feraient repartir
     les 22 jours à zéro : c'est une facturation refusée par la caisse, ou
     pire, acceptée à tort.
+
+    ``boites=None`` signifie « ne touche pas au compte » : c'est ce dont
+    l'import a besoin quand le fichier n'a pas de colonne de quantité. Avec
+    ``0``, chaque import remettrait toutes les avances à zéro — et l'avance
+    est précisément ce qui empêche le patient d'attendre l'avion.
     """
     if not _texte(patient) or not _texte(produit):
         return dossier if dossier is not None else dossier_vide()
@@ -639,12 +658,61 @@ def ajouter_dossier(dossier: pd.DataFrame, patient: str, produit: str,
     }
     if existant is not None:
         for colonne, valeur in valeurs.items():
+            if colonne == "Boîtes en main":
+                # Le compte est remplacé — y compris par zéro, une avance
+                # peut légitimement tomber à rien — SAUF si l'appelant a dit
+                # de ne pas y toucher.
+                if boites is not None:
+                    dossier.at[existant, colonne] = valeur
+                continue
             # On ne VIDE pas une case déjà remplie avec un blanc : compléter
             # un dossier ne doit pas effacer ce qu'on n'a pas retapé.
-            if valeur not in ("", 0) or colonne == "Boîtes en main":
+            if valeur != "":
                 dossier.at[existant, colonne] = valeur
         return dossier.reset_index(drop=True)
     return pd.concat([dossier, pd.DataFrame([valeurs])], ignore_index=True)
+
+
+def importer_dossiers(dossier: pd.DataFrame, lignes) -> tuple:
+    """Charge en bloc des dossiers venus d'un fichier de la pharmacie.
+
+    ``lignes`` : itérable de dictionnaires ``{"patient", "produit", "cip",
+    "boites", "envoi", "reception", "facturation", "notes"}``. La fonction
+    ignore d'où ils viennent — c'est ce qui la laisse indépendante de tout
+    format de fichier, et testable sans en ouvrir aucun.
+
+    Une clé absente du dictionnaire n'écrase rien : un fichier qui ne porte
+    ni les dates ni les quantités complète les identités sans détruire le
+    suivi déjà en place.
+
+    Renvoie ``(dossier, ajoutes, completes, ignores)``. Une ligne sans
+    patient ou sans produit est ignorée : elle n'ouvrirait aucun dossier.
+    """
+    if dossier is None or dossier.empty:
+        dossier = dossier_vide()
+    dossier = dossier.reindex(columns=COLONNES_DOSSIER).copy()
+
+    ajoutes = completes = ignores = 0
+    for ligne in lignes or []:
+        patient = _texte(ligne.get("patient"))
+        produit = _texte(ligne.get("produit"))
+        if not patient or not produit:
+            ignores += 1
+            continue
+        cip = _texte(ligne.get("cip"))
+        deja = _index_dossier(dossier, patient, cip, produit) is not None
+        dossier = ajouter_dossier(
+            dossier, patient, produit, cip,
+            # « absent du fichier » et « zéro dans le fichier » ne sont pas
+            # la même chose : le premier ne doit toucher à rien.
+            boites=ligne.get("boites", None),
+            envoi=ligne.get("envoi"), reception=ligne.get("reception"),
+            facturation=ligne.get("facturation"), notes=ligne.get("notes"))
+        if deja:
+            completes += 1
+        else:
+            ajoutes += 1
+    return dossier.reset_index(drop=True), ajoutes, completes, ignores
 
 
 def _iso(valeur) -> str:
