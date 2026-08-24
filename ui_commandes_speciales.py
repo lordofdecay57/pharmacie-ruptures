@@ -21,6 +21,7 @@ import streamlit as st
 
 import base_medicaments
 import commandes_speciales as cs
+import commun
 import ui_commun
 
 _journal = logging.getLogger("pharmacie.commandes_speciales.ui")
@@ -223,6 +224,131 @@ def _panneau_ajout(dossiers: pd.DataFrame) -> None:
                    "patient peut en avoir plusieurs, et il n'y a pas de "
                    "limite au nombre de dossiers.")
         _formulaire_nouveau()
+
+
+#: Ce qu'on cherche dans le fichier importé, et les mots qui le trahissent.
+#: L'ordre compte : le premier en-tête contenant l'un de ces mots gagne.
+_ROLES_IMPORT = [
+    ("patient", "Patient", True,
+     ("patient", "nom du patient", "beneficiaire", "assure", "client")),
+    ("produit", "Médicament", True,
+     ("produit", "medicament", "specialite", "libelle", "designation",
+      "article", "denomination")),
+    ("cip", "Code CIP", False, ("cip", "code", "ean", "acl")),
+    ("boites", "Boîtes en main", False,
+     ("boite", "quantite", "qte", "stock", "en main", "nombre")),
+    ("envoi", "Envoi du mail", False, ("envoi", "mail", "commande le",
+                                       "commande")),
+    ("reception", "Réception", False, ("reception", "recu", "livraison",
+                                       "livre")),
+    ("facturation", "Dernière facturation", False,
+     ("facturation", "facture", "delivrance", "delivre")),
+    ("notes", "Notes", False, ("note", "remarque", "commentaire",
+                               "observation")),
+]
+
+_AUCUNE = "— aucune —"
+
+
+def _colonne_probable(colonnes, mots) -> str:
+    """La colonne du fichier qui correspond le mieux à ce rôle.
+
+    Deviner évite de faire choisir huit colonnes à la main quand les
+    en-têtes sont clairs. Deviner **mal** est sans gravité : la
+    proposition reste modifiable avant l'import.
+    """
+    for mot in mots:
+        for colonne in colonnes:
+            if mot in commun.sans_accents(str(colonne)):
+                return colonne
+    return _AUCUNE
+
+
+def _import_fichier(dossiers: pd.DataFrame) -> None:
+    """Charger des dossiers depuis un fichier Excel, CSV ou PDF.
+
+    Retaper trente patients qui existent déjà dans un tableur, c'est une
+    demi-journée et des fautes de frappe sur des noms.
+
+    La LECTURE du fichier est faite ici, dans l'interface : le moteur ne
+    reçoit que des lignes, et reste ainsi indépendant de tout format —
+    c'est ce qui permet de le tester sans ouvrir un seul fichier.
+    """
+    with st.expander("📂 Importer depuis un fichier (Excel, CSV, PDF)"):
+        st.caption(
+            "Vos dossiers existants sont **complétés**, jamais remplacés : "
+            "un patient déjà suivi garde ses dates et son avance si le "
+            "fichier ne les porte pas. Rien n'est écrit tant que vous n'avez "
+            "pas cliqué sur le bouton d'import.")
+        depot = st.file_uploader(
+            "Fichier", type=["xlsx", "xlsm", "xls", "csv", "txt", "pdf"],
+            key="cs_import_fichier", label_visibility="collapsed")
+        if depot is None:
+            return
+        try:
+            tableau = commun.charger_fichier(depot, depot.name)
+        except Exception as erreur:
+            st.error(f"**Fichier illisible.** {erreur}")
+            return
+        if tableau is None or tableau.empty:
+            st.warning("Ce fichier ne contient aucune ligne exploitable. "
+                       "Pour un PDF, vérifiez qu'il contient du texte et non "
+                       "une simple image scannée.")
+            return
+
+        st.caption(f"{len(tableau)} ligne(s) lue(s). Vérifiez les colonnes "
+                   "ci-dessous, puis importez.")
+        st.dataframe(tableau.head(5), use_container_width=True,
+                     hide_index=True)
+
+        colonnes = list(tableau.columns)
+        choix = {}
+        rangees = [_ROLES_IMPORT[i:i + 4] for i in range(0, len(_ROLES_IMPORT),
+                                                         4)]
+        for rangee in rangees:
+            for cellule, (role, libelle, requis, mots) in zip(
+                    st.columns(len(rangee)), rangee):
+                options = ([_AUCUNE] + colonnes if not requis else colonnes)
+                propose = _colonne_probable(colonnes, mots)
+                if requis and propose == _AUCUNE:
+                    propose = colonnes[0]
+                choix[role] = cellule.selectbox(
+                    libelle + (" *" if requis else ""), options,
+                    index=options.index(propose) if propose in options else 0,
+                    key=f"cs_import_{role}")
+
+        if not st.button("📥 Importer ces dossiers", type="primary",
+                         use_container_width=True, key="cs_import_valider"):
+            return
+
+        lignes = []
+        for _, ligne in tableau.iterrows():
+            # Une colonne non désignée est ABSENTE du dictionnaire, elle
+            # n'est pas mise à vide : c'est ce qui évite qu'un fichier sans
+            # quantités remette toutes les avances à zéro.
+            lignes.append({role: ligne[colonne]
+                           for role, colonne in choix.items()
+                           if colonne != _AUCUNE})
+
+        resultat = {}
+
+        def mouvement(courant):
+            nouveau, ajoutes, completes, ignores = cs.importer_dossiers(
+                courant, lignes)
+            resultat.update(ajoutes=ajoutes, completes=completes,
+                            ignores=ignores, total=len(nouveau))
+            return nouveau
+
+        if _appliquer(mouvement) is None:
+            return
+        st.session_state["cs_message"] = (
+            "ok",
+            f"📂 {resultat['ajoutes']} dossier(s) ouvert(s), "
+            f"{resultat['completes']} complété(s)"
+            + (f" · {resultat['ignores']} ligne(s) sans patient ou sans "
+               "médicament ignorée(s)" if resultat["ignores"] else "")
+            + f" · {resultat['total']} dossier(s) suivis désormais.")
+        st.rerun()
 
 
 def _formulaire_nouveau() -> None:
@@ -578,6 +704,7 @@ def rendre(etape, tuile_kpi) -> None:
     # gérer qu'un seul patient — celui de la liste déroulante des gestes.
     # C'est pourtant l'action de départ : un module vide n'a que celle-là.
     _panneau_ajout(dossiers)
+    _import_fichier(dossiers)
 
     # --- Le matin ----------------------------------------------------------
     etape("1", "Ce qu'il y a à faire aujourd'hui",

@@ -558,3 +558,147 @@ class TestExports:
         assert cs.exporter_csv(cs.dossier_vide(), AUJOURDHUI)
         pytest.importorskip("reportlab")
         assert cs.exporter_pdf(cs.dossier_vide(), aujourdhui=AUJOURDHUI)
+
+
+class TestImport:
+    """Charger en bloc des dossiers venus d'un fichier de la pharmacie.
+
+    Retaper trente patients qui existent déjà dans un tableur, c'est une
+    demi-journée et des fautes de frappe sur des noms. Le danger, lui, est
+    à l'autre bout : un import qui ÉCRASE le suivi déjà en place.
+    """
+
+    def test_un_fichier_neuf_ouvre_les_dossiers(self):
+        nouveau, ajoutes, completes, ignores = cs.importer_dossiers(
+            cs.dossier_vide(), [
+                {"patient": "DUPONT", "produit": "KEYTRUDA", "boites": 2},
+                {"patient": "MARTIN", "produit": "OPDIVO"}])
+        assert (ajoutes, completes, ignores) == (2, 0, 0)
+        assert len(nouveau) == 2
+
+    def test_une_ligne_sans_patient_ou_sans_produit_est_ignoree(self):
+        """Elle n'ouvrirait aucun dossier : le couple est ce qui identifie
+        un suivi, et ce qui porte les 22 jours."""
+        _, ajoutes, _, ignores = cs.importer_dossiers(cs.dossier_vide(), [
+            {"patient": "", "produit": "KEYTRUDA"},
+            {"patient": "DUPONT", "produit": ""},
+            {"produit": "OPDIVO"},
+            {"patient": "BERNARD", "produit": "REVLIMID"}])
+        assert (ajoutes, ignores) == (1, 3)
+
+    def test_un_patient_deja_suivi_est_complete_pas_duplique(self):
+        depart = _dossier()
+        nouveau, ajoutes, completes, _ = cs.importer_dossiers(depart, [
+            {"patient": "mme lea dupont", "produit": "KEYTRUDA 100 mg",
+             "cip": "3400930000019", "notes": "importé"}])
+        assert (ajoutes, completes) == (0, 1)
+        assert len(nouveau) == 1
+        assert nouveau.iloc[0]["Notes"] == "importé"
+
+    def test_un_fichier_sans_quantites_ne_remet_pas_les_avances_a_zero(self):
+        """Le piège de l'import. « Colonne absente » et « zéro dans le
+        fichier » ne sont pas la même chose : confondre les deux effacerait
+        l'avance de chaque patient — et l'avance est précisément ce qui
+        évite au patient d'attendre l'avion."""
+        depart = _dossier(boites=3)
+        nouveau, _, _, _ = cs.importer_dossiers(depart, [
+            {"patient": "Mme Léa DUPONT", "produit": "KEYTRUDA 100 mg",
+             "cip": "3400930000019"}])
+        assert cs._entier(nouveau.iloc[0]["Boîtes en main"]) == 3
+
+    def test_un_zero_explicite_remet_bien_l_avance_a_zero(self):
+        """Une avance peut légitimement tomber à rien : le fichier a le
+        droit de le dire."""
+        nouveau, _, _, _ = cs.importer_dossiers(_dossier(boites=3), [
+            {"patient": "Mme Léa DUPONT", "produit": "KEYTRUDA 100 mg",
+             "cip": "3400930000019", "boites": 0}])
+        assert cs._entier(nouveau.iloc[0]["Boîtes en main"]) == 0
+
+    def test_un_fichier_sans_dates_conserve_le_suivi_en_place(self):
+        """C'est ce qui distingue « compléter » de « remplacer »."""
+        nouveau, _, _, _ = cs.importer_dossiers(
+            _dossier(envoi="10/07/2026", reception="05/08/2026"),
+            [{"patient": "Mme Léa DUPONT", "produit": "KEYTRUDA 100 mg",
+              "cip": "3400930000019"}])
+        ligne = nouveau.iloc[0]
+        assert ligne["Dernière facturation"] == "2026-08-01"
+        assert ligne["Envoi du mail"] == "2026-07-10"
+        assert ligne["Réception"] == "2026-08-05"
+
+    def test_les_dates_du_fichier_sont_lues_dans_tous_les_formats(self):
+        """Un tableur d'officine mêle les écritures : on ne va pas demander
+        de les uniformiser avant d'importer."""
+        nouveau, _, _, _ = cs.importer_dossiers(cs.dossier_vide(), [
+            {"patient": "A", "produit": "P", "facturation": "01/08/2026"},
+            {"patient": "B", "produit": "P", "facturation": "01082026"},
+            {"patient": "C", "produit": "P", "facturation": "2026-08-01"}])
+        assert list(nouveau["Dernière facturation"]) == ["2026-08-01"] * 3
+
+    def test_une_date_illisible_n_empeche_pas_l_import(self):
+        """Mieux vaut un dossier ouvert avec une date manquante qu'une
+        ligne perdue : la date se corrige dans le tableau."""
+        nouveau, ajoutes, _, _ = cs.importer_dossiers(cs.dossier_vide(), [
+            {"patient": "A", "produit": "P", "facturation": "à revoir"}])
+        assert ajoutes == 1
+        assert nouveau.iloc[0]["Dernière facturation"] == ""
+
+    def test_le_meme_patient_deux_fois_dans_le_fichier_ne_fait_qu_un_dossier(self):
+        """Un tableur contient souvent une ligne par commande : deux
+        dossiers pour le même patient feraient repartir les 22 jours."""
+        nouveau, ajoutes, completes, _ = cs.importer_dossiers(
+            cs.dossier_vide(), [
+                {"patient": "DUPONT", "produit": "KEYTRUDA",
+                 "facturation": "01/07/2026"},
+                {"patient": "dupont", "produit": "KEYTRUDA",
+                 "facturation": "01/08/2026"}])
+        assert len(nouveau) == 1
+        assert (ajoutes, completes) == (1, 1)
+        assert nouveau.iloc[0]["Dernière facturation"] == "2026-08-01"
+
+    def test_un_import_vide_ne_casse_rien(self):
+        for lignes in ([], None):
+            nouveau, ajoutes, completes, ignores = cs.importer_dossiers(
+                _dossier(), lignes)
+            assert len(nouveau) == 1
+            assert (ajoutes, completes, ignores) == (0, 0, 0)
+
+    def test_les_dossiers_importes_sont_immediatement_exploitables(self):
+        """Un import qui remplirait un tableau sans alimenter les listes du
+        matin ne servirait à rien."""
+        nouveau, _, _, _ = cs.importer_dossiers(cs.dossier_vide(), [
+            {"patient": "A FACTURER", "produit": "P", "boites": 1,
+             "facturation": "20/07/2026"}])
+        assert list(cs.a_facturer_aujourdhui(nouveau,
+                                             AUJOURDHUI)["Patient"]) == \
+            ["A FACTURER"]
+
+
+class TestCodeCIPVenuDUnTableur:
+    """Le piège d'un fichier réel : une seule cellule vide dans la colonne
+    des codes, et le tableur lit toute la colonne en décimal.
+
+    Constaté en important un vrai Excel : « 3400930000019.0 » devenait
+    « 34009300000190 », le code ne correspondait plus, et le dossier du
+    patient était DUPLIQUÉ au lieu d'être complété — donc les 22 jours
+    repartaient de zéro, donc une facturation refusée par la caisse.
+    """
+
+    @pytest.mark.parametrize("lu", ["3400930000019.0", 3400930000019.0,
+                                    "3400930000019.00", "3400930000019"])
+    def test_un_code_lu_en_decimal_reste_le_meme_code(self, lu):
+        assert cs.normaliser_cip(lu) == "3400930000019"
+
+    @pytest.mark.parametrize("vide", ["", "0", "000", None, "0.0"])
+    def test_un_code_vide_ou_a_zero_est_traite_comme_absent(self, vide):
+        """Le « 0 » est un remplissage fréquent des exports : deux produits
+        distincts s'y rapprocheraient."""
+        assert cs.normaliser_cip(vide) == ""
+
+    def test_l_import_d_un_tableur_complete_au_lieu_de_dupliquer(self):
+        depart = _dossier(boites=3)
+        nouveau, ajoutes, completes, _ = cs.importer_dossiers(depart, [
+            {"patient": "Mme Léa DUPONT", "produit": "KEYTRUDA 100 mg",
+             "cip": 3400930000019.0}])          # tel que pandas le rend
+        assert len(nouveau) == 1, "le dossier a été dupliqué"
+        assert (ajoutes, completes) == (0, 1)
+        assert cs._entier(nouveau.iloc[0]["Boîtes en main"]) == 3

@@ -609,6 +609,30 @@ normal : s'il ne reste qu'une boîte et qu'elle part aujourd'hui à la
 facturation, il faut facturer **et** commander. Des listes rendues
 artificiellement exclusives cacheraient l'une des deux actions.
 
+### Import d'un fichier existant (Excel, CSV, PDF)
+
+Retaper trente patients qui existent déjà dans un tableur, c'est une
+demi-journée et des fautes de frappe sur des noms. Le panneau
+**📂 Importer depuis un fichier**, en haut de l'écran, avale les quatre
+formats que lit déjà le reste de l'application : `.xlsx`, `.xlsm`, `.xls`,
+`.csv` et `.pdf`.
+
+Vos en-têtes n'ont pas à ressembler aux nôtres : l'application **propose**
+la correspondance (« Nom du patient » → Patient, « Spécialité » → Médicament,
+« Dernière délivrance » → Dernière facturation) et vous la corrigez avant
+d'importer. Seuls le patient et le médicament sont obligatoires.
+
+> **Vos dossiers sont complétés, jamais remplacés.** Un patient déjà suivi
+> garde ses dates et son avance si le fichier ne les porte pas. C'est la
+> distinction qui compte : « colonne absente du fichier » et « zéro dans le
+> fichier » ne sont pas la même chose — les confondre remettrait à zéro
+> l'avance de chaque patient, et l'avance est précisément ce qui évite au
+> patient d'attendre l'avion.
+
+Une ligne sans patient ou sans médicament est ignorée et comptée. Une date
+illisible n'empêche pas le dossier d'être ouvert : elle se corrige ensuite
+dans le tableau.
+
 ### Les trois gestes du comptoir
 
 **Facturé et délivré**, **Boîte reçue**, **Mail de commande envoyé** : chacun
