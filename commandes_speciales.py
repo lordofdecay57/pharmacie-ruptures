@@ -328,6 +328,70 @@ COLONNES_VUE = [
     "À commander", "Dernière facturation", "Notes",
 ]
 
+#: Ce qu'on LIT d'un coup d'œil : où en est chaque patient, et que
+#: faut-il faire. Sept colonnes au lieu de quinze.
+#:
+#: Les quinze disaient trois fois la même chose : le statut de facturation,
+#: la date facturable ET le compte à rebours ; le statut de commande, la
+#: date d'envoi, la date de réception, l'attente ET le délai observé. Sur
+#: deux dossiers cela passait ; avec vingt patients, plus rien ne se lit.
+#: Le détail reste disponible — il change simplement de vue.
+COLONNES_LECTURE = [
+    "Facturation", "Patient", "Nom du produit", "Boîtes en main",
+    "Facturable le", "Commande", "À commander",
+]
+
+#: Ce qu'on CORRIGE : uniquement ce qui a été saisi à la main. Les statuts
+#: et les comptes à rebours se déduisent — les afficher dans un tableau
+#: modifiable laisse croire qu'on peut les changer.
+#:
+#: « Code CIP » y figure bien qu'il ne soit pas modifiable : le tableau
+#: corrigé est réécrit en entier, et une colonne absente de l'écran serait
+#: effacée du fichier.
+COLONNES_CORRECTION = [
+    "Patient", "Nom du produit", "Code CIP", "Boîtes en main",
+    "Envoi du mail", "Réception", "Dernière facturation", "Notes",
+]
+
+VUE_LECTURE = "👁️ Lecture"
+VUE_CORRECTION = "✏️ Correction"
+VUES = (VUE_LECTURE, VUE_CORRECTION)
+
+#: Colonnes de dates de la vue, à mettre en forme pour l'écran.
+_COLONNES_DATES = ("Facturable le", "Envoi du mail", "Réception",
+                   "Dernière facturation")
+#: Colonnes de nombres pouvant être vides.
+_COLONNES_NOMBRES = ("Attente (j)", "Délai observé (j)")
+
+
+def pour_affichage(vue: pd.DataFrame) -> pd.DataFrame:
+    """La vue en TEXTE, pour que les cases vides soient vraiment vides.
+
+    Constaté à l'écran, pas déduit : Streamlit affiche **« None »** pour une
+    date absente (``NaT``) comme pour un entier absent (``pd.NA``). Seule
+    une chaîne vide s'affiche vide. Un premier correctif s'était contenté de
+    typer les colonnes en ``Int64`` puis en ``datetime64`` : les types
+    étaient justes, et « None » restait à l'écran de la pharmacie.
+
+    La vue typée reste celle que rendent ``vue_affichable`` et les exports —
+    elle se trie et se calcule. Cette mise en forme est pour l'affichage
+    seul, et les dates y reprennent le format français ``JJ/MM/AAAA``, que
+    ``parser_date`` sait relire si on les corrige à la main.
+    """
+    if vue is None or vue.empty:
+        return vue if vue is not None else pd.DataFrame(columns=COLONNES_VUE)
+    propre = vue.copy()
+    for colonne in _COLONNES_DATES:
+        if colonne in propre.columns:
+            propre[colonne] = [
+                f"{jour:%d/%m/%Y}" if not pd.isna(jour) else ""
+                for jour in propre[colonne]]
+    for colonne in _COLONNES_NOMBRES:
+        if colonne in propre.columns:
+            propre[colonne] = ["" if pd.isna(v) else str(int(v))
+                               for v in propre[colonne]]
+    return propre
+
 
 def _cle_tri(tri: str) -> list:
     """Colonnes de tri, ajoutées puis retirées après le classement."""
