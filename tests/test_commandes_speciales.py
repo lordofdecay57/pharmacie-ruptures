@@ -227,6 +227,23 @@ class TestVueEtListesDuMatin:
         assert vue.iloc[0]["Facturable le"] == pd.Timestamp(2026, 8, 23)
         assert vue.iloc[0]["Jours avant facturation"] == 6
 
+    def test_la_correction_couvre_tout_ce_qui_est_saisi(self):
+        """Le tableau corrigé est réécrit EN ENTIER : une colonne absente de
+        l'écran serait effacée du fichier. Le code CIP y figure donc, même
+        s'il n'est pas modifiable."""
+        assert set(cs.COLONNES_CORRECTION) == set(cs.COLONNES_DOSSIER)
+
+    def test_les_deux_vues_sortent_de_la_vue_complete(self):
+        for colonne in cs.COLONNES_LECTURE + cs.COLONNES_CORRECTION:
+            assert colonne in cs.COLONNES_VUE, colonne
+
+    def test_la_vue_de_lecture_tient_a_l_ecran(self):
+        """Quinze colonnes d'un bloc ne se lisent pas : trois disaient la
+        facturation, cinq la commande. Avec vingt patients, plus rien ne
+        ressort."""
+        assert len(cs.COLONNES_LECTURE) <= 8
+        assert len(cs.COLONNES_LECTURE) < len(cs.COLONNES_VUE)
+
     def test_aucune_case_vide_ne_s_affiche_None(self):
         """« None » en plein tableau serait la seule note anglo-saxonne d'un
         écran entièrement en français — et personne ne sait ce que c'est.
@@ -239,14 +256,41 @@ class TestVueEtListesDuMatin:
         neuf = cs.ajouter_dossier(cs.dossier_vide(), "NOUVEAU", "PRODUIT",
                                   boites=1)
         vue = cs.vue_affichable(neuf, AUJOURDHUI)
-        for colonne in ("Attente (j)", "Délai observé (j)"):
-            assert str(vue[colonne].dtype) == "Int64", colonne
-        for colonne in ("Facturable le", "Envoi du mail", "Réception",
-                        "Dernière facturation"):
-            assert "datetime64" in str(vue[colonne].dtype), colonne
         assert vue.iloc[0].isna().any(), "ce dossier doit avoir des cases vides"
+
+        # CE QUE VOIT L'ÉCRAN. Constaté dans un navigateur, pas déduit :
+        # Streamlit affiche « None » aussi bien pour une date absente (NaT)
+        # que pour un entier absent (pd.NA). Un premier correctif s'était
+        # contenté de typer les colonnes — les types étaient justes, et
+        # « None » restait affiché. Seule une chaîne vide s'affiche vide.
+        affichee = cs.pour_affichage(vue)
+        for colonne in affichee.columns:
+            valeurs = list(affichee[colonne])
+            assert not any(v is None for v in valeurs), colonne
+            assert not any(pd.isna(v) for v in valeurs), colonne
+        assert "" in list(affichee.iloc[0]), "les cases vides doivent l'être"
         assert "None" not in cs.exporter_csv(neuf,
                                              AUJOURDHUI).decode("utf-8-sig")
+
+    def test_les_dates_affichees_se_relisent(self):
+        """Le tableau de correction est modifiable : ce qu'il affiche doit
+        pouvoir être retapé et compris. « 24/08/2026 » comme « 24082026 »."""
+        affichee = cs.pour_affichage(cs.vue_affichable(_dossier(), AUJOURDHUI))
+        texte = affichee.iloc[0]["Dernière facturation"]
+        assert texte == "01/08/2026"
+        assert cs.parser_date(texte) == date(2026, 8, 1)
+
+    def test_l_affichage_ne_touche_pas_a_la_vue_typee(self):
+        """La vue typée sert au tri, aux calculs et aux exports : la mise en
+        forme est une COPIE, pas une transformation en place."""
+        vue = cs.vue_affichable(_dossier(), AUJOURDHUI)
+        avant = vue["Facturable le"].iloc[0]
+        cs.pour_affichage(vue)
+        assert vue["Facturable le"].iloc[0] == avant
+
+    def test_une_vue_vide_s_affiche_sans_casser(self):
+        assert cs.pour_affichage(cs.vue_affichable(cs.dossier_vide(),
+                                                   AUJOURDHUI)).empty
 
     def test_un_dossier_vide_ne_casse_rien(self):
         vue = cs.vue_affichable(cs.dossier_vide(), AUJOURDHUI)

@@ -53,7 +53,13 @@ def _colonnes_vue() -> dict:
     Tout est centré, comme dans le stock fermé : sur des colonnes larges,
     un nombre collé au bord droit finit loin de son en-tête.
     """
-    jour = dict(format="DD/MM/YYYY", width="small", alignment="center")
+    # Colonnes de DATE et de nombre pouvant être vides : déclarées en
+    # texte, parce que Streamlit affiche « None » pour une date absente
+    # comme pour un entier absent — seule une chaîne vide s'affiche vide.
+    # Les valeurs sont mises en forme par ``cs.pour_affichage``, et
+    # ``parser_date`` sait relire « 24/08/2026 » comme « 24082026 » si on
+    # les corrige à la main.
+    jour = dict(width="small", alignment="center")
     nombre = dict(min_value=0, step=1, width="small", alignment="center")
     return {
         "Facturation": st.column_config.TextColumn(
@@ -64,20 +70,20 @@ def _colonnes_vue() -> dict:
         "Code CIP": st.column_config.TextColumn(
             "Code CIP", alignment="center", disabled=True),
         "Boîtes en main": st.column_config.NumberColumn("En main", **nombre),
-        "Facturable le": st.column_config.DateColumn("Facturable le", **jour),
-        "Jours avant facturation": st.column_config.NumberColumn(
+        "Facturable le": st.column_config.TextColumn("Facturable le", **jour),
+        "Jours avant facturation": st.column_config.TextColumn(
             "J avant fact.", width="small", alignment="center"),
         "Commande": st.column_config.TextColumn(
             "Commande", width="small", alignment="center"),
-        "Envoi du mail": st.column_config.DateColumn("Mail envoyé", **jour),
-        "Réception": st.column_config.DateColumn("Reçu le", **jour),
-        "Attente (j)": st.column_config.NumberColumn(
+        "Envoi du mail": st.column_config.TextColumn("Mail envoyé", **jour),
+        "Réception": st.column_config.TextColumn("Reçu le", **jour),
+        "Attente (j)": st.column_config.TextColumn(
             "Attente (j)", width="small", alignment="center"),
-        "Délai observé (j)": st.column_config.NumberColumn(
+        "Délai observé (j)": st.column_config.TextColumn(
             "Délai réel (j)", width="small", alignment="center"),
         "À commander": st.column_config.TextColumn(
             "À commander", width="small", alignment="center"),
-        "Dernière facturation": st.column_config.DateColumn(
+        "Dernière facturation": st.column_config.TextColumn(
             "Dern. facturation", **jour),
         "Notes": st.column_config.TextColumn("Notes", alignment="center"),
     }
@@ -349,8 +355,9 @@ def _liste(titre: str, aide: str, tableau: pd.DataFrame,
         st.caption(vide)
         return
     st.caption(aide)
-    st.dataframe(tableau[colonnes], use_container_width=True,
-                 hide_index=True, column_config=_colonnes_vue())
+    st.dataframe(cs.pour_affichage(tableau[colonnes]),
+                 use_container_width=True, hide_index=True,
+                 column_config=_colonnes_vue())
 
 
 def _listes_du_matin(dossiers: pd.DataFrame, aujourdhui: date,
@@ -388,31 +395,57 @@ def _listes_du_matin(dossiers: pd.DataFrame, aujourdhui: date,
 # Tableau complet
 # ---------------------------------------------------------------------------
 
-def _tableau_editable(dossiers: pd.DataFrame, aujourdhui: date, tri: str,
-                      avance: int):
+def _tableau(dossiers: pd.DataFrame, aujourdhui: date, tri: str,
+             avance: int, vue_choisie: str):
+    """Le tableau de référence, dans l'une de ses deux vues.
+
+    Quinze colonnes d'un bloc ne se lisent pas : trois disaient la
+    facturation (statut, date, compte à rebours), cinq la commande. Sur
+    deux dossiers cela passait ; avec vingt patients, plus rien ne ressort.
+
+    Deux vues, donc, parce qu'il y a deux gestes distincts : **regarder où
+    en est chaque patient**, et **corriger une date mal saisie**. La
+    première n'a pas besoin des champs de saisie, la seconde n'a pas besoin
+    des statuts — et les montrer dans un tableau modifiable laisse croire
+    qu'on peut les changer.
+
+    Renvoie le tableau corrigé, ou ``None``.
+    """
     vue = cs.vue_affichable(dossiers, aujourdhui, tri, avance)
     if vue.empty:
-        st.info("Aucun dossier — ouvrez-en un ci-dessus.")
+        return None
+
+    if vue_choisie == cs.VUE_LECTURE:
+        st.dataframe(cs.pour_affichage(vue[cs.COLONNES_LECTURE]),
+                     use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
+        st.caption(
+            f"{len(vue)} dossier(s). Passez en **✏️ Correction** pour "
+            "modifier une date, ajouter ou supprimer un dossier — et pour "
+            "voir le détail des dates d'envoi et de réception.")
         return None
 
     # La clé porte la génération ET l'ordre affiché : l'éditeur repère ses
     # corrections par POSITION de ligne, et les rejouer sur un tableau
     # reclassé recopierait une date sur le mauvais patient.
+    # La comparaison « a-t-on corrigé quelque chose ? » se fait sur le
+    # tableau TEL QU'AFFICHÉ. Comparer du texte à des valeurs typées
+    # signalerait une correction à chaque affichage, et l'écran bouclerait.
+    affiche = cs.pour_affichage(vue[cs.COLONNES_CORRECTION])
     edite = st.data_editor(
-        vue, hide_index=True, use_container_width=True, num_rows="dynamic",
+        affiche, hide_index=True,
+        use_container_width=True, num_rows="dynamic",
         key=f"cs_editeur_{st.session_state.get('cs_generation', 0)}"
             f"_{cs.TRIS.index(tri)}",
-        disabled=["Facturation", "Code CIP", "Facturable le",
-                  "Jours avant facturation", "Commande", "Attente (j)",
-                  "Délai observé (j)", "À commander"],
-        column_config=_colonnes_vue())
+        disabled=["Code CIP"], column_config=_colonnes_vue())
     st.caption("Corrigez une date ou un nombre de boîtes directement dans le "
                "tableau, **ajoutez un dossier** avec le « + » de la dernière "
                "ligne, ou supprimez-en un (sélection puis touche Suppr). "
                "Tout est enregistré automatiquement.")
 
     colonnes = [c for c in _COLONNES_EDITABLES if c in edite.columns]
-    if len(edite) == len(vue) and edite[colonnes].equals(vue[colonnes]):
+    if len(edite) == len(affiche) and edite[colonnes].equals(
+            affiche[colonnes]):
         return None
     return cs.normaliser_tableau_edite(edite)
 
@@ -560,25 +593,34 @@ def rendre(etape, tuile_kpi) -> None:
     # --- La référence ------------------------------------------------------
     st.divider()
     etape("3", "Tous les dossiers", "La référence, corrigeable à la main.")
-    colonne_recherche, colonne_tri = st.columns([3, 2])
+    colonne_vue, colonne_recherche, colonne_tri = st.columns([2, 3, 2])
+    vue_choisie = colonne_vue.selectbox("👓 Afficher", cs.VUES, key="cs_vue")
     recherche = colonne_recherche.text_input(
         "🔍 Rechercher", key="cs_recherche",
         placeholder="Nom du patient, médicament ou code CIP")
     tri = colonne_tri.selectbox("↕️ Classer par", cs.TRIS, key="cs_tri")
 
-    if recherche.strip():
+    if dossiers.empty:
+        st.info("Aucun dossier — ouvrez-en un tout en haut de l'écran.")
+    elif recherche.strip():
+        # Le tableau ne devient modifiable que sur la liste ENTIÈRE :
+        # corriger une vue filtrée réécrirait les dossiers en perdant les
+        # lignes masquées.
         vue = cs.vue_affichable(dossiers, aujourdhui, tri, avance)
         motif = recherche.strip().lower()
         garde = vue.apply(
             lambda l: motif in f"{l['Patient']} {l['Nom du produit']} "
                                f"{l['Code CIP']}".lower(), axis=1)
         filtree = vue[garde]
-        st.dataframe(filtree, use_container_width=True, hide_index=True,
+        colonnes = (cs.COLONNES_LECTURE if vue_choisie == cs.VUE_LECTURE
+                    else cs.COLONNES_CORRECTION)
+        st.dataframe(cs.pour_affichage(filtree[colonnes]),
+                     use_container_width=True, hide_index=True,
                      column_config=_colonnes_vue())
-        st.caption(f"{len(filtree)} dossier(s) affiché(s). Videz la "
+        st.caption(f"{len(filtree)} dossier(s) trouvé(s). Videz la "
                    "recherche pour corriger le tableau.")
     else:
-        corrige = _tableau_editable(dossiers, aujourdhui, tri, avance)
+        corrige = _tableau(dossiers, aujourdhui, tri, avance, vue_choisie)
         if corrige is not None:
             _enregistrer_corrections(corrige)
             st.rerun()
