@@ -60,13 +60,22 @@ ETAPES = [
     ("1", "Installer Python et le dossier",
      "Tout vit sur le serveur : c'est le seul ordinateur où l'on installe "
      "quoi que ce soit.",
-     ["Installez Python depuis python.org, en cochant « Add python.exe to "
-      "PATH ». C'est l'étape la plus souvent oubliée.",
+     ["Sur python.org/downloads/windows, prenez « Windows installer "
+      "(64-bit) » : le nom du fichier doit finir par -amd64.exe.",
+      "Cochez « Add python.exe to PATH » dans la première fenêtre — c'est "
+      "l'étape la plus souvent oubliée. Puis « Customize installation » et "
+      "« Install for all users ».",
+      "Refermez toute fenêtre noire déjà ouverte : elle garde l'ancien "
+      "réglage et ne verrait pas Python.",
       "Copiez le dossier « pharmacie-ruptures » sur le serveur, par exemple "
       "dans Documents.",
       "Si vous avez récupéré des fichiers de données, copiez-les MAINTENANT "
       "dans ce dossier, à côté de lancer.bat."],
-     [("attention", "C'est le moment ou jamais pour les données : une fois "
+     [("attention", "Un fichier .msix n'est PAS un installeur : c'est un "
+                    "paquet du Microsoft Store, qu'un Windows Server ne sait "
+                    "pas ouvrir. Il propose alors le Bloc-notes. Reprenez la "
+                    "ligne -amd64.exe."),
+      ("attention", "C'est le moment ou jamais pour les données : une fois "
                     "l'utilitaire démarré, il créerait ses propres fichiers "
                     "vides.")]),
 

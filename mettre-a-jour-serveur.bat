@@ -42,11 +42,17 @@ call :dire "  Mise a jour du serveur - %QUAND%"
 call :dire "===================================================="
 
 REM --- 0. Python -----------------------------------------------
-where python >nul 2>nul
-if errorlevel 1 (
-    call :dire "[ERREUR] Python n'est pas installe ou absent du PATH."
-    goto echec
-)
+REM  "where python" ne suffit pas : Windows pose un faux python.exe
+REM  dans WindowsApps qui ouvre le Microsoft Store au lieu de demarrer
+REM  Python. Il repond a "where", mais pas a "--version". Repli sur le
+REM  lanceur "py", installe meme quand la case "Add python.exe to PATH"
+REM  a ete oubliee - c'est l'oubli le plus courant de l'installation.
+set "PY="
+python --version >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if not defined PY py -3 --version >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3"
+if not defined PY goto pas_de_python
 
 REM  Version avant, pour que le journal dise d'ou l'on part.
 set "AVANT="
@@ -83,7 +89,7 @@ if %ERRORLEVEL% GEQ 8 (
     call :dire "[ERREUR] Copie des fichiers impossible."
     goto echec
 )
-python -m pip install -r requirements.txt --quiet
+%PY% -m pip install -r requirements.txt --quiet
 
 set "APRES="
 for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" app.py 2^>nul') do set "APRES=%%~v"
@@ -120,7 +126,7 @@ if defined SILENCE goto detache
 REM  Double-clic : l'application vit dans CETTE fenetre, comme avec
 REM  lancer-serveur.bat. La fermer arrete le serveur - c'est la regle
 REM  que la pharmacie connait deja, on ne la change pas.
-python -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+%PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 call :dire "Le serveur s'est arrete. Les postes ne peuvent plus s'y connecter."
 pause
 exit /b 0
@@ -133,9 +139,18 @@ REM  premier plan tuerait donc le serveur tous les trois jours, en pleine
 REM  journee, sans que rien ne l'explique.
 REM  "start" lui donne son propre processus : la tache se termine en
 REM  quelques secondes, l'application reste.
-start "Serveur - Pilotage pharmacie" /min cmd /c python -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+start "Serveur - Pilotage pharmacie" /min cmd /c %PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 call :dire "Serveur redemarre dans sa propre fenetre."
 exit /b 0
+
+:pas_de_python
+call :dire "[ERREUR] Python est introuvable sur ce serveur."
+call :dire "  Installez-le depuis https://www.python.org/downloads/windows/"
+call :dire "  Prenez Windows installer 64-bit : le nom du fichier doit"
+call :dire "  finir par -amd64.exe. Un fichier .msix ne s'installe pas ici."
+call :dire "  Cochez Add python.exe to PATH dans la premiere fenetre, puis"
+call :dire "  FERMEZ cette fenetre et relancez ce fichier."
+goto echec
 
 :echec
 call :dire "Mise a jour abandonnee - rien n'a ete modifie, l'application"
