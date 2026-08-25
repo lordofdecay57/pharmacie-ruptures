@@ -17,19 +17,25 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 title Serveur - Pilotage pharmacie  (NE PAS FERMER)
 
-where python >nul 2>nul
-if errorlevel 1 (
-    echo Python n'est pas installe. Installez-le depuis https://www.python.org/downloads/
-    echo (cochez "Add Python to PATH" pendant l'installation^)
-    pause
-    exit /b 1
-)
-python -m pip install -r requirements.txt --quiet
+REM --- Recherche de Python -------------------------------------
+REM  "where python" ne suffit pas : Windows 10/11 pose un faux
+REM  python.exe dans WindowsApps qui ouvre le Microsoft Store au
+REM  lieu de demarrer Python. Il repond a "where", mais pas a
+REM  "--version" : on teste donc ce qui compte vraiment.
+REM  Repli sur le lanceur "py", installe meme quand la case
+REM  "Add python.exe to PATH" a ete oubliee.
+set "PY="
+python --version >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if not defined PY py -3 --version >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3"
+if not defined PY goto pas_de_python
+%PY% -m pip install -r requirements.txt --quiet
 
 REM  Mise a jour AVANT le demarrage : c'est le seul moment ou remplacer
 REM  des fichiers est sans danger. Sur le serveur, cela met a jour la
 REM  pharmacie entiere d'un coup.
-python maj_auto.py --verbeux
+%PY% maj_auto.py --verbeux
 if errorlevel 10 (
     echo.
     echo  [ATTENTION] Une application repond deja sur le port 8501.
@@ -78,7 +84,27 @@ echo.
 REM  Ecoute sur toutes les cartes reseau : sans cela, seule cette
 REM  machine pourrait ouvrir l'application. Port fixe, pour que
 REM  l'adresse donnee aux postes reste vraie d'un jour a l'autre.
-python -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+%PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 echo.
 echo  Le serveur s'est arrete. Les postes ne peuvent plus s'y connecter.
 pause
+exit /b 0
+
+:pas_de_python
+echo.
+echo  [ERREUR] Python est introuvable sur cet ordinateur.
+echo.
+echo  1. Installez-le depuis https://www.python.org/downloads/windows/
+echo     Prenez "Windows installer (64-bit)" : le nom du fichier doit
+echo     finir par -amd64.exe. Un fichier .msix ne s'installe pas ici.
+echo  2. Dans la premiere fenetre, cochez "Add python.exe to PATH".
+echo  3. FERMEZ cette fenetre noire, puis relancez ce fichier : une
+echo     fenetre deja ouverte garde l'ancien PATH et ne verra rien.
+echo.
+echo  Si ce message revient alors que Python est bien installe, tapez
+echo  py --version dans une invite de commandes. Si cela repond, c'est
+echo  le PATH qui manque : relancez l'installeur, choisissez Modify,
+echo  et cochez la case.
+echo.
+pause
+exit /b 1

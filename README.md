@@ -784,11 +784,40 @@ casser le calcul des ruptures, et inversement.
 > détaille ci-dessous, mais en texte brut : pas besoin de savoir ouvrir un
 > fichier Markdown le jour où l'on est devant le serveur.
 
-1. **Installer Python** (3.10 ou plus récent) : <https://www.python.org/downloads/>
-   — sous Windows, cochez bien **« Add Python to PATH »** pendant l'installation.
+1. **Installer Python** (3.10 ou plus récent) :
+   <https://www.python.org/downloads/windows/> — prenez **« Windows installer
+   (64-bit) »**, dont le nom finit par `-amd64.exe`, et cochez **« Add
+   python.exe to PATH »** pendant l'installation.
 2. Récupérer ce dossier `pharmacie-ruptures/` sur le PC (clé USB, téléchargement…).
 3. C'est tout : le script de lancement installe les dépendances tout seul la
    première fois.
+
+### Quand Python reste « introuvable » après l'installation
+
+Trois causes, toutes rencontrées sur le serveur de la pharmacie, et toutes
+invisibles depuis la fenêtre noire :
+
+| Ce qui se passe | Comment s'en sortir |
+|---|---|
+| Le fichier téléchargé est un **`.msix`** : ce n'est pas un installeur mais un paquet du Microsoft Store. Un Windows Server n'a pas de quoi l'ouvrir et propose le **Bloc-notes**. | Reprendre la ligne **« Windows installer (64-bit) »**, en `-amd64.exe`. |
+| La case **« Add python.exe to PATH »** a été oubliée. Python est bien installé, mais la commande `python` ne répond pas. | Les scripts se rabattent d'eux-mêmes sur le lanceur **`py`**, installé dans tous les cas. Pour rétablir proprement : relancer l'installeur → **Modify** → cocher la case. |
+| Une **fenêtre noire ouverte avant** l'installation garde l'ancien PATH. L'installation semble n'avoir rien changé. | La fermer et relancer le script. |
+
+Un quatrième cas, plus sournois : Windows 10/11 pose un **faux `python.exe`**
+dans `WindowsApps`, dont le seul rôle est d'ouvrir le Microsoft Store. Il
+répond à `where python` — ce sur quoi les scripts se fiaient — sans démarrer
+aucun Python. Ils **lancent désormais réellement Python** (`python --version`)
+au lieu de chercher son nom, ce que le raccourci du Store ne peut pas simuler.
+
+Pour savoir où l'on en est, dans une invite de commandes (touche Windows,
+`cmd`, Entrée) :
+
+```
+py --version
+```
+
+Si cela répond, Python est installé et c'est le PATH qui manque — les scripts
+fonctionneront quand même.
 
 Installation manuelle si besoin :
 

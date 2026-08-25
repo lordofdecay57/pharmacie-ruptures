@@ -15,15 +15,19 @@ echo  ====================================================
 echo.
 
 REM --- 0. Verifier que Python est disponible -----------------
-where python >nul 2>nul
-if errorlevel 1 (
-    echo  [ERREUR] Python n'est pas installe ou absent du PATH.
-    echo  Installez-le depuis https://www.python.org/downloads/
-    echo  en cochant "Add Python to PATH" pendant l'installation.
-    echo.
-    pause
-    exit /b 1
-)
+REM --- Recherche de Python -------------------------------------
+REM  "where python" ne suffit pas : Windows 10/11 pose un faux
+REM  python.exe dans WindowsApps qui ouvre le Microsoft Store au
+REM  lieu de demarrer Python. Il repond a "where", mais pas a
+REM  "--version" : on teste donc ce qui compte vraiment.
+REM  Repli sur le lanceur "py", installe meme quand la case
+REM  "Add python.exe to PATH" a ete oubliee.
+set "PY="
+python --version >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if not defined PY py -3 --version >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3"
+if not defined PY goto pas_de_python
 
 set "URL=https://github.com/lordofdecay57/pharmacie-ruptures/archive/refs/heads/main.zip"
 set "ZIP=%TEMP%\pharmacie-maj.zip"
@@ -62,7 +66,7 @@ if %ERRORLEVEL% GEQ 8 (
     pause
     exit /b 1
 )
-python -m pip install -r requirements.txt --quiet
+%PY% -m pip install -r requirements.txt --quiet
 
 REM  Icone du Bureau. Elle est aussi posee par lancer.bat, mais qui met a
 REM  jour depuis CE script ne passe jamais par lancer.bat : sans cet appel,
@@ -73,7 +77,7 @@ call "%~dp0creer-raccourci.bat" /silencieux /sipremier
 REM  Affiche la version qui vient d'etre installee : sans ce reperage, une
 REM  mise a jour qui n'a pas pris passe inapercue.
 REM  L'espace fait partie des delimiteurs, et %%~v retire les guillemets :
-REM  « VERSION_APP = "3.4" » donne directement 3.4, sans les manipulations
+REM  "VERSION_APP = "3.4"" donne directement 3.4, sans les manipulations
 REM  de chaine a guillemets impairs qui trainaient ici.
 for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" app.py') do set "VER=%%~v"
 echo.
@@ -83,13 +87,13 @@ echo  ^(elle doit s'afficher a l'identique dans le bandeau de l'application^)
 REM --- 4. Fermeture de l'ancienne version ----------------------
 REM  Une ancienne version encore ouverte occupe le port 8501 : la nouvelle
 REM  demarrerait alors sur 8502, et l'onglet localhost:8501 continuerait
-REM  d'afficher l'ANCIENNE — la mise a jour semblerait sans effet. On ferme
+REM  d'afficher l'ANCIENNE - la mise a jour semblerait sans effet. On ferme
 REM  donc nous-memes le processus qui ecoute sur 8501, plutot que de
 REM  demander a l'utilisateur d'y penser.
 echo  [4/5] Fermeture de la version precedente...
 REM  Une seule ligne, tout entre guillemets : cmd ne reinterprete alors ni
 REM  le | ni les parentheses. Le try/catch couvre les Windows depourvus de
-REM  Get-NetTCPConnection — la mise a jour ne doit jamais echouer ici.
+REM  Get-NetTCPConnection - la mise a jour ne doit jamais echouer ici.
 powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }" >nul 2>nul
 REM  Laisse le port se liberer avant de relancer.
 timeout /t 3 /nobreak >nul
@@ -115,5 +119,25 @@ echo  Pour arreter l'application : fermez cette fenetre ou appuyez sur Ctrl+C.
 echo.
 REM  Port fixe : si 8501 est occupe, Streamlit le DIT au lieu de basculer en
 REM  silence sur un autre port.
-python -m streamlit run app.py --server.port 8501
+%PY% -m streamlit run app.py --server.port 8501
 pause
+exit /b 0
+
+:pas_de_python
+echo.
+echo  [ERREUR] Python est introuvable sur cet ordinateur.
+echo.
+echo  1. Installez-le depuis https://www.python.org/downloads/windows/
+echo     Prenez "Windows installer (64-bit)" : le nom du fichier doit
+echo     finir par -amd64.exe. Un fichier .msix ne s'installe pas ici.
+echo  2. Dans la premiere fenetre, cochez "Add python.exe to PATH".
+echo  3. FERMEZ cette fenetre noire, puis relancez ce fichier : une
+echo     fenetre deja ouverte garde l'ancien PATH et ne verra rien.
+echo.
+echo  Si ce message revient alors que Python est bien installe, tapez
+echo  py --version dans une invite de commandes. Si cela repond, c'est
+echo  le PATH qui manque : relancez l'installeur, choisissez Modify,
+echo  et cochez la case.
+echo.
+pause
+exit /b 1

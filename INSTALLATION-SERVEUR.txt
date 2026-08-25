@@ -80,6 +80,18 @@ ETAPE 1 - Installer Python et le dossier
 1. Installez Python en suivant l'ETAPE 1 de INSTALLATION.txt.
    N'oubliez pas de cocher "Add python.exe to PATH".
 
+   >> DEUX PIEGES, sur un serveur en particulier :
+
+      - Prenez le fichier dont le nom finit par  -amd64.exe
+        Un fichier .msix est un paquet du Microsoft Store :
+        un Windows Server n'a pas de quoi l'ouvrir, et propose
+        le Bloc-notes. Ce n'est pas le bon fichier.
+
+      - Choisissez "Customize installation", puis cochez
+        "Install for all users". Sinon Python n'existe que
+        pour la session ouverte aujourd'hui, et disparait
+        pour quiconque ouvrira une autre session demain.
+
 2. Copiez le dossier "pharmacie-ruptures" sur le serveur, par
    exemple dans Documents.
 

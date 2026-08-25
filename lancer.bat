@@ -2,14 +2,20 @@
 REM Lancement en un double-clic (Windows).
 REM Premiere fois : installe les dependances, puis ouvre l'app dans le navigateur.
 cd /d "%~dp0"
-where python >nul 2>nul
-if errorlevel 1 (
-    echo Python n'est pas installe. Installez-le depuis https://www.python.org/downloads/
-    echo (cochez "Add Python to PATH" pendant l'installation^)
-    pause
-    exit /b 1
-)
-python -m pip install -r requirements.txt --quiet
+REM --- Recherche de Python -------------------------------------
+REM  "where python" ne suffit pas : Windows 10/11 pose un faux
+REM  python.exe dans WindowsApps qui ouvre le Microsoft Store au
+REM  lieu de demarrer Python. Il repond a "where", mais pas a
+REM  "--version" : on teste donc ce qui compte vraiment.
+REM  Repli sur le lanceur "py", installe meme quand la case
+REM  "Add python.exe to PATH" a ete oubliee.
+set "PY="
+python --version >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if not defined PY py -3 --version >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3"
+if not defined PY goto pas_de_python
+%PY% -m pip install -r requirements.txt --quiet
 
 REM  Icone du Bureau : posee UNE SEULE FOIS, au tout premier lancement.
 REM  /sipremier gere le temoin (une icone supprimee volontairement ne
@@ -20,7 +26,7 @@ REM  Mise a jour automatique AVANT de lancer : c'est le seul moment ou
 REM  remplacer des fichiers est sans danger, l'application n'est pas encore
 REM  demarree. Le script ne fait rien s'il n'y a pas de nouvelle version,
 REM  si le poste est hors ligne, ou si une instance tourne deja.
-python maj_auto.py --verbeux
+%PY% maj_auto.py --verbeux
 
 REM  Code 10 : l'application repond deja. Tenter un second demarrage
 REM  echouerait sur le port occupe et laisserait l'utilisateur devant une
@@ -35,7 +41,27 @@ if errorlevel 10 (
 )
 
 REM  Port fixe : si 8501 est deja occupe par une autre instance,
-REM  Streamlit le DIT au lieu de basculer en silence sur 8502 —
+REM  Streamlit le DIT au lieu de basculer en silence sur 8502 -
 REM  on regarderait sinon l'ancienne version sans le savoir.
-python -m streamlit run app.py --server.port 8501
+%PY% -m streamlit run app.py --server.port 8501
 pause
+exit /b 0
+
+:pas_de_python
+echo.
+echo  [ERREUR] Python est introuvable sur cet ordinateur.
+echo.
+echo  1. Installez-le depuis https://www.python.org/downloads/windows/
+echo     Prenez "Windows installer (64-bit)" : le nom du fichier doit
+echo     finir par -amd64.exe. Un fichier .msix ne s'installe pas ici.
+echo  2. Dans la premiere fenetre, cochez "Add python.exe to PATH".
+echo  3. FERMEZ cette fenetre noire, puis relancez ce fichier : une
+echo     fenetre deja ouverte garde l'ancien PATH et ne verra rien.
+echo.
+echo  Si ce message revient alors que Python est bien installe, tapez
+echo  py --version dans une invite de commandes. Si cela repond, c'est
+echo  le PATH qui manque : relancez l'installeur, choisissez Modify,
+echo  et cochez la case.
+echo.
+pause
+exit /b 1

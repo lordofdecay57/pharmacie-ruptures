@@ -32,9 +32,20 @@ quand meme cette etape : cela ne pose aucun probleme de le
 reinstaller.
 
 1. Allez sur le site officiel :
-   https://www.python.org/downloads/
+   https://www.python.org/downloads/windows/
 
-2. Cliquez sur le gros bouton "Download Python 3.x.x".
+2. Descendez jusqu'a une version 3.12 ou plus recente, et dans
+   le tableau "Files" cliquez sur :
+
+       Windows installer (64-bit)
+
+   >> LE NOM DU FICHIER DOIT FINIR PAR  -amd64.exe
+      exemple : python-3.12.10-amd64.exe
+
+      S'il finit par .msix, ce n'est PAS le bon fichier. Le .msix
+      est un paquet du Microsoft Store : il ne s'ouvre pas sur un
+      serveur, Windows propose alors le Bloc-notes. Revenez au
+      tableau et prenez la ligne "Windows installer (64-bit)".
 
 3. Ouvrez le fichier telecharge.
 
@@ -49,6 +60,28 @@ reinstaller.
 
 5. Cliquez sur "Install Now", patientez une a deux minutes, puis
    cliquez sur "Close".
+
+6. FERMEZ toutes les fenetres noires deja ouvertes. Une fenetre
+   ouverte AVANT l'installation garde l'ancien reglage et ne
+   verra pas Python : l'installation semble alors n'avoir servi
+   a rien.
+
+
+   >> SI L'UTILITAIRE DIT ENCORE QUE PYTHON EST INTROUVABLE
+
+      Appuyez sur la touche Windows, tapez  cmd  puis Entree, et
+      tapez :
+
+          py --version
+
+      - Cela repond "Python 3.12.x" : Python est bien installe,
+        c'est la case du PATH qui a ete oubliee. Relancez
+        l'installeur, choisissez "Modify", et cochez la case.
+        (L'utilitaire sait aussi se debrouiller avec "py" seul :
+        reessayez d'abord un double-clic sur lancer.bat.)
+
+      - Cela ne repond rien : l'installation n'a pas abouti.
+        Reprenez au point 1 en verifiant le nom du fichier.
 
 
 ---------------------------------------------------------------
