@@ -129,6 +129,21 @@ def postes_actifs(dossier: Path, maintenant: Optional[float] = None,
     return sorted(trouves)
 
 
+def autres_postes(dossier: Path, maintenant: Optional[float] = None,
+                  duree_max_h: float = DUREE_MAX_H) -> List[str]:
+    """Les postes actifs SAUF celui-ci.
+
+    C'est la question que pose une mise à jour manuelle : « est-ce que je
+    vais casser l'écran de quelqu'un d'autre ? ». Sa propre application,
+    elle, sera de toute façon redémarrée — se compter soi-même ferait
+    apparaître un avertissement à chaque fois, et on apprendrait à passer
+    outre sans lire.
+    """
+    moi = nom_du_poste()
+    return [nom for nom in postes_actifs(dossier, maintenant, duree_max_h)
+            if nom != moi]
+
+
 def purger(dossier: Path, maintenant: Optional[float] = None,
            duree_max_h: float = DUREE_MAX_H) -> int:
     """Efface les marqueurs périmés. Renvoie le nombre effacé.
@@ -163,6 +178,7 @@ def main(argv=None) -> int:
     groupe.add_argument("--entrer", action="store_true")
     groupe.add_argument("--sortir", action="store_true")
     groupe.add_argument("--lister", action="store_true")
+    groupe.add_argument("--autres", action="store_true")
     arguments = analyseur.parse_args(argv)
 
     dossier = Path(arguments.dossier)
@@ -171,8 +187,11 @@ def main(argv=None) -> int:
         entrer(dossier)
     elif arguments.sortir:
         sortir(dossier)
-    else:
+    elif arguments.lister:
         for nom in postes_actifs(dossier):
+            print(nom)
+    else:
+        for nom in autres_postes(dossier):
             print(nom)
     # Toujours 0 : un marqueur manqué ne doit pas faire echouer le
     # lancement du script qui l'appelle.

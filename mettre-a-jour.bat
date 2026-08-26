@@ -37,6 +37,22 @@ if not defined PY py -3 --version >nul 2>nul
 if not defined PY if not errorlevel 1 set "PY=py -3"
 if not defined PY goto pas_de_python
 
+REM --- 0 bis. Qui d'autre travaille sur ce dossier ? ------------
+REM  Dossier partage : les autres comptoirs lancent LEUR Streamlit
+REM  sur CES fichiers. Les remplacer sous leur session casse leur
+REM  ecran en pleine dispensation - Streamlit recharge ses modules
+REM  a chaud. La mise a jour automatique s'en garde toute seule ;
+REM  ici, c'est quelqu'un qui decide, alors on lui montre qui il
+REM  va interrompre.
+REM  "--autres" et non "--lister" : sa propre application sera de
+REM  toute facon redemarree. Se compter soi-meme ferait apparaitre
+REM  l'avertissement a chaque fois, et on apprendrait a passer
+REM  outre sans le lire.
+set "AUTRES="
+for /f "delims=" %%p in ('%PY% presence.py --autres 2^>nul') do set "AUTRES=1"
+if defined AUTRES goto postes_ouverts
+:dossier_libre
+
 set "URL=https://github.com/lordofdecay57/pharmacie-ruptures/archive/refs/heads/main.zip"
 set "ZIP=%TEMP%\pharmacie-maj.zip"
 set "EXDIR=%TEMP%\pharmacie-maj"
@@ -136,6 +152,25 @@ REM  comptoir voisin, en pleine dispensation.
 REM  La place est rendue : la mise a jour de demain matin pourra
 REM  se faire des que tout le monde aura ferme.
 %PY% presence.py --sortir
+pause
+exit /b 0
+
+:postes_ouverts
+echo.
+echo  [ATTENTION] Ces postes utilisent le dossier en ce moment :
+echo.
+%PY% presence.py --autres
+echo.
+echo  Remplacer les fichiers maintenant interrompra leur ecran, en
+echo  pleine dispensation. Demandez-leur de fermer leur fenetre, ou
+echo  refaites cette mise a jour avant l'ouverture de la pharmacie.
+echo.
+set "REPONSE="
+set /p REPONSE=  Continuer quand meme ? (o/N) : 
+if /i "%REPONSE%"=="o" goto dossier_libre
+echo.
+echo  Mise a jour abandonnee - rien n'a ete modifie.
+echo.
 pause
 exit /b 0
 
