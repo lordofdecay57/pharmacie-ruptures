@@ -890,6 +890,25 @@ d'œil que la dernière version tourne bien.
 
 ### Si l'application ne s'ouvre pas
 
+> **Avant toute chose : double-cliquez sur `verifier-installation.bat`.**
+> Il ne répare rien et ne modifie rien — il regarde, et il dit ce qu'il
+> voit : le programme est-il là, Python est-il installé, les compléments
+> aussi, **l'application tourne-t-elle**, quelle version, quel montage, qui
+> d'autre travaille sur le dossier, et quelles données sont présentes avec
+> leur date. Chaque point est suivi de ce qu'il faut faire.
+>
+> Un outil de diagnostic qui répare tout seul est un outil qu'on n'ose plus
+> lancer quand ça va mal. Celui-ci se lance sans réfléchir — un test
+> interdit toute commande qui écrirait quoi que ce soit.
+
+**« Désolé, impossible d'accéder à cette page » / `ERR_CONNECTION_REFUSED`
+sur `localhost:8501`.** Le navigateur dit vrai : il n'y a rien à afficher
+parce que **l'application n'est pas démarrée**. Ce message vient d'Edge, pas
+de nous, et il ne dit ni cela ni quoi faire. Double-cliquez sur `lancer.bat`
+ou sur l'icône 💊 du Bureau. La fenêtre noire qui s'ouvre **est**
+l'application : la fermer l'arrête, et l'onglet du navigateur affiche alors
+exactement cette page.
+
 **La fenêtre noire affiche `Email:` et rien ne se passe.** C'est le
 questionnaire de bienvenue de Streamlit : il attend une réponse et bloque le
 démarrage. Appuyez sur **Entrée** (sans rien taper) et l'application
@@ -1552,6 +1571,7 @@ pharmacie-ruptures/
 ├── creer-raccourci-poste.bat   # icône du Bureau d'un poste, vers le serveur
 ├── planifier-ouverture-poste.bat # ouvre l'utilitaire chaque matin à 08:00
 ├── ouvrir-le-matin.bat      # ce que cette tâche lance (une fois par jour)
+├── verifier-installation.bat # diagnostic d'un poste : il regarde, il ne touche à rien
 ├── creer-raccourci.bat       # pose l'icône 💊 « Pharmacie » sur le Bureau
 ├── raccourci.py             # la même pose, appelable depuis l'application
 ├── pharmacie.ico            # icône du raccourci (16 → 256 px)
