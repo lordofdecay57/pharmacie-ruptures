@@ -35,14 +35,26 @@ REM  qu'en ligne de commande : un dossier contenant un espace, une
 REM  apostrophe ou un accent casse le meilleur des echappements.
 set "APP=%~dp0"
 set "CIBLE=%~dp0lancer.bat"
-set "ICONE=%~dp0pharmacie.ico"
-set "NOM=Pharmacie.lnk"
 REM  Le temoin est LOCAL au poste, jamais dans le dossier de
 REM  l'application : celui-ci peut etre un partage reseau, et le
 REM  premier poste equipe priverait alors TOUS les autres de leur
 REM  icone - ils liraient "deja fait" devant un Bureau vide.
 set "LOCAL_PHARMACIE=%LOCALAPPDATA%\Pharmacie"
 set "TEMOIN=%LOCAL_PHARMACIE%\raccourci-bureau.txt"
+REM  L'icone est COPIEE sur le poste, comme le fait deja
+REM  creer-raccourci-poste.bat. La laisser sur le partage a deux
+REM  effets : le Bureau depend du serveur pour dessiner une image,
+REM  et surtout l'Explorateur GARDE LE FICHIER OUVERT pour chaque
+REM  raccourci pose. Une mise a jour ne pouvait alors plus le
+REM  remplacer : robocopy reessayait sans fin, ecran fige sur
+REM  "Installation des fichiers...".
+set "ICONE=%~dp0pharmacie.ico"
+if exist "%ICONE%" (
+    if not exist "%LOCAL_PHARMACIE%" mkdir "%LOCAL_PHARMACIE%" >nul 2>nul
+    copy /y "%ICONE%" "%LOCAL_PHARMACIE%\pharmacie.ico" >nul 2>nul
+)
+if exist "%LOCAL_PHARMACIE%\pharmacie.ico" set "ICONE=%LOCAL_PHARMACIE%\pharmacie.ico"
+set "NOM=Pharmacie.lnk"
 
 REM  Temoin : il contient la version pour laquelle l'icone a ete posee.
 REM   - meme version : on ne fait rien, une icone supprimee volontairement

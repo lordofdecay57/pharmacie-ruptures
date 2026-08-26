@@ -107,15 +107,38 @@ if errorlevel 1 (
     goto echec
 )
 
-REM --- 3. Installation -----------------------------------------
+REM --- 3. Arret de la version en cours --------------------------
+REM  L'ancienne version occupe le port 8501 : la nouvelle demarrerait
+REM  sur 8502 et les postes continueraient d'afficher l'ANCIENNE, sans
+REM  que rien ne le signale. On ferme donc nous-memes le processus qui
+REM  ecoute, plutot que d'esperer que quelqu'un y pense.
+REM  AVANT la copie, et non apres : robocopy ne peut pas remplacer un
+REM  fichier qu'un programme tient ouvert. Il reessayait alors sans
+REM  fin, ecran fige sur "Installation des fichiers...".
+call :dire "[3/5] Arret de la version precedente..."
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }" >nul 2>nul
+timeout /t 3 /nobreak >nul
+
+powershell -NoProfile -Command "try { exit ((Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count) } catch { exit 0 }"
+if errorlevel 1 (
+    call :dire "[ATTENTION] Le port 8501 est toujours occupe - demarrage tente quand meme."
+)
+
+REM --- 4. Installation -----------------------------------------
 REM  On ne remplace ni les scripts de mise a jour (ils sont en cours
 REM  d'execution : cmd relit le fichier au fil des lignes, et le
 REM  reecrire sous ses pieds lui ferait executer n'importe quoi), ni
 REM  les donnees de la pharmacie. Cette liste doit rester identique a
 REM  celle de mettre-a-jour.bat et a maj_auto.FICHIERS_PROTEGES : un
 REM  test le verifie.
-call :dire "[3/5] Installation des fichiers..."
-robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
+call :dire "[4/5] Installation des fichiers..."
+REM  /R:2 /W:5 : DEUX essais, cinq secondes d'attente. Par defaut
+REM  robocopy reessaie UN MILLION de fois, trente secondes entre
+REM  chaque - soit pres d'un an d'attente sur un seul fichier
+REM  verrouille, sans rien afficher. C'est exactement ce qui s'est
+REM  produit en officine : l'ecran est reste fige sur "Installation
+REM  des fichiers..." sans plus rien afficher.
+robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /R:2 /W:5 /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
 if %ERRORLEVEL% GEQ 8 (
     call :dire "[ERREUR] Copie des fichiers impossible."
     goto echec
@@ -129,20 +152,6 @@ call :dire "  Version : v%AVANT% vers v%APRES%"
 
 REM  Pas d'icone du Bureau ici : sur un serveur, personne ne s'assoit
 REM  devant. Les postes ont la leur, posee par creer-raccourci-poste.bat.
-
-REM --- 4. Arret de la version en cours --------------------------
-REM  L'ancienne version occupe le port 8501 : la nouvelle demarrerait
-REM  sur 8502 et les postes continueraient d'afficher l'ANCIENNE, sans
-REM  que rien ne le signale. On ferme donc nous-memes le processus qui
-REM  ecoute, plutot que d'esperer que quelqu'un y pense.
-call :dire "[4/5] Arret de la version precedente..."
-powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }" >nul 2>nul
-timeout /t 3 /nobreak >nul
-
-powershell -NoProfile -Command "try { exit ((Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count) } catch { exit 0 }"
-if errorlevel 1 (
-    call :dire "[ATTENTION] Le port 8501 est toujours occupe - demarrage tente quand meme."
-)
 
 REM --- 5. Redemarrage en mode serveur ---------------------------
 REM  Les deux options sont ce qui distingue un serveur d'un poste :

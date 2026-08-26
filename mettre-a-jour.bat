@@ -78,14 +78,57 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- 3. Installation des nouveaux fichiers ------------------
+REM --- 3. Fermeture de l'ancienne version ----------------------
+REM  Une ancienne version encore ouverte occupe le port 8501 : la nouvelle
+REM  demarrerait alors sur 8502, et l'onglet localhost:8501 continuerait
+REM  d'afficher l'ANCIENNE - la mise a jour semblerait sans effet. On ferme
+REM  donc nous-memes le processus qui ecoute sur 8501, plutot que de
+REM  demander a l'utilisateur d'y penser.
+REM  AVANT la copie, et non apres : robocopy ne peut pas remplacer un
+REM  fichier qu'un programme tient ouvert. Il reessayait alors sans
+REM  fin, ecran fige sur "Installation des fichiers...".
+echo  [3/5] Fermeture de la version precedente...
+REM  Une seule ligne, tout entre guillemets : cmd ne reinterprete alors ni
+REM  le | ni les parentheses. Le try/catch couvre les Windows depourvus de
+REM  Get-NetTCPConnection - la mise a jour ne doit jamais echouer ici.
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }" >nul 2>nul
+REM  Laisse le port se liberer avant de relancer.
+timeout /t 3 /nobreak >nul
+
+REM  Ceinture et bretelles : si quelque chose tient encore le port, mieux
+REM  vaut le dire que de laisser l'utilisateur devant une version fantome.
+REM  Le code de sortie vaut le NOMBRE de processus qui ecoutent (0 = libre).
+powershell -NoProfile -Command "try { exit ((Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count) } catch { exit 0 }"
+if errorlevel 1 (
+    echo.
+    echo  [ATTENTION] Le port 8501 est toujours occupe.
+    echo  Fermez toutes les fenetres noires de l'application, puis
+    echo  relancez ce script.
+    echo.
+    pause
+)
+
+REM --- 4. Installation des nouveaux fichiers ------------------
 REM  On ne remplace ni ce script, ni vos donnees personnelles
 REM  (mapping des colonnes, historique des analyses, etat du stock
 REM  min/max et inventaire du stock ferme).
-echo  [3/5] Installation des fichiers...
-robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
+echo  [4/5] Installation des fichiers...
+REM  /R:2 /W:5 : DEUX essais, cinq secondes d'attente. Par defaut
+REM  robocopy reessaie UN MILLION de fois, trente secondes entre
+REM  chaque - soit pres d'un an d'attente sur un seul fichier
+REM  verrouille, sans rien afficher. C'est exactement ce qui s'est
+REM  produit en officine : l'ecran est reste fige sur "Installation
+REM  des fichiers..." sans plus rien afficher.
+robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /R:2 /W:5 /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
 if %ERRORLEVEL% GEQ 8 (
+    echo.
     echo  [ERREUR] Copie des fichiers impossible.
+    echo.
+    echo  Le plus souvent, un fichier est encore ouvert : une fenetre
+    echo  de l'application restee ouverte sur CE poste ou sur un autre,
+    echo  ou un CSV ouvert dans Excel. Fermez-les et relancez.
+    echo.
+    echo  Rien n'a ete modifie : l'ancienne version reste en place.
     echo.
     pause
     exit /b 1
@@ -107,33 +150,6 @@ for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" app.py') do set "V
 echo.
 echo  Version installee : v%VER%
 echo  ^(elle doit s'afficher a l'identique dans le bandeau de l'application^)
-
-REM --- 4. Fermeture de l'ancienne version ----------------------
-REM  Une ancienne version encore ouverte occupe le port 8501 : la nouvelle
-REM  demarrerait alors sur 8502, et l'onglet localhost:8501 continuerait
-REM  d'afficher l'ANCIENNE - la mise a jour semblerait sans effet. On ferme
-REM  donc nous-memes le processus qui ecoute sur 8501, plutot que de
-REM  demander a l'utilisateur d'y penser.
-echo  [4/5] Fermeture de la version precedente...
-REM  Une seule ligne, tout entre guillemets : cmd ne reinterprete alors ni
-REM  le | ni les parentheses. Le try/catch couvre les Windows depourvus de
-REM  Get-NetTCPConnection - la mise a jour ne doit jamais echouer ici.
-powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }" >nul 2>nul
-REM  Laisse le port se liberer avant de relancer.
-timeout /t 3 /nobreak >nul
-
-REM  Ceinture et bretelles : si quelque chose tient encore le port, mieux
-REM  vaut le dire que de laisser l'utilisateur devant une version fantome.
-REM  Le code de sortie vaut le NOMBRE de processus qui ecoutent (0 = libre).
-powershell -NoProfile -Command "try { exit ((Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count) } catch { exit 0 }"
-if errorlevel 1 (
-    echo.
-    echo  [ATTENTION] Le port 8501 est toujours occupe.
-    echo  Fermez toutes les fenetres noires de l'application, puis
-    echo  relancez ce script.
-    echo.
-    pause
-)
 
 echo  [5/5] Lancement de l'application...
 echo.

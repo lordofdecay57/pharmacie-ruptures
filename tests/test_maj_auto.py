@@ -250,23 +250,47 @@ class TestApplicationEnCours:
 # ---------------------------------------------------------------------------
 
 class TestCoherence:
-    @pytest.mark.parametrize("nom", ["mettre-a-jour.bat",
-                                     "mettre-a-jour-serveur.bat"])
+    #: Les deux scripts s'excluent EN PLUS des données : ils tournent
+    #: pendant que robocopy réécrit le dossier.
+    SCRIPTS = {"mettre-a-jour.bat", "mettre-a-jour-serveur.bat"}
+
+    @pytest.mark.parametrize("nom", sorted(SCRIPTS))
     def test_meme_liste_de_fichiers_proteges_que_le_script_manuel(self, nom):
-        """Trois chemins de mise à jour, une seule liste de fichiers à
+        """Trois chemins de mise à jour, une seule liste de données à
         préserver : si elles divergent, une des trois voies écrasera les
         données de la pharmacie."""
         script = (RACINE / nom).read_text(encoding="utf-8", errors="replace")
         ligne = next(l for l in script.splitlines() if "/XF" in l)
         exclus = ligne.split("/XF", 1)[1].split(">nul")[0].split()
-        assert set(exclus) == set(FICHIERS_PROTEGES)
+        assert set(exclus) == set(FICHIERS_PROTEGES) | self.SCRIPTS
 
     def test_les_scripts_de_mise_a_jour_se_protegent_eux_memes(self):
         """Chacun est en cours d'exécution pendant que robocopy réécrit le
         dossier, et cmd relit le fichier au fil des lignes : le remplacer
         sous ses pieds lui ferait exécuter n'importe quoi."""
-        for nom in ("mettre-a-jour.bat", "mettre-a-jour-serveur.bat"):
-            assert nom in FICHIERS_PROTEGES, f"{nom} doit être protégé"
+        for nom in sorted(self.SCRIPTS):
+            script = (RACINE / nom).read_text(encoding="utf-8",
+                                              errors="replace")
+            ligne = next(l for l in script.splitlines() if "/XF" in l)
+            assert nom in ligne.split("/XF", 1)[1], f"{nom} doit s'exclure"
+
+    def test_mais_maj_auto_a_le_droit_de_les_corriger(self):
+        """Un bug dans ces scripts était jusqu'ici INCORRIGEABLE : ils
+        s'excluaient de leur propre copie ET de celle de maj_auto. Réparé
+        dans le dépôt, il restait indéfiniment chez la pharmacie.
+
+        Ici c'est Python qui écrit, et aucun des deux n'est en train de
+        tourner : rien ne justifie de les épargner."""
+        for nom in sorted(self.SCRIPTS):
+            assert nom not in FICHIERS_PROTEGES, (
+                f"{nom} ne pourra jamais être corrigé à distance")
+
+    def test_seules_les_donnees_sont_protegees(self):
+        """La liste est celle des fichiers de la PHARMACIE. Y glisser du
+        code, c'est se priver de pouvoir le réparer."""
+        for nom in FICHIERS_PROTEGES:
+            assert not nom.endswith((".bat", ".py")), (
+                f"{nom} est du programme, pas une donnée")
 
     def test_le_journal_est_protege_des_ecrasements(self):
         """maj_auto.log est produit sur le poste ; il n'est pas dans le
