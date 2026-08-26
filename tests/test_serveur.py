@@ -219,6 +219,10 @@ class TestMiseAJourDuServeur:
                             f"{ligne!r}")
             if nu.startswith("timeout ") and "/nobreak" not in nu:
                 pytest.fail(f"attente interruptible au clavier : {ligne!r}")
+            if nu.startswith("set /p "):
+                pytest.fail(f"question posée à personne — la nuit, le script "
+                            f"attendrait une réponse jusqu'au matin : "
+                            f"{ligne!r}")
 
     def test_la_tache_de_nuit_ne_retient_pas_l_application(self):
         """Le planificateur de Windows arrête par défaut toute tâche qui

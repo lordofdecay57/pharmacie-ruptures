@@ -234,6 +234,96 @@ class TestCablageDesLanceurs:
         assert "presence.py" not in ligne
 
 
+class TestAutresPostes:
+    """« Est-ce que je vais casser l'écran de quelqu'un d'autre ? »
+
+    C'est la question de la mise à jour MANUELLE — celle qu'un humain
+    déclenche. Sa propre application sera de toute façon redémarrée : se
+    compter soi-même ferait apparaître l'avertissement à chaque fois, et
+    on apprendrait à passer outre sans le lire.
+    """
+
+    def test_on_ne_se_compte_pas_soi_meme(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("COMPUTERNAME", "MOI")
+        presence.entrer(tmp_path)
+        assert presence.postes_actifs(tmp_path) == ["MOI"]
+        assert presence.autres_postes(tmp_path) == []
+
+    def test_les_voisins_sont_comptes(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("COMPUTERNAME", "MOI")
+        presence.entrer(tmp_path)
+        presence.entrer(tmp_path, "COMPTOIR-1")
+        assert presence.autres_postes(tmp_path) == ["COMPTOIR-1"]
+
+    def test_un_voisin_abandonne_ne_compte_pas(self, tmp_path, monkeypatch):
+        import os
+        monkeypatch.setenv("COMPUTERNAME", "MOI")
+        presence.entrer(tmp_path, "PARTI")
+        quand = time.time() - (presence.DUREE_MAX_H + 1) * HEURE
+        os.utime(presence.marqueur(tmp_path, "PARTI"), (quand, quand))
+        assert presence.autres_postes(tmp_path) == []
+
+
+class TestMiseAJourManuelle:
+    """La pharmacie installe chaque poste EN LANÇANT mettre-a-jour.bat.
+
+    Ce script réécrit le dossier partagé sans rien demander : lancé à
+    10 heures depuis un poste, il coupe l'écran de tous les autres. La
+    mise à jour automatique s'en garde toute seule ; ici, c'est quelqu'un
+    qui décide — on lui montre donc qui il va interrompre.
+    """
+
+    MANUELS = ["mettre-a-jour.bat", "mettre-a-jour-serveur.bat"]
+
+    @pytest.mark.parametrize("nom", MANUELS)
+    def test_il_regarde_qui_travaille_avant_de_reecrire(self, nom):
+        texte = (RACINE / nom).read_text(encoding="ascii")
+        assert "presence.py --autres" in texte, (
+            f"{nom} réécrit le dossier partagé sans regarder qui l'utilise")
+
+    @pytest.mark.parametrize("nom", MANUELS)
+    def test_le_controle_precede_la_copie(self, nom):
+        """Prévenir après avoir écrasé les fichiers ne sert plus à rien."""
+        lignes = [l.strip() for l in
+                  (RACINE / nom).read_text(encoding="ascii").splitlines()]
+        controle = next(i for i, l in enumerate(lignes)
+                        if "presence.py --autres" in l)
+        copie = next(i for i, l in enumerate(lignes)
+                     if l.startswith("robocopy "))
+        assert controle < copie, f"{nom} : l'avertissement arrive trop tard"
+
+    @pytest.mark.parametrize("nom", MANUELS)
+    def test_les_postes_sont_nommes_pas_seulement_comptes(self, nom):
+        """« Occupé » n'aide personne. « COMPTOIR-1 » dit à qui aller
+        demander de fermer sa fenêtre."""
+        lignes = [l.strip() for l in
+                  (RACINE / nom).read_text(encoding="ascii").splitlines()]
+        affichages = [l for l in lignes
+                      if l.startswith("%PY% presence.py --autres")]
+        assert affichages, f"{nom} n'affiche jamais la liste"
+
+    def test_le_dossier_libre_ne_pose_aucune_question(self):
+        """Le cas courant — un poste isolé, personne d'autre — doit rester
+        un simple double-clic."""
+        for nom in self.MANUELS:
+            texte = (RACINE / nom).read_text(encoding="ascii")
+            saut = "if defined AUTRES goto postes_ouverts" in texte \
+                or "if not defined AUTRES goto dossier_libre" in texte
+            assert saut, f"{nom} : la question est posée dans tous les cas"
+
+    def test_la_nuit_le_serveur_renonce_au_lieu_de_demander(self):
+        """Personne n'est devant : la question resterait sans réponse
+        jusqu'au matin, application arrêtée. On renonce, on le consigne,
+        et la nuit suivante réessaiera."""
+        texte = (RACINE / "mettre-a-jour-serveur.bat").read_text(
+            encoding="ascii")
+        avertissement = texte.index("presence.py --autres")
+        branche = texte.index("if defined SILENCE goto echec", avertissement)
+        question = texte.index("set /p REPONSE", avertissement)
+        assert branche < question, (
+            "la question est posée avant que le mode silencieux ne sorte")
+
+
 class TestIsolation:
     def test_presence_n_importe_aucun_module_du_projet(self):
         """Il est appelé par maj_auto au démarrage du poste, avant que quoi

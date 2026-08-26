@@ -1298,10 +1298,37 @@ ou copier le dossier sur le disque local.
 #### Quand chaque poste lance l'application depuis le partage
 
 C'est le second déploiement : le dossier vit sur le disque du serveur,
-partagé, et chaque poste y lance **son propre** Streamlit sur les **mêmes**
-fichiers. Les écritures simultanées sont couvertes depuis le début (verrou,
-écriture atomique, relecture sous verrou). Deux choses ne l'étaient pas, et
-ne se voient que dans ce déploiement précis :
+partagé, **rien ne tourne sur le serveur lui-même**, et chaque poste y lance
+son propre Streamlit sur les mêmes fichiers. C'est un choix légitime — il
+évite d'avoir à garder une session ouverte en permanence sur le serveur, et
+avec elle le pare-feu, l'IP fixe et la mise en veille.
+
+**La bonne méthode, poste par poste :**
+
+1. installer **Python** sur le poste
+   ([comment](#installation-une-seule-fois)) — indispensable, l'application
+   tourne chez lui ;
+2. depuis le dossier partagé, double-cliquer sur **`lancer.bat`**.
+
+C'est tout, et c'est aussi le geste de tous les jours. `lancer.bat` installe
+les dépendances Python **sur ce poste**, pose l'icône 💊 du Bureau, vérifie
+s'il existe une nouvelle version, puis ouvre l'application.
+
+> ⚠️ **Ne pas se servir de `mettre-a-jour.bat` pour installer un poste.** Il
+> fonctionne — mais il **re-télécharge et réécrit tout le dossier partagé**,
+> depuis chaque poste, à chaque fois. Sur cinq postes, c'est cinq
+> réécritures du dossier de toute la pharmacie pour un travail que
+> `lancer.bat` fait sans y toucher. Gardez-le pour ce à quoi il sert :
+> forcer une mise à jour, en dehors des heures d'ouverture.
+
+Dans ce déploiement, les étapes 3 (pare-feu), 4 (IP fixe), 5 (veille) et 6
+(`planifier-maj-serveur.bat`) de la procédure serveur **ne servent à rien** :
+le port 8501 reste local à chaque poste, et aucune application ne tourne sur
+le serveur.
+
+Les écritures simultanées sont couvertes depuis le début (verrou, écriture
+atomique, relecture sous verrou). Deux choses ne l'étaient pas, et ne se
+voient que dans ce déploiement précis :
 
 **Un seul poste recevait son icône.** `creer-raccourci.bat` gardait son
 témoin « icône déjà posée » **dans le dossier de l'application** — donc sur
@@ -1335,11 +1362,34 @@ La conséquence pratique est la bonne : **la mise à jour se fait au premier
 lancement du matin**, quand personne d'autre n'est encore ouvert. C'est
 exactement le moment où elle est sans danger.
 
-> ⚠️ Cela ne couvre pas la mise à jour **manuelle**. Lancer
-> `mettre-a-jour.bat` à 10 heures depuis un poste remplace les fichiers du
-> partage pendant que les autres travaillent : il y a là un humain qui
-> décide, et rien ne l'arrête. Faites-le avant l'ouverture ou après la
-> fermeture.
+**Et la mise à jour manuelle ?** `mettre-a-jour.bat` réécrit le dossier sans
+passer par `maj_auto`. Il regarde donc lui aussi qui travaille, et le **dit
+avant** de toucher à quoi que ce soit :
+
+```
+[ATTENTION] Ces postes utilisent le dossier en ce moment :
+
+COMPTOIR-1
+COMPTOIR-3
+
+Remplacer les fichiers maintenant interrompra leur ecran, en
+pleine dispensation.
+
+  Continuer quand meme ? (o/N) :
+```
+
+Ici, contrairement à la mise à jour automatique, c'est **quelqu'un qui
+décide** : le script ne refuse pas, il montre qui sera interrompu. Le cas
+courant — personne d'autre — ne pose aucune question et reste un simple
+double-clic.
+
+Il ne se compte pas lui-même : sa propre application va de toute façon
+redémarrer. Se compter ferait apparaître l'avertissement à chaque fois, et
+on apprendrait à passer outre sans le lire.
+
+Sur le serveur, la version de nuit ne pose pas la question — personne n'est
+devant. Elle **renonce**, le consigne dans `maj_serveur.log`, et la nuit
+suivante réessaiera.
 
 ## ⬆️ Le bouton d'installation (le chemin normal)
 

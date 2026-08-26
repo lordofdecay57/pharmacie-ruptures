@@ -62,6 +62,29 @@ if not defined PY py -3 --version >nul 2>nul
 if not defined PY if not errorlevel 1 set "PY=py -3"
 if not defined PY goto pas_de_python
 
+REM --- 0 bis. Qui d'autre travaille sur ce dossier ? ------------
+REM  Sur un dossier partage, les autres postes lancent LEUR
+REM  Streamlit sur CES fichiers. Les remplacer sous leur session
+REM  casse leur ecran en pleine dispensation.
+REM  "--autres" et non "--lister" : cette instance-ci sera de toute
+REM  facon redemarree plus bas.
+set "AUTRES="
+for /f "delims=" %%p in ('%PY% presence.py --autres 2^>nul') do set "AUTRES=1"
+if not defined AUTRES goto dossier_libre
+call :dire "[ATTENTION] D'autres postes utilisent ce dossier en ce moment."
+REM  La nuit, personne n'est devant : on renonce et on le consigne,
+REM  plutot que d'interrompre des sessions ou d'attendre une touche
+REM  jusqu'au matin. La prochaine nuit reessaiera.
+if defined SILENCE goto echec
+%PY% presence.py --autres
+call :dire "Remplacer les fichiers interrompra leur ecran, en pleine"
+call :dire "dispensation. Demandez-leur de fermer leur fenetre, ou"
+call :dire "refaites cette mise a jour avant l'ouverture."
+set "REPONSE="
+set /p REPONSE=  Continuer quand meme ? (o/N) : 
+if /i not "%REPONSE%"=="o" goto echec
+:dossier_libre
+
 REM  Version avant, pour que le journal dise d'ou l'on part.
 set "AVANT="
 for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" app.py 2^>nul') do set "AVANT=%%~v"
