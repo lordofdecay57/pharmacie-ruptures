@@ -22,7 +22,15 @@ REM  postes perdent leur page quelques secondes, et une fiche
 REM  en cours de saisie est perdue. D'ou l'heure creuse.
 REM ============================================================
 setlocal
-cd /d "%~dp0"
+REM  pushd, et NON "cd /d" : le dossier peut vivre sur un partage
+REM  reseau. cmd REFUSE un chemin \\serveur\... comme repertoire
+REM  courant : il se rabat sur C:\Windows sans rien demander, et
+REM  tout ce qui suit cherche alors app.py dans C:\Windows.
+REM  pushd, lui, monte un lecteur temporaire le temps du script.
+pushd "%~dp0"
+REM  Le script est forcement dans son propre dossier : s'il n'y est
+REM  pas, c'est que pushd a echoue et qu'on est ailleurs.
+if not exist "%~nx0" goto pas_de_dossier
 
 set "SILENCE="
 if /i "%~1"=="/silencieux" set "SILENCE=1"
@@ -139,7 +147,11 @@ REM  premier plan tuerait donc le serveur tous les trois jours, en pleine
 REM  journee, sans que rien ne l'explique.
 REM  "start" lui donne son propre processus : la tache se termine en
 REM  quelques secondes, l'application reste.
-start "Serveur - Pilotage pharmacie" /min cmd /c %PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+REM  L'enfant monte SON PROPRE lecteur : il herite du repertoire
+REM  courant, mais pas du montage temporaire qui le rend valide.
+REM  Ce montage appartient a cette fenetre-ci, qui se termine
+REM  dans la seconde - le serveur repartirait alors sans dossier.
+start "Serveur - Pilotage pharmacie" /min cmd /c pushd "%~dp0" ^& %PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 call :dire "Serveur redemarre dans sa propre fenetre."
 exit /b 0
 
@@ -169,3 +181,21 @@ REM  fichier au lieu d'afficher la phrase. Un test l'interdit.
 echo.%~1
 >> "%JOURNAL%" echo.%~1
 exit /b 0
+
+:pas_de_dossier
+echo.
+echo  [ERREUR] Impossible de se placer dans le dossier de l'utilitaire.
+echo.
+echo      %~dp0
+echo.
+echo  Ce dossier est sur un partage reseau, et Windows n'a pas pu lui
+echo  attribuer de lettre de lecteur temporaire.
+echo.
+echo  Deux solutions :
+echo    - connectez le partage a une lettre de lecteur (clic droit sur
+echo      le dossier reseau, puis "Connecter un lecteur reseau"), et
+echo      relancez depuis cette lettre ;
+echo    - ou copiez le dossier sur le disque de cet ordinateur.
+echo.
+if /i not "%~1"=="/silencieux" pause
+exit /b 1

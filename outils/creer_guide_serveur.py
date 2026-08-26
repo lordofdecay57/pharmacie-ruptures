@@ -69,6 +69,9 @@ ETAPES = [
       "réglage et ne verrait pas Python.",
       "Copiez le dossier « pharmacie-ruptures » sur le serveur, par exemple "
       "dans Documents.",
+      "Un dossier partagé convient aussi — mais lancez-le par une lettre de "
+      "lecteur (Z:\\…) plutôt que par son chemin réseau (\\\\srv-lafoa\\…) : "
+      "clic droit sur le dossier partagé, « Connecter un lecteur réseau ».",
       "Si vous avez récupéré des fichiers de données, copiez-les MAINTENANT "
       "dans ce dossier, à côté de lancer.bat."],
      [("attention", "Un fichier .msix n'est PAS un installeur : c'est un "

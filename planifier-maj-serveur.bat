@@ -19,7 +19,10 @@ REM    planifier-maj-serveur.bat 04:30        a l'heure voulue
 REM    planifier-maj-serveur.bat /supprimer   retire la tache
 REM ============================================================
 setlocal
-cd /d "%~dp0"
+REM  Aucun changement de repertoire : tout ce que ce script touche
+REM  est designe par %~dp0, le chemin de CE fichier. Il fonctionne
+REM  donc depuis un partage reseau (\\serveur\...), que cmd refuse
+REM  comme repertoire courant - il se rabattrait sur C:\Windows.
 title Mise a jour automatique du serveur - Pilotage pharmacie
 
 set "TACHE=Pilotage pharmacie - mise a jour"
