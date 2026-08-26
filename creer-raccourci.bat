@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  Cree sur le Bureau une icone "Pharmacie" qui lance
+REM  Cree sur le Bureau une icone "Pilotage pharmacie" qui lance
 REM  l'utilitaire en un double-clic.
 REM
 REM  Appele automatiquement par lancer.bat ET par
@@ -54,7 +54,12 @@ if exist "%ICONE%" (
     copy /y "%ICONE%" "%LOCAL_PHARMACIE%\pharmacie.ico" >nul 2>nul
 )
 if exist "%LOCAL_PHARMACIE%\pharmacie.ico" set "ICONE=%LOCAL_PHARMACIE%\pharmacie.ico"
-set "NOM=Pharmacie.lnk"
+REM  Le MEME nom partout : ce script, creer-raccourci-poste.bat
+REM  et raccourci.py posent la meme icone. S'ils divergent, un
+REM  poste finit avec deux icones et personne ne sait laquelle
+REM  ouvre quoi.
+set "NOM=Pilotage pharmacie.lnk"
+set "NOM_URL=Pilotage pharmacie.url"
 
 REM  Temoin : il contient la version pour laquelle l'icone a ete posee.
 REM   - meme version : on ne fait rien, une icone supprimee volontairement
@@ -73,7 +78,18 @@ set "DEJA="
 if not exist "%TEMOIN%" goto sans_temoin
 set /p DEJA=<"%TEMOIN%"
 :sans_temoin
-if defined SIPREMIER if "%DEJA%"=="%VER%" exit /b 0
+REM  Le temoin dit que l'icone a ete POSEE, pas qu'elle EXISTE. Une
+REM  pose ratee - PowerShell interdit par strategie de groupe, Bureau
+REM  redirige vers OneDrive - l'ecrivait quand meme, et /sipremier ne
+REM  reessayait alors PLUS JAMAIS : le Bureau restait vide sans que rien
+REM  ne le signale. C'est le "l'icone n'apparait pas sur certains
+REM  postes" remonte par la pharmacie. On regarde donc le Bureau.
+set "DEJA_LA="
+if not defined SIPREMIER goto poser
+if not "%DEJA%"=="%VER%" goto poser
+call :chercher_icone
+if defined DEJA_LA exit /b 0
+:poser
 
 if not exist "%CIBLE%" (
     if not defined SILENCE (
@@ -88,7 +104,7 @@ if not exist "%CIBLE%" (
 
 if not defined SILENCE (
     echo.
-    echo  Creation de l'icone "Pharmacie" sur le Bureau...
+    echo  Creation de l'icone "Pilotage pharmacie" sur le Bureau...
 )
 
 REM --- Methode normale : un vrai raccourci Windows (.lnk) -------
@@ -109,25 +125,54 @@ if not exist "%BUREAU%" if defined OneDrive if exist "%OneDrive%\Desktop" set "B
 if not exist "%BUREAU%" goto echec
 
 set "URLCIBLE=%CIBLE:\=/%"
-> "%BUREAU%\Pharmacie.url" echo [InternetShortcut]
->> "%BUREAU%\Pharmacie.url" echo URL=file:///%URLCIBLE%
->> "%BUREAU%\Pharmacie.url" echo IconFile=%ICONE%
->> "%BUREAU%\Pharmacie.url" echo IconIndex=0
-if not exist "%BUREAU%\Pharmacie.url" goto echec
-echo  Icone posee sur le Bureau : %BUREAU%\Pharmacie.url
+> "%BUREAU%\%NOM_URL%" echo [InternetShortcut]
+>> "%BUREAU%\%NOM_URL%" echo URL=file:///%URLCIBLE%
+>> "%BUREAU%\%NOM_URL%" echo IconFile=%ICONE%
+>> "%BUREAU%\%NOM_URL%" echo IconIndex=0
+if not exist "%BUREAU%\%NOM_URL%" goto echec
+echo  Icone posee sur le Bureau : %BUREAU%\%NOM_URL%
 
 :pose
+REM  L'ancienne icone "Pharmacie" est retiree : deux icones cote a
+REM  cote, dont une qui pointe peut-etre sur une installation
+REM  supprimee, c'est la garantie qu'on cliquera un jour la mauvaise.
+call :retirer "%USERPROFILE%\Desktop"
+if defined OneDrive call :retirer "%OneDrive%\Desktop"
+REM  Windows garde les icones en cache : sans ce rafraichissement, le
+REM  Bureau affiche encore l'ancien dessin, ou un carre blanc. La
+REM  commande n'existe pas partout - son echec est sans consequence.
+ie4uinit.exe -show >nul 2>nul
+
 REM  Le temoin n'est ecrit qu'en cas de succes : une tentative ratee sera
 REM  refaite au lancement suivant.
 if not exist "%LOCAL_PHARMACIE%" mkdir "%LOCAL_PHARMACIE%" >nul 2>nul
 > "%TEMOIN%" echo %VER%
 if not defined SILENCE (
     echo.
-    echo  C'est fait. Double-cliquez sur l'icone "Pharmacie" du Bureau
+    echo  C'est fait. Double-cliquez sur l'icone "Pilotage pharmacie"
     echo  pour ouvrir l'utilitaire.
     echo.
     pause
 )
+exit /b 0
+
+REM  L'icone est-elle reellement sur le Bureau ? On regarde les deux
+REM  emplacements possibles - le Bureau peut etre redirige vers OneDrive
+REM  sur les postes d'entreprise - et les deux formes, .lnk et .url.
+:retirer
+if exist "%~1\Pharmacie.lnk" del /q "%~1\Pharmacie.lnk" >nul 2>nul
+if exist "%~1\Pharmacie.url" del /q "%~1\Pharmacie.url" >nul 2>nul
+exit /b 0
+
+:chercher_icone
+set "DEJA_LA="
+call :voir "%USERPROFILE%\Desktop"
+if defined OneDrive call :voir "%OneDrive%\Desktop"
+exit /b 0
+
+:voir
+if exist "%~1\%NOM%" set "DEJA_LA=1"
+if exist "%~1\%NOM_URL%" set "DEJA_LA=1"
 exit /b 0
 
 :echec

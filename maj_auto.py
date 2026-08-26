@@ -50,6 +50,23 @@ URL_VERSION = ("https://raw.githubusercontent.com/lordofdecay57/"
 #: Dossier racine à l'intérieur de l'archive GitHub.
 RACINE_ARCHIVE = "pharmacie-ruptures-main"
 
+#: Ce qui ne descend PAS sur le poste de la pharmacie.
+#:
+#: Le dépôt contient le programme ET tout ce qui sert à le fabriquer :
+#: la suite de tests, les outils de développement, une application web
+#: sans rapport. Tout cela atterrissait dans le dossier de l'officine —
+#: 3 Mo et une centaine de fichiers de plus, au milieu desquels il
+#: fallait retrouver « lancer.bat ». Personne ne lance un utilitaire
+#: dont il ne reconnaît aucun fichier.
+DOSSIERS_DE_DEVELOPPEMENT = (
+    "tests",        # la suite de tests : 2,3 Mo, inutile en officine
+    "outils",       # génération de l'icône et du guide PDF
+    "web",          # application Next.js, projet séparé
+    ".github",      # intégration continue
+    ".pytest_cache",
+    "__pycache__",
+)
+
 #: Fichiers de la pharmacie : JAMAIS écrasés par une mise à jour.
 #: Ce sont ses DONNÉES, rien d'autre.
 #:
@@ -176,6 +193,11 @@ def installer_archive(archive: bytes, destination: Path) -> int:
                     continue
                 relatif = fichier.relative_to(source)
                 if relatif.name in FICHIERS_PROTEGES:
+                    continue
+                # Le dossier de l'officine ne reçoit que le programme :
+                # y déverser la suite de tests, c'est noyer lancer.bat
+                # au milieu de cent fichiers que personne ne reconnaît.
+                if set(relatif.parts[:-1]) & set(DOSSIERS_DE_DEVELOPPEMENT):
                     continue
                 cible = destination / relatif
                 cible.parent.mkdir(parents=True, exist_ok=True)

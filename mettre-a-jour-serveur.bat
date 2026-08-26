@@ -138,7 +138,12 @@ REM  chaque - soit pres d'un an d'attente sur un seul fichier
 REM  verrouille, sans rien afficher. C'est exactement ce qui s'est
 REM  produit en officine : l'ecran est reste fige sur "Installation
 REM  des fichiers..." sans plus rien afficher.
-robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /R:2 /W:5 /NFL /NDL /NJH /NJS /NP /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
+REM  /XD : le dossier de l'officine ne recoit que le PROGRAMME. Le
+REM  depot contient aussi tout ce qui sert a le fabriquer - 2,3 Mo de
+REM  tests, les outils, une application web sans rapport - qui noyaient
+REM  lancer.bat sous une centaine de fichiers inconnus. Personne ne
+REM  lance un utilitaire dont il ne reconnait aucun fichier.
+robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /R:2 /W:5 /NFL /NDL /NJH /NJS /NP /XD tests outils web .github .pytest_cache __pycache__ /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
 if %ERRORLEVEL% GEQ 8 (
     call :dire "[ERREUR] Copie des fichiers impossible."
     goto echec

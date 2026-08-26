@@ -549,7 +549,7 @@ class TestDocumentation:
         """Les icônes des postes sont du texte : personne ne doit croire
         qu'il faut tout réinstaller."""
         texte = README.read_text(encoding="utf-8")
-        assert "Pharmacie.url" in texte and "Bloc-notes" in texte
+        assert "Pilotage pharmacie.url" in texte and "Bloc-notes" in texte
 
     def test_le_readme_explique_la_mise_a_jour_du_serveur(self):
         """C'est le point sur lequel une pharmacie peut rester bloquée des

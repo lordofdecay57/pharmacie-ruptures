@@ -118,13 +118,41 @@ class TestInstallerArchive:
             encoding="utf-8") == "mes analyses\n"
 
     def test_sous_dossiers_deployes(self, tmp_path):
+        """`.streamlit/config.toml` porte le thème et supprime le
+        questionnaire de bienvenue : un sous-dossier qui doit descendre."""
         dossier = _installation(tmp_path)
         installer_archive(_archive({
             "app.py": 'VERSION_APP = "3.4"\n',
-            "tests/test_x.py": "# test\n",
             ".streamlit/config.toml": "[server]\n"}), dossier)
-        assert (dossier / "tests" / "test_x.py").exists()
         assert (dossier / ".streamlit" / "config.toml").exists()
+
+    @pytest.mark.parametrize("chemin", [
+        "tests/test_x.py", "tests/donnees/cadencier.csv",
+        "outils/creer_icone.py", "web/src/app/page.tsx",
+        ".github/workflows/ci.yml", "__pycache__/app.cpython-313.pyc"])
+    def test_le_dossier_de_l_officine_ne_recoit_que_le_programme(
+            self, tmp_path, chemin):
+        """Le dépôt contient aussi tout ce qui sert à FABRIQUER le
+        programme : 2,3 Mo de tests, les outils, une application web sans
+        rapport. Déversés dans le dossier de l'officine, ils y noyaient
+        `lancer.bat` sous une centaine de fichiers inconnus — et personne
+        ne lance un utilitaire dont il ne reconnaît aucun fichier."""
+        dossier = _installation(tmp_path)
+        installer_archive(_archive({
+            "app.py": 'VERSION_APP = "3.4"\n', chemin: "x\n"}), dossier)
+        assert not (dossier / chemin).exists(), chemin
+        assert (dossier / "app.py").exists(), "le programme doit descendre"
+
+    def test_le_compte_annonce_ne_compte_pas_l_ecarte(self, tmp_path):
+        """« 47 fichiers » alors qu'on en a écrit deux, c'est un compte
+        rendu qui ment sur ce qui vient de se passer."""
+        dossier = _installation(tmp_path)
+        ecrits = installer_archive(_archive({
+            "app.py": 'VERSION_APP = "3.4"\n',
+            "lancer.bat": "@echo off\n",
+            "tests/test_x.py": "# test\n",
+            "web/page.tsx": "x\n"}), dossier)
+        assert ecrits == 2, ecrits
 
     def test_fichiers_supplementaires_conserves(self, tmp_path):
         """Une mise à jour ajoute ou remplace ; elle ne fait pas le ménage."""
@@ -263,6 +291,18 @@ class TestCoherence:
         ligne = next(l for l in script.splitlines() if "/XF" in l)
         exclus = ligne.split("/XF", 1)[1].split(">nul")[0].split()
         assert set(exclus) == set(FICHIERS_PROTEGES) | self.SCRIPTS
+
+    @pytest.mark.parametrize("nom", sorted(SCRIPTS))
+    def test_les_dossiers_de_developpement_sont_ecartes_partout(self, nom):
+        """Trois chemins de mise à jour, une seule idée de ce qui doit
+        descendre. Si le script manuel recopie les tests que `maj_auto`
+        écarte, le dossier de l'officine redevient illisible dès qu'on
+        clique sur le mauvais des deux."""
+        ligne = next(l for l in (RACINE / nom).read_text(encoding="ascii")
+                     .splitlines() if l.startswith("robocopy "))
+        exclus = set(ligne.split("/XD", 1)[1].split("/XF")[0].split())
+        assert exclus == set(maj_auto.DOSSIERS_DE_DEVELOPPEMENT), (
+            f"{nom} : {sorted(exclus)}")
 
     def test_les_scripts_de_mise_a_jour_se_protegent_eux_memes(self):
         """Chacun est en cours d'exécution pendant que robocopy réécrit le
