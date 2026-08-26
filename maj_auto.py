@@ -51,11 +51,22 @@ URL_VERSION = ("https://raw.githubusercontent.com/lordofdecay57/"
 RACINE_ARCHIVE = "pharmacie-ruptures-main"
 
 #: Fichiers de la pharmacie : JAMAIS écrasés par une mise à jour.
-#: Cette liste doit rester identique à celle du « /XF » de
-#: mettre-a-jour.bat — un test le vérifie.
+#: Ce sont ses DONNÉES, rien d'autre.
+#:
+#: Les deux `mettre-a-jour*.bat` n'y figurent pas, et c'est délibéré.
+#: Ils s'excluent eux-mêmes de leur propre `/XF` — cmd relit un .bat
+#: au fil des lignes, le remplacer sous ses pieds lui ferait exécuter
+#: n'importe quoi. Mais ici, c'est Python qui écrit et aucun des deux
+#: n'est en train de tourner : les protéger revenait à interdire pour
+#: toujours de corriger un bug dedans. Un défaut y est resté des mois,
+#: réparé dans le dépôt et jamais chez la pharmacie.
+#:
+#: Reste une course étroite : quelqu'un lance `mettre-a-jour.bat`
+#: pendant que `maj_auto` tourne sur un autre poste. Elle dure quelques
+#: secondes, elle ne survient qu'un jour de publication, et elle coûte
+#: une fenêtre à relancer. L'autre branche du choix coûtait un bug
+#: définitif.
 FICHIERS_PROTEGES = (
-    "mettre-a-jour.bat",
-    "mettre-a-jour-serveur.bat",
     "config.yaml",
     "historique_commandes.csv",
     "etat_stock_precedent.csv",

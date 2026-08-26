@@ -1321,6 +1321,39 @@ s'il existe une nouvelle version, puis ouvre l'application.
 > `lancer.bat` fait sans y toucher. Gardez-le pour ce à quoi il sert :
 > forcer une mise à jour, en dehors des heures d'ouverture.
 
+##### « Installation des fichiers… » et plus rien
+
+Ce blocage a été vu en officine, sur un poste qu'il fallait installer.
+L'écran restait figé sur cette ligne, indéfiniment. Trois causes empilées,
+dont aucune ne s'annonçait :
+
+- **`robocopy` réessaie un million de fois par défaut**, trente secondes
+  entre chaque. Un seul fichier verrouillé, et c'est près d'un an
+  d'attente. Il renonce maintenant au bout de deux essais et **dit** ce qui
+  bloque ;
+- **l'application était fermée à l'étape suivante** — on remplaçait donc
+  les fichiers pendant qu'elle tournait encore. Elle est désormais fermée
+  **avant** la copie ;
+- **le fichier verrouillé avait un nom** : `pharmacie.ico`. Chaque
+  raccourci du Bureau pointait dessus *sur le partage*, et l'Explorateur le
+  garde ouvert. L'icône est maintenant copiée sur le poste, comme le
+  faisait déjà `creer-raccourci-poste.bat`.
+
+> **Un mot sur la façon dont ce correctif vous parvient.** `mettre-a-jour.bat`
+> s'excluait de sa propre copie — à raison : cmd relit un `.bat` au fil des
+> lignes, le remplacer sous ses pieds lui ferait exécuter n'importe quoi.
+> Mais il s'excluait **aussi** de la mise à jour automatique, qui est du
+> Python et ne l'exécute pas. Un bug dedans était donc **incorrigible à
+> distance** : réparé dans le dépôt, il restait indéfiniment sur le disque
+> de la pharmacie. C'est exactement ce qui s'est produit — le poste tournait
+> encore sur une version affichant « [3/4] ». `maj_auto` a désormais le
+> droit de les corriger ; chacun continue de s'exclure de sa **propre**
+> copie.
+>
+> Conséquence pratique : **cette fois-ci, remplacez les deux
+> `mettre-a-jour*.bat` à la main** dans le dossier partagé. Les suivantes se
+> feront toutes seules.
+
 Dans ce déploiement, les étapes 3 (pare-feu), 4 (IP fixe), 5 (veille) et 6
 (`planifier-maj-serveur.bat`) de la procédure serveur **ne servent à rien** :
 le port 8501 reste local à chaque poste, et aucune application ne tourne sur

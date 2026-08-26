@@ -324,6 +324,120 @@ class TestMiseAJourManuelle:
             "la question est posée avant que le mode silencieux ne sorte")
 
 
+class TestCopieQuiNeSeFigePas:
+    """« [3/5] Installation des fichiers... » et plus rien, indéfiniment.
+
+    Vu en officine, sur un poste qu'il fallait installer. Trois causes
+    empilées, dont aucune ne s'annonçait :
+
+    1. `robocopy` réessaie **un million de fois**, trente secondes entre
+       chaque, par défaut. Un seul fichier verrouillé, et c'est près d'un
+       an d'attente.
+    2. `>nul` masquait chaque tentative : l'écran restait figé sur une
+       ligne qui laissait croire à une copie en cours.
+    3. L'application était fermée à l'étape **suivante** — on remplaçait
+       donc les fichiers pendant qu'elle tournait encore.
+
+    Et le fichier verrouillé avait un nom : `pharmacie.ico`. Chaque
+    raccourci du Bureau pointait dessus **sur le partage**, et
+    l'Explorateur le garde ouvert.
+    """
+
+    MANUELS = ["mettre-a-jour.bat", "mettre-a-jour-serveur.bat"]
+
+    @pytest.mark.parametrize("nom", MANUELS)
+    def test_la_copie_renonce_au_lieu_de_reessayer_un_an(self, nom):
+        ligne = next(l for l in (RACINE / nom).read_text(encoding="ascii")
+                     .splitlines() if l.startswith("robocopy "))
+        assert "/R:" in ligne, (
+            "sans /R, robocopy reessaie 1 000 000 de fois : pres d'un an "
+            "d'attente sur un seul fichier verrouille")
+        assert "/W:" in ligne, "sans /W, trente secondes entre chaque essai"
+        essais = int(ligne.split("/R:")[1].split()[0])
+        attente = int(ligne.split("/W:")[1].split()[0])
+        assert essais * attente <= 60, (
+            f"{essais} essais x {attente} s : personne n'attend devant un "
+            f"ecran fige aussi longtemps")
+
+    @pytest.mark.parametrize("nom", MANUELS)
+    def test_l_application_est_fermee_avant_la_copie(self, nom):
+        """On ne remplace pas les fichiers d'un programme qui tourne :
+        robocopy n'y arrive pas, et réessaie."""
+        lignes = [l.strip() for l in
+                  (RACINE / nom).read_text(encoding="ascii").splitlines()]
+        fermeture = next(i for i, l in enumerate(lignes)
+                         if "Stop-Process" in l)
+        copie = next(i for i, l in enumerate(lignes)
+                     if l.startswith("robocopy "))
+        assert fermeture < copie, (
+            f"{nom} : la copie passe AVANT la fermeture — elle bute sur "
+            f"les fichiers encore ouverts")
+
+    @pytest.mark.parametrize("nom", MANUELS)
+    def test_les_etapes_restent_numerotees_dans_l_ordre(self, nom):
+        """L'écran annonce « [3/5] », « [4/5] » : deux blocs échangés sans
+        renuméroter, et le compteur repart en arrière sous les yeux de
+        quelqu'un qui attend."""
+        # Seulement ce qui S'AFFICHE : les commentaires citent les
+        # etapes, et les compter ferait echouer le test sur sa propre
+        # explication.
+        affichees = [l for l in
+                     (RACINE / nom).read_text(encoding="ascii").splitlines()
+                     if l.startswith(("echo  [", "call :dire \"["))]
+        vus = [int(t.split("/")[0]) for l in affichees
+               for t in l.split("[")[1:]
+               if len(t) > 3 and t[1] == "/" and t[0].isdigit()]
+        assert vus == sorted(vus), f"{nom} : compteur en arriere — {vus}"
+        assert vus == list(range(1, len(vus) + 1)), vus
+
+    def test_l_icone_du_bureau_ne_reste_pas_sur_le_partage(self):
+        """C'est ELLE que l'Explorateur tenait ouverte, sur chaque poste
+        équipé. Une mise à jour ne pouvait plus la remplacer."""
+        texte = (RACINE / "creer-raccourci.bat").read_text(encoding="ascii")
+        assert 'copy /y "%ICONE%" "%LOCAL_PHARMACIE%\\pharmacie.ico"' in texte
+        derniere = [l for l in texte.splitlines()
+                    if l.strip().startswith(('set "ICONE=',
+                                             'if exist "%LOCAL_PHARMACIE%'))][-1]
+        assert "%LOCAL_PHARMACIE%" in derniere, (
+            "le raccourci pointe encore sur l'icone du partage")
+
+    def test_l_echec_de_copie_nomme_la_cause_la_plus_probable(self):
+        """« Copie impossible » tout court n'apprend rien à qui doit
+        décider quoi fermer."""
+        texte = (RACINE / "mettre-a-jour.bat").read_text(encoding="ascii")
+        message = texte[texte.index("Copie des fichiers impossible"):][:600]
+        assert "encore ouvert" in message
+        assert "Rien n'a ete modifie" in message
+
+
+class TestScriptsCorrigeablesADistance:
+    """Un bug dans `mettre-a-jour.bat` était jusqu'ici incorrigible.
+
+    Il s'excluait de sa propre copie — à raison, cmd relit un .bat au fil
+    des lignes — mais AUSSI de celle de `maj_auto`, qui est du Python et
+    ne l'exécute pas. Réparé dans le dépôt, il restait indéfiniment sur
+    le disque de la pharmacie. C'est exactement ce qui s'est passé : le
+    poste tournait encore sur une version affichant « [3/4] ».
+    """
+
+    def test_maj_auto_peut_corriger_les_scripts_de_mise_a_jour(self):
+        assert "mettre-a-jour.bat" not in maj_auto.FICHIERS_PROTEGES
+        assert "mettre-a-jour-serveur.bat" not in maj_auto.FICHIERS_PROTEGES
+
+    def test_ils_continuent_de_s_exclure_de_leur_propre_copie(self):
+        """Là, c'est cmd qui relit le fichier ligne à ligne pendant qu'il
+        s'exécute : le remplacer sous ses pieds reste interdit."""
+        for nom in ("mettre-a-jour.bat", "mettre-a-jour-serveur.bat"):
+            ligne = next(l for l in (RACINE / nom).read_text(encoding="ascii")
+                         .splitlines() if l.startswith("robocopy "))
+            assert nom in ligne.split("/XF", 1)[1]
+
+    def test_aucun_fichier_de_programme_n_est_protege(self):
+        """Protéger du code, c'est se priver de pouvoir le réparer."""
+        for nom in maj_auto.FICHIERS_PROTEGES:
+            assert not nom.endswith((".bat", ".py", ".ico")), nom
+
+
 class TestIsolation:
     def test_presence_n_importe_aucun_module_du_projet(self):
         """Il est appelé par maj_auto au démarrage du poste, avant que quoi
