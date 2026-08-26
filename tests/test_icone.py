@@ -170,13 +170,28 @@ class TestPremierLancement:
         """Le témoin appartient à creer-raccourci.bat : dupliquer sa gestion
         dans chaque appelant, c'est se garantir qu'un des deux l'oublie."""
         texte = SCRIPT.read_text(encoding="utf-8", errors="replace")
-        assert ".raccourci-bureau" in texte
+        assert 'set "TEMOIN=' in texte
         for appelant in (LANCEUR, MISE_A_JOUR):
             contenu = appelant.read_text(encoding="utf-8", errors="replace")
-            assert ".raccourci-bureau" not in contenu, (
+            assert "TEMOIN" not in contenu, (
                 f"{appelant.name} ne doit pas manipuler le témoin lui-même")
 
-    def test_le_temoin_reste_local_au_poste(self):
-        """Il ne doit ni être versionné ni voyager dans une mise à jour."""
+    def test_le_temoin_est_pose_sur_le_poste_pas_dans_le_dossier(self):
+        """Le dossier de l'application peut être un partage réseau. Le
+        témoin y aurait été écrit par le PREMIER poste équipé, et tous les
+        autres auraient lu « déjà fait » devant un Bureau vide. Il vit donc
+        dans %LOCALAPPDATA%, qui appartient à la machine."""
+        texte = SCRIPT.read_text(encoding="utf-8", errors="replace")
+        ligne = next(l for l in texte.splitlines()
+                     if l.strip().startswith('set "TEMOIN='))
+        assert "%LOCALAPPDATA%" in ligne or "%LOCAL_PHARMACIE%" in ligne, ligne
+        assert "%~dp0" not in ligne, (
+            "le témoin est dans le dossier partagé : un seul poste aurait "
+            "son icône")
+
+    def test_l_ancien_temoin_reste_ignore_par_git(self):
+        """Les installations d'avant le déplacement en gardent un dans le
+        dossier : sans cette ligne, il apparaîtrait comme un fichier à
+        versionner."""
         ignore = (RACINE / ".gitignore").read_text(encoding="utf-8")
         assert ".raccourci-bureau" in ignore

@@ -1295,6 +1295,52 @@ ou copier le dossier sur le disque local.
 > [la procédure complète](#la-procédure-complète-dans-lordre) : une seule
 > mise à jour, une seule machine à surveiller.
 
+#### Quand chaque poste lance l'application depuis le partage
+
+C'est le second déploiement : le dossier vit sur le disque du serveur,
+partagé, et chaque poste y lance **son propre** Streamlit sur les **mêmes**
+fichiers. Les écritures simultanées sont couvertes depuis le début (verrou,
+écriture atomique, relecture sous verrou). Deux choses ne l'étaient pas, et
+ne se voient que dans ce déploiement précis :
+
+**Un seul poste recevait son icône.** `creer-raccourci.bat` gardait son
+témoin « icône déjà posée » **dans le dossier de l'application** — donc sur
+le partage. Le premier poste équipé l'écrivait, et tous les suivants y
+lisaient « déjà fait » devant un Bureau vide. Le témoin vit désormais dans
+`%LOCALAPPDATA%\Pharmacie\`, qui appartient à la machine.
+
+**Un poste mettait à jour sous les autres.** `maj_auto` vérifiait qu'aucune
+application ne tournait — sur `127.0.0.1`, c'est-à-dire chez elle seule. Le
+scénario, un matin ordinaire :
+
+1. le comptoir 1 ouvre l'application à 07h55 ;
+2. le comptoir 2 la lance à 08h05. Son port 8501 **à lui** est libre, donc
+   `maj_auto` se croit seul, télécharge la nouvelle version et remplace les
+   fichiers du dossier partagé ;
+3. Streamlit, chez le comptoir 1, recharge ses modules à chaud — et l'écran
+   part en erreur au milieu d'un scan.
+
+Chaque lancement dépose maintenant un **marqueur à son nom**
+(`.postes-actifs/`) et le retire en partant. La mise à jour ne touche à
+rien tant qu'il en reste un, et **nomme** les postes concernés : « Dossier
+en cours d'utilisation par : COMPTOIR-1 ». On sait à qui aller demander de
+fermer sa fenêtre, plutôt que de lire « occupé ».
+
+Le marqueur **périme au bout de 16 heures** — une journée de travail. Un
+poste éteint brutalement laisse le sien : sans péremption, une seule
+coupure de courant figerait la pharmacie sur sa version pour toujours, et
+personne ne saurait pourquoi.
+
+La conséquence pratique est la bonne : **la mise à jour se fait au premier
+lancement du matin**, quand personne d'autre n'est encore ouvert. C'est
+exactement le moment où elle est sans danger.
+
+> ⚠️ Cela ne couvre pas la mise à jour **manuelle**. Lancer
+> `mettre-a-jour.bat` à 10 heures depuis un poste remplace les fichiers du
+> partage pendant que les autres travaillent : il y a là un humain qui
+> décide, et rien ne l'arrête. Faites-le avant l'ouverture ou après la
+> fermeture.
+
 ## ⬆️ Le bouton d'installation (le chemin normal)
 
 Quand une nouvelle version est publiée, le bandeau l'annonce et un encadré
@@ -1411,6 +1457,7 @@ pharmacie-ruptures/
 ├── stock_ferme_produits.csv  # produits mémorisés du stock fermé (CIP → nom)
 ├── requirements.txt          # dépendances Python
 ├── maj_auto.py              # mise à jour automatique (testable, sans Streamlit)
+├── presence.py              # qui utilise le dossier partagé en ce moment
 ├── maj-auto-activer.bat     # active la vérification au démarrage de Windows
 ├── maj-auto-desactiver.bat  # la désactive
 ├── lancer.bat                 # double-clic Windows

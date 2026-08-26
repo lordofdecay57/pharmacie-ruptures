@@ -92,7 +92,15 @@ echo.
 REM  Ecoute sur toutes les cartes reseau : sans cela, seule cette
 REM  machine pourrait ouvrir l'application. Port fixe, pour que
 REM  l'adresse donnee aux postes reste vraie d'un jour a l'autre.
+REM  Dossier partage : ce poste annonce qu'il travaille sur ces
+REM  fichiers, et le retire en partant. Sans cela, un poste qui
+REM  demarre a 08h05 remplacerait le code sous la session du
+REM  comptoir voisin, en pleine dispensation.
+%PY% presence.py --entrer
 %PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+REM  La place est rendue : la mise a jour de demain matin pourra
+REM  se faire des que tout le monde aura ferme.
+%PY% presence.py --sortir
 echo.
 echo  Le serveur s'est arrete. Les postes ne peuvent plus s'y connecter.
 pause

@@ -37,7 +37,12 @@ set "APP=%~dp0"
 set "CIBLE=%~dp0lancer.bat"
 set "ICONE=%~dp0pharmacie.ico"
 set "NOM=Pharmacie.lnk"
-set "TEMOIN=%~dp0.raccourci-bureau"
+REM  Le temoin est LOCAL au poste, jamais dans le dossier de
+REM  l'application : celui-ci peut etre un partage reseau, et le
+REM  premier poste equipe priverait alors TOUS les autres de leur
+REM  icone - ils liraient "deja fait" devant un Bureau vide.
+set "LOCAL_PHARMACIE=%LOCALAPPDATA%\Pharmacie"
+set "TEMOIN=%LOCAL_PHARMACIE%\raccourci-bureau.txt"
 
 REM  Temoin : il contient la version pour laquelle l'icone a ete posee.
 REM   - meme version : on ne fait rien, une icone supprimee volontairement
@@ -102,6 +107,7 @@ echo  Icone posee sur le Bureau : %BUREAU%\Pharmacie.url
 :pose
 REM  Le temoin n'est ecrit qu'en cas de succes : une tentative ratee sera
 REM  refaite au lancement suivant.
+if not exist "%LOCAL_PHARMACIE%" mkdir "%LOCAL_PHARMACIE%" >nul 2>nul
 > "%TEMOIN%" echo %VER%
 if not defined SILENCE (
     echo.

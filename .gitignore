@@ -13,8 +13,11 @@ stock_ferme_produits.csv
 base_medicaments.csv
 # Journal de la mise a jour automatique
 maj_auto.log
-# Temoin « icone du Bureau deja creee » (propre a chaque poste)
+# Temoin « icone du Bureau deja creee ». Il vit desormais dans
+# %LOCALAPPDATA% ; cette ligne couvre les installations d'avant.
 .raccourci-bureau
+# Qui utilise le dossier partage en ce moment (un fichier par poste)
+.postes-actifs/
 
 # Application web (Next.js / Supabase)
 web/node_modules/
