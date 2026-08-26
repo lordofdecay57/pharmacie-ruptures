@@ -170,7 +170,8 @@ ETAPES = [
       "mettant en favori.",
       "Il trouve l'adresse tout seul si le dossier du serveur est partagé. "
       "Sinon il la demande : tapez celle notée à l'étape 2.",
-      "Une icône « Pharmacie » apparaît sur le Bureau. Double-cliquez pour "
+      "Une icône « Pilotage pharmacie » apparaît sur le Bureau. Double-"
+      "cliquez pour "
       "vérifier TOUT DE SUITE que la page s'ouvre depuis ce poste."],
      [("attention", "La page ne s'ouvre pas ? C'est presque toujours "
                     "l'étape 3 (le pare-feu) ou le profil réseau resté sur "
@@ -242,7 +243,8 @@ DEPANNAGE = [
     ("L'adresse du serveur a changé",
      "Rien n'est perdu : l'icône d'un poste est un simple fichier texte. "
      "Relancez creer-raccourci-poste.bat avec la nouvelle adresse, ou ouvrez "
-     "Pharmacie.url sur le Bureau avec le Bloc-notes et corrigez la ligne "
+     "« Pilotage pharmacie.url » sur le Bureau avec le Bloc-notes et "
+                    "corrigez la ligne "
      "URL=."),
     ("« Le fichier est ouvert dans un autre programme »",
      "Un fichier de données est ouvert dans Excel sur le serveur. Fermez "

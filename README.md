@@ -827,7 +827,7 @@ pip install -r requirements.txt
 
 ## Lancement
 
-- **Windows** : double-cliquez sur l'icône 💊 **Pharmacie** du Bureau. Elle
+- **Windows** : double-cliquez sur l'icône 💊 **Pilotage pharmacie** du Bureau. Elle
   est créée automatiquement au premier lancement (voir ci-dessous) ; sinon,
   double-cliquez sur `lancer.bat` dans le dossier.
 - **Mac** : double-cliquez sur `lancer.command` (la première fois : clic droit
@@ -1087,7 +1087,7 @@ repassez sur les postes avec `creer-raccourci-poste.bat` si elle a changé.
 > Si l'adresse change un jour malgré tout, rien n'est perdu : les icônes
 > des postes sont de simples fichiers texte. Relancez
 > `creer-raccourci-poste.bat` avec la nouvelle adresse, ou ouvrez
-> `Pharmacie.url` du Bureau avec le Bloc-notes et corrigez la ligne
+> `Pilotage pharmacie.url` du Bureau avec le Bloc-notes et corrigez la ligne
 > `URL=`.
 
 #### Empêcher la mise en veille
@@ -1305,6 +1305,26 @@ Si Windows ne peut vraiment pas monter de lecteur (plus une seule lettre
 libre), les scripts le **disent** au lieu de continuer ailleurs, et
 proposent les deux issues : connecter le partage à une lettre de lecteur,
 ou copier le dossier sur le disque local.
+
+#### Lequel choisir, en deux phrases
+
+**Tout sur le serveur, une icône sur les postes** — c'est le montage
+recommandé, et celui que décrit
+[la procédure complète](#la-procédure-complète-dans-lordre) :
+
+| | |
+|---|---|
+| **Sur le serveur** | Python + le dossier. On lance `lancer-serveur.bat`, et **on laisse la fenêtre noire ouverte** : elle *est* l'application. Une session Windows doit rester ouverte. |
+| **Sur chaque poste** | `creer-raccourci-poste.bat`, une fois. **Rien d'autre** — ni Python, ni le programme, ni données. L'icône n'est qu'une adresse. |
+
+Ce que cela demande en plus : le port 8501 ouvert, une IP fixe, pas de mise
+en veille, et `planifier-maj-serveur.bat` pour que le serveur se mette à
+jour. Ce que cela évite : Python sur cinq postes, cinq installations à
+maintenir, cinq fois plus d'occasions que quelque chose diverge.
+
+**L'autre montage** — le dossier partagé, chaque poste lance l'application
+lui-même — demande Python partout, mais aucune machine à garder allumée.
+Les deux fonctionnent ; ce qui ne fonctionne pas, c'est de les mélanger.
 
 > **Deux déploiements possibles, à ne pas mélanger.** Soit le serveur fait
 > tourner l'application (`lancer-serveur.bat` **sur le serveur**) et les
@@ -1572,7 +1592,7 @@ pharmacie-ruptures/
 ├── planifier-ouverture-poste.bat # ouvre l'utilitaire chaque matin à 08:00
 ├── ouvrir-le-matin.bat      # ce que cette tâche lance (une fois par jour)
 ├── verifier-installation.bat # diagnostic d'un poste : il regarde, il ne touche à rien
-├── creer-raccourci.bat       # pose l'icône 💊 « Pharmacie » sur le Bureau
+├── creer-raccourci.bat       # pose l'icône 💊 « Pilotage pharmacie » sur le Bureau
 ├── raccourci.py             # la même pose, appelable depuis l'application
 ├── pharmacie.ico            # icône du raccourci (16 → 256 px)
 ├── pharmacie.png            # même visuel en 1024 px (Mac, documentation)

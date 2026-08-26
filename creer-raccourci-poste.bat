@@ -3,7 +3,7 @@ REM ============================================================
 REM  ICONE SUR UN POSTE DE LA PHARMACIE
 REM
 REM  A lancer UNE FOIS sur chaque poste. Il pose sur le Bureau
-REM  une icone "Pharmacie" qui ouvre l'utilitaire tournant sur
+REM  une icone "Pilotage pharmacie" qui ouvre l'utilitaire
 REM  le SERVEUR.
 REM
 REM  Rien n'est installe sur le poste : ni Python, ni
@@ -14,7 +14,7 @@ REM    creer-raccourci-poste.bat                (demande l'adresse)
 REM    creer-raccourci-poste.bat 192.168.1.10   (adresse donnee)
 REM ============================================================
 setlocal
-title Icone Pharmacie - poste de travail
+title Icone Pilotage pharmacie - poste de travail
 
 REM  1. L'adresse donnee en parametre l'emporte.
 REM  2. Sinon celle laissee par le serveur a cote de ce script
@@ -71,15 +71,28 @@ if exist "%~dp0pharmacie.ico" (
 REM  Un raccourci Internet : du texte brut, que cmd sait ecrire seul.
 REM  Windows l'ouvre dans le navigateur par defaut, avec notre icone.
 REM  Aucun PowerShell requis - certains postes d'officine l'interdisent.
-set "LIEN=%BUREAU%\Pharmacie.url"
+REM  Le MEME nom que creer-raccourci.bat et raccourci.py : trois
+REM  chemins pour un seul geste. S'ils divergent, un poste finit
+REM  avec deux icones et personne ne sait laquelle ouvre quoi.
+set "LIEN=%BUREAU%\Pilotage pharmacie.url"
 > "%LIEN%" echo [InternetShortcut]
 >> "%LIEN%" echo URL=%ADRESSE%
 if defined ICONE >> "%LIEN%" echo IconFile=%ICONE%
 if defined ICONE >> "%LIEN%" echo IconIndex=0
 if not exist "%LIEN%" goto echec
 
+REM  L'ancienne icone "Pharmacie" est retiree : deux icones cote a
+REM  cote, dont une qui pointe peut-etre sur une installation
+REM  supprimee, c'est la garantie qu'on cliquera un jour la mauvaise.
+if exist "%BUREAU%\Pharmacie.url" del /q "%BUREAU%\Pharmacie.url" >nul 2>nul
+if exist "%BUREAU%\Pharmacie.lnk" del /q "%BUREAU%\Pharmacie.lnk" >nul 2>nul
+REM  Windows garde les icones en cache : sans ce rafraichissement, le
+REM  Bureau affiche encore l'ancien dessin, ou un carre blanc. La
+REM  commande n'existe pas partout - son echec est sans consequence.
+ie4uinit.exe -show >nul 2>nul
+
 echo.
-echo  C'est fait. Double-cliquez sur l'icone "Pharmacie" du Bureau.
+echo  C'est fait. Double-cliquez sur l'icone "Pilotage pharmacie".
 echo.
 echo  Si l'application ne s'ouvre pas :
 echo    - verifiez que la fenetre noire du serveur est toujours ouverte ;

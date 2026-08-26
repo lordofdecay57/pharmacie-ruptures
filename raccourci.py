@@ -19,11 +19,21 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Sequence
 
-#: Nom de l'icône telle qu'elle apparaît sur le Bureau.
-NOM_RACCOURCI = "Pharmacie.lnk"
+#: Nom de l'icône telle qu'elle apparaît sur le Bureau. Le MÊME nom et
+#: la MÊME image partout : `creer-raccourci.bat` sur un poste autonome,
+#: `creer-raccourci-poste.bat` sur un poste relié au serveur, et ce
+#: module depuis l'application. Trois chemins pour un seul geste — s'ils
+#: divergent, un poste finit avec deux icônes et personne ne sait
+#: laquelle ouvre quoi.
+NOM_RACCOURCI = "Pilotage pharmacie.lnk"
 #: Repli lorsque PowerShell est indisponible : un raccourci Internet, qui
 #: n'est que du texte et se laisse écrire sans le moindre outil.
-NOM_REPLI = "Pharmacie.url"
+NOM_REPLI = "Pilotage pharmacie.url"
+
+#: Les noms d'avant le renommage. On les efface en posant la nouvelle
+#: icône : les laisser, c'est deux icônes côte à côte sur le Bureau,
+#: dont une qui pointe peut-être sur une installation supprimée.
+ANCIENS_NOMS = ("Pharmacie.lnk", "Pharmacie.url")
 
 NOM_LANCEUR = "lancer.bat"
 NOM_ICONE = "pharmacie.ico"
@@ -87,10 +97,29 @@ def raccourci_existant(accueil: Optional[Path] = None,
     une aide, c'est du bruit.
     """
     for dossier in dossiers_bureau(accueil, environnement):
-        for nom in (NOM_RACCOURCI, NOM_REPLI):
+        # Les anciens noms comptent : quelqu'un qui a déjà son icône ne
+        # doit pas se voir proposer d'en poser une seconde.
+        for nom in (NOM_RACCOURCI, NOM_REPLI) + ANCIENS_NOMS:
             if (dossier / nom).is_file():
                 return dossier / nom
     return None
+
+
+def effacer_anciens(bureau_choisi: Path) -> int:
+    """Retire les icônes portant l'ancien nom. Ne lève jamais.
+
+    Appelé juste après avoir posé la nouvelle : deux icônes côte à côte,
+    dont une qui pointe peut-être sur une installation supprimée, c'est
+    la garantie qu'on cliquera un jour la mauvaise.
+    """
+    efface = 0
+    for nom in ANCIENS_NOMS:
+        try:
+            (Path(bureau_choisi) / nom).unlink()
+            efface += 1
+        except OSError:
+            continue
+    return efface
 
 
 def commande_powershell(dossier: Path, cible_bureau: Path) -> list:
@@ -170,7 +199,9 @@ def creer(dossier: Path, accueil: Optional[Path] = None,
     except Exception:                       # PowerShell absent ou interdit
         pass
     if lien.is_file():
-        return True, f"Icône « Pharmacie » créée sur le Bureau ({lien})."
+        effacer_anciens(destination)
+        return True, (f"Icône « {NOM_RACCOURCI[:-4]} » créée sur le Bureau "
+                      f"({lien}).")
 
     # Repli : certains postes d'officine interdisent PowerShell par
     # stratégie de groupe. Le .url ne demande rien d'autre qu'écrire un
@@ -183,4 +214,6 @@ def creer(dossier: Path, accueil: Optional[Path] = None,
                        f"l'icône à la main : clic droit sur « {NOM_LANCEUR} », "
                        "puis « Envoyer vers » ▸ « Bureau (créer un "
                        "raccourci) ».")
-    return True, f"Icône « Pharmacie » créée sur le Bureau ({replacement})."
+    effacer_anciens(destination)
+    return True, (f"Icône « {NOM_REPLI[:-4]} » créée sur le Bureau "
+                  f"({replacement}).")

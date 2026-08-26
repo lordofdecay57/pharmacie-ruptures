@@ -423,7 +423,7 @@ apercoit a l'inventaire.
 - L'ADRESSE DU SERVEUR A CHANGE
   Rien n'est perdu : l'icone d'un poste est un simple fichier
   texte. Relancez creer-raccourci-poste.bat avec la nouvelle
-  adresse, ou ouvrez "Pharmacie.url" sur le Bureau avec le
+  adresse, ou ouvrez "Pilotage pharmacie.url" sur le Bureau avec
   Bloc-notes et corrigez la ligne "URL=".
 
 - "IMPOSSIBLE D'ENREGISTRER : LE FICHIER EST OUVERT DANS UN

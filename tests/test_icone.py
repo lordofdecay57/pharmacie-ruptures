@@ -19,6 +19,13 @@ APERCU = RACINE / "pharmacie.png"
 SCRIPT = RACINE / "creer-raccourci.bat"
 LANCEUR = RACINE / "lancer.bat"
 MISE_A_JOUR = RACINE / "mettre-a-jour.bat"
+POSTE = RACINE / "creer-raccourci-poste.bat"
+
+#: Le nom de l'icône, tel qu'il doit apparaître sur le Bureau. Un seul
+#: nom pour les TROIS chemins qui la posent.
+NOM_ICONE = "Pilotage pharmacie"
+#: Le nom d'avant, à effacer en posant le nouveau.
+ANCIEN_NOM = "Pharmacie"
 
 #: Doit rester identique à ``outils/creer_icone.py``.
 TAILLES_ATTENDUES = {16, 24, 32, 48, 64, 128, 256}
@@ -195,3 +202,128 @@ class TestPremierLancement:
         versionner."""
         ignore = (RACINE / ".gitignore").read_text(encoding="utf-8")
         assert ".raccourci-bureau" in ignore
+
+
+class TestUnSeulNomPartout:
+    """Trois chemins posent l'icône ; ils doivent poser LA MÊME.
+
+    `creer-raccourci.bat` sur un poste autonome, `creer-raccourci-poste.bat`
+    sur un poste relié au serveur, `raccourci.py` depuis l'application.
+    S'ils divergent, un poste finit avec deux icônes sur son Bureau et
+    personne ne sait laquelle ouvre quoi — ni laquelle pointe encore sur
+    une installation supprimée.
+    """
+
+    def test_les_deux_scripts_posent_le_meme_nom(self):
+        for chemin in (SCRIPT, POSTE):
+            texte = chemin.read_text(encoding="ascii")
+            assert NOM_ICONE in texte, f"{chemin.name} pose un autre nom"
+
+    def test_le_module_python_pose_le_meme_nom(self):
+        import raccourci
+        assert raccourci.NOM_RACCOURCI == f"{NOM_ICONE}.lnk"
+        assert raccourci.NOM_REPLI == f"{NOM_ICONE}.url"
+
+    def test_plus_aucun_ancien_nom_n_est_POSE(self):
+        """Il ne doit subsister que dans les lignes qui l'EFFACENT."""
+        for chemin in (SCRIPT, POSTE):
+            for ligne in chemin.read_text(encoding="ascii").splitlines():
+                nu = ligne.strip()
+                if nu.startswith("REM") or f"{ANCIEN_NOM}.lnk" not in nu \
+                        and f"{ANCIEN_NOM}.url" not in nu:
+                    continue
+                assert nu.startswith(("if exist", "del ")) or "del /q" in nu, (
+                    f"{chemin.name} pose encore l'ancien nom : {ligne}")
+
+
+class TestLAncienneIconeEstRetiree:
+    """Deux icônes côte à côte, c'est une de trop.
+
+    Celle d'avant pointe peut-être sur une installation supprimée : la
+    laisser, c'est la garantie qu'on cliquera un jour la mauvaise, et
+    qu'on scannera dans un stock que personne d'autre ne voit.
+    """
+
+    @pytest.mark.parametrize("chemin", [SCRIPT, POSTE],
+                             ids=lambda p: p.name)
+    def test_le_script_efface_l_ancienne(self, chemin):
+        texte = chemin.read_text(encoding="ascii")
+        assert f'del /q "%~1\\{ANCIEN_NOM}.lnk"' in texte \
+            or f'del /q "%BUREAU%\\{ANCIEN_NOM}.lnk"' in texte, chemin.name
+        assert f"{ANCIEN_NOM}.url" in texte
+
+    @pytest.mark.parametrize("chemin", [SCRIPT, POSTE],
+                             ids=lambda p: p.name)
+    def test_le_cache_d_icones_est_rafraichi(self, chemin):
+        """Windows garde les icônes en cache : sans ce rafraîchissement,
+        le Bureau affiche encore l'ancien dessin, ou un carré blanc."""
+        assert "ie4uinit.exe -show" in chemin.read_text(encoding="ascii")
+
+    def test_le_module_python_efface_aussi(self):
+        import raccourci
+        assert raccourci.ANCIENS_NOMS
+        assert hasattr(raccourci, "effacer_anciens")
+
+    def test_le_module_python_l_efface_apres_avoir_pose(self):
+        """Un module qui SAIT effacer mais ne le fait pas laisse les deux
+        icônes en place — le défaut exact qu'on veut éviter."""
+        import inspect
+        import raccourci
+        corps = inspect.getsource(raccourci.creer)
+        assert corps.count("effacer_anciens(") == 2, (
+            "les DEUX chemins — le .lnk et le repli .url — doivent "
+            "effacer l'ancienne icône")
+
+    def test_effacer_anciens_ne_leve_jamais(self, tmp_path):
+        """Appelé après une pose réussie : une erreur ici transformerait
+        un succès en exception, devant quelqu'un dont l'icône est là."""
+        import raccourci
+        assert raccourci.effacer_anciens(tmp_path) == 0
+        (tmp_path / "Pharmacie.lnk").write_text("x", encoding="utf-8")
+        assert raccourci.effacer_anciens(tmp_path) == 1
+        assert not (tmp_path / "Pharmacie.lnk").exists()
+
+    def test_une_ancienne_icone_compte_comme_presente(self, tmp_path):
+        """Quelqu'un qui a déjà son icône ne doit pas se voir proposer
+        d'en poser une seconde sous prétexte qu'elle a changé de nom."""
+        import raccourci
+        bureau = tmp_path / "Desktop"
+        bureau.mkdir()
+        (bureau / "Pharmacie.lnk").write_text("x", encoding="utf-8")
+        trouve = raccourci.raccourci_existant(tmp_path, {})
+        assert trouve == bureau / "Pharmacie.lnk"
+
+
+class TestLIconeQuiNApparaitPas:
+    """« Sur certains postes l'icône n'apparaît pas. »
+
+    Le témoin dit que l'icône a été POSÉE, pas qu'elle EXISTE. Une pose
+    ratée — PowerShell interdit par stratégie de groupe, Bureau redirigé
+    vers OneDrive — l'écrivait quand même, et `/sipremier` ne réessayait
+    alors PLUS JAMAIS : le Bureau restait vide sans que rien ne le
+    signale, lancement après lancement.
+    """
+
+    def test_le_bureau_est_regarde_avant_de_renoncer(self):
+        texte = SCRIPT.read_text(encoding="ascii")
+        assert "call :chercher_icone" in texte, (
+            "le témoin est cru sur parole : une pose ratée ne sera "
+            "jamais réessayée")
+        assert "if defined DEJA_LA exit /b 0" in texte
+
+    def test_les_deux_emplacements_du_bureau_sont_regardes(self):
+        """Le Bureau est souvent redirigé vers OneDrive sur les postes
+        d'entreprise : le chemin en dur pointe alors sur un dossier vide
+        que personne ne regarde."""
+        texte = SCRIPT.read_text(encoding="ascii")
+        bloc = texte[texte.index("\n:chercher_icone\n"):]
+        assert "%USERPROFILE%\\Desktop" in bloc
+        assert "%OneDrive%\\Desktop" in bloc
+
+    def test_les_deux_formes_sont_regardees(self):
+        """La pose normale fait un .lnk, le repli un .url : ne chercher
+        que le premier ferait reposer l'icône à chaque lancement sur les
+        postes où PowerShell est interdit."""
+        texte = SCRIPT.read_text(encoding="ascii")
+        bloc = texte[texte.index("\n:voir\n"):]
+        assert "%NOM%" in bloc and "%NOM_URL%" in bloc
