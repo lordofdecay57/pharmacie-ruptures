@@ -127,7 +127,15 @@ echo  Pour arreter l'application : fermez cette fenetre ou appuyez sur Ctrl+C.
 echo.
 REM  Port fixe : si 8501 est occupe, Streamlit le DIT au lieu de basculer en
 REM  silence sur un autre port.
+REM  Dossier partage : ce poste annonce qu'il travaille sur ces
+REM  fichiers, et le retire en partant. Sans cela, un poste qui
+REM  demarre a 08h05 remplacerait le code sous la session du
+REM  comptoir voisin, en pleine dispensation.
+%PY% presence.py --entrer
 %PY% -m streamlit run app.py --server.port 8501
+REM  La place est rendue : la mise a jour de demain matin pourra
+REM  se faire des que tout le monde aura ferme.
+%PY% presence.py --sortir
 pause
 exit /b 0
 

@@ -51,7 +51,15 @@ if errorlevel 10 (
 REM  Port fixe : si 8501 est deja occupe par une autre instance,
 REM  Streamlit le DIT au lieu de basculer en silence sur 8502 -
 REM  on regarderait sinon l'ancienne version sans le savoir.
+REM  Dossier partage : ce poste annonce qu'il travaille sur ces
+REM  fichiers, et le retire en partant. Sans cela, un poste qui
+REM  demarre a 08h05 remplacerait le code sous la session du
+REM  comptoir voisin, en pleine dispensation.
+%PY% presence.py --entrer
 %PY% -m streamlit run app.py --server.port 8501
+REM  La place est rendue : la mise a jour de demain matin pourra
+REM  se faire des que tout le monde aura ferme.
+%PY% presence.py --sortir
 pause
 exit /b 0
 

@@ -10,7 +10,11 @@ Deux règles de prudence guident tout le module :
 1. **ne jamais toucher aux fichiers pendant que l'application tourne** —
    remplacer un module sous un Streamlit en cours de route casserait la
    session en plein comptoir. Si le port de l'application répond, on ne
-   fait rien et on ressort ;
+   fait rien et on ressort. Sur un dossier partagé, ce test ne suffit
+   pas : il ne regarde que ``127.0.0.1``, alors que les comptoirs
+   voisins lancent leur propre Streamlit sur les mêmes fichiers. Les
+   marqueurs de ``presence.py`` disent qui d'autre est en train de
+   travailler ;
 2. **ne jamais bloquer** — poste hors ligne, réseau filtré, archive
    illisible : la mise à jour renonce en silence. Elle n'a pas le droit
    d'empêcher l'application de démarrer.
@@ -34,6 +38,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+import presence
 
 _journal = logging.getLogger("pharmacie.maj_auto")
 
@@ -181,6 +187,18 @@ def executer(dossier: Path, forcer: bool = False,
         return (APPLICATION_EN_COURS,
                 "Application ouverte — mise à jour reportée pour ne pas "
                 "interrompre la session en cours.")
+
+    # Dossier partagé : les autres comptoirs lancent leur propre Streamlit
+    # sur CES fichiers. Le test du port ci-dessus ne les voit pas — il
+    # n'interroge que cette machine. Les nommer plutôt que dire « occupé »
+    # : le lendemain, on saura quel poste était resté ouvert.
+    occupes = presence.postes_actifs(dossier)
+    if occupes:
+        return (APPLICATION_EN_COURS,
+                "Dossier en cours d'utilisation par : "
+                + ", ".join(occupes)
+                + " — mise à jour reportée pour ne pas interrompre leur "
+                  "session.")
 
     publiee = version_publiee(delai_s)
     if not publiee:

@@ -134,7 +134,15 @@ if defined SILENCE goto detache
 REM  Double-clic : l'application vit dans CETTE fenetre, comme avec
 REM  lancer-serveur.bat. La fermer arrete le serveur - c'est la regle
 REM  que la pharmacie connait deja, on ne la change pas.
+REM  Dossier partage : ce poste annonce qu'il travaille sur ces
+REM  fichiers, et le retire en partant. Sans cela, un poste qui
+REM  demarre a 08h05 remplacerait le code sous la session du
+REM  comptoir voisin, en pleine dispensation.
+%PY% presence.py --entrer
 %PY% -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+REM  La place est rendue : la mise a jour de demain matin pourra
+REM  se faire des que tout le monde aura ferme.
+%PY% presence.py --sortir
 call :dire "Le serveur s'est arrete. Les postes ne peuvent plus s'y connecter."
 pause
 exit /b 0
@@ -147,6 +155,10 @@ REM  premier plan tuerait donc le serveur tous les trois jours, en pleine
 REM  journee, sans que rien ne l'explique.
 REM  "start" lui donne son propre processus : la tache se termine en
 REM  quelques secondes, l'application reste.
+REM  Pas de marqueur de presence ici : cette instance vit indefiniment
+REM  et ne rendrait jamais sa place. Elle n'en a pas besoin - sur un
+REM  serveur, la mise a jour passe par CE script, qui ne consulte pas
+REM  les marqueurs, et non par maj_auto.py.
 REM  L'enfant monte SON PROPRE lecteur : il herite du repertoire
 REM  courant, mais pas du montage temporaire qui le rend valide.
 REM  Ce montage appartient a cette fenetre-ci, qui se termine
