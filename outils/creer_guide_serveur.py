@@ -55,7 +55,7 @@ ETAPES = [
       "installez le serveur avec le poste le plus complet, et demandez la "
       "fusion des autres — elles ne peuvent pas être recopiées les unes sur "
       "les autres."],
-     [("danger", "NE SUPPRIMEZ RIEN sur les postes avant l'étape 8.")]),
+     [("danger", "NE SUPPRIMEZ RIEN sur les postes avant l'étape 9.")]),
 
     ("1", "Installer Python et le dossier",
      "Tout vit sur le serveur : c'est le seul ordinateur où l'on installe "
@@ -176,8 +176,32 @@ ETAPES = [
                     "l'étape 3 (le pare-feu) ou le profil réseau resté sur "
                     "« Public ».")]),
 
-    ("8", "Retirer les anciennes installations",
-     "À faire seulement quand les étapes 1 à 7 fonctionnent, et quand vous "
+    ("8", "Sur chaque poste : l'ouverture du matin",
+     "L'écran du matin ne vaut que s'il est lu AVANT que la journée "
+     "commence. Compter sur quelqu'un pour cliquer une icône à 8 heures, "
+     "c'est compter sur le seul moment où personne n'a le temps.",
+     ["Sur chaque poste, UNE SEULE FOIS et au même endroit qu'à l'étape 7, "
+      "double-cliquez sur planifier-ouverture-poste.bat.",
+      "L'utilitaire s'ouvrira tous les jours à 08:00. Pour une autre heure : "
+      "planifier-ouverture-poste.bat 07:45. Pour retirer la tâche : "
+      "planifier-ouverture-poste.bat /supprimer.",
+      "Le script affiche le fuseau horaire du poste ET l'heure qu'il est. "
+      "Si l'heure affichée est la bonne, il n'y a rien à faire.",
+      "Il n'ouvre l'utilitaire qu'UNE FOIS par jour. Poste allumé en "
+      "retard ? La tâche repasse tous les quarts d'heure pendant quatre "
+      "heures, puis renonce.",
+      "Si le serveur n'est pas encore démarré à 08:00, rien ne s'ouvre et "
+      "la tâche réessaie : pas de page d'erreur au réveil."],
+     [("attention", "Windows ne connaît pas « l'heure de Nouméa » : il ne "
+                    "connaît que le fuseau réglé sur la machine. Celui de "
+                    "la Nouvelle-Calédonie s'appelle « Central Pacific "
+                    "Standard Time » (UTC+11)."),
+      ("attention", "À REFAIRE SUR CHAQUE POSTE : une tâche n'existe que "
+                    "sur la machine où on la crée, il n'y a aucun réglage "
+                    "central.")]),
+
+    ("9", "Retirer les anciennes installations",
+     "À faire seulement quand les étapes 1 à 8 fonctionnent, et quand vous "
      "avez vérifié que les données récupérées sont bien visibles dans "
      "l'application du serveur.",
      ["Supprimez le dossier « pharmacie-ruptures » du poste.",

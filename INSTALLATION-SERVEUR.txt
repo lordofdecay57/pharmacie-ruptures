@@ -66,7 +66,7 @@ Tous ne seront pas forcement presents : copiez ceux qui le sont.
     Gardez les cles USB de cote, installez le serveur avec le
     poste le plus complet, et demandez la fusion des autres.
 
-NE SUPPRIMEZ RIEN sur les postes avant l'ETAPE 8.
+NE SUPPRIMEZ RIEN sur les postes avant l'ETAPE 9.
 
 
 ===============================================================
@@ -305,10 +305,59 @@ pare-feu) ou le profil reseau "Public".
 
 
 ---------------------------------------------------------------
-ETAPE 8 - Retirer les anciennes installations
+ETAPE 8 - Ouvrir l'utilitaire tout seul chaque matin
 ---------------------------------------------------------------
 
-A faire seulement quand les ETAPES 1 a 7 fonctionnent, et quand
+Facultatif, mais c'est le geste qui fait LIRE l'ecran du matin
+(peremptions, commandes a facturer, commandes a passer). Compter
+sur quelqu'un pour cliquer une icone a 8 heures, c'est compter
+sur le seul moment ou personne n'a le temps.
+
+Sur chaque poste, UNE SEULE FOIS, au meme endroit qu'a
+l'ETAPE 7, double-cliquez sur :
+
+       planifier-ouverture-poste.bat
+
+Il ouvre l'utilitaire tous les jours a 08:00. Pour une autre
+heure, lancez-le depuis une invite de commandes avec l'heure en
+parametre :
+
+       planifier-ouverture-poste.bat 07:45
+
+Pour retirer la tache :
+
+       planifier-ouverture-poste.bat /supprimer
+
+ATTENTION AU FUSEAU HORAIRE. Windows ne connait pas "l'heure de
+Noumea" : il ne connait que le fuseau regle sur la machine. Le
+script affiche donc ce fuseau ET l'heure qu'il est. Si l'heure
+affichee est la bonne, il n'y a rien a faire. Sinon, corrigez le
+fuseau dans les reglages de Windows (Heure et langue) - le
+fuseau de la Nouvelle-Caledonie s'appelle "Central Pacific
+Standard Time".
+
+A SAVOIR :
+  - l'utilitaire ne s'ouvre qu'UNE FOIS par jour. Si vous fermez
+    la fenetre a 10 h, elle ne revient pas toute seule : passez
+    par l'icone du Bureau. Le lendemain matin, elle revient ;
+  - poste allume en retard ? La tache repasse tous les quarts
+    d'heure pendant quatre heures, puis renonce ;
+  - la session Windows doit etre OUVERTE a l'heure dite. Ecran
+    verrouille, c'est bien : la page attend derriere le verrou.
+    Session fermee, non ;
+  - si le serveur n'est pas encore demarre a 08:00, rien ne
+    s'ouvre et la tache reessaie : vous n'aurez pas de page
+    d'erreur.
+
+A REFAIRE SUR CHAQUE POSTE : Windows ne connait que les taches
+de la machine ou on les cree. Il n'y a aucun reglage central.
+
+
+---------------------------------------------------------------
+ETAPE 9 - Retirer les anciennes installations
+---------------------------------------------------------------
+
+A faire seulement quand les ETAPES 1 a 8 fonctionnent, et quand
 vous avez verifie que les donnees recuperees sont bien visibles
 dans l'application du serveur.
 

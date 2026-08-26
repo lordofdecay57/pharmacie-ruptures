@@ -17,6 +17,9 @@ SERVEUR = RACINE / "lancer-serveur.bat"
 POSTE = RACINE / "creer-raccourci-poste.bat"
 MAJ_SERVEUR = RACINE / "mettre-a-jour-serveur.bat"
 PLANIFIER = RACINE / "planifier-maj-serveur.bat"
+#: L'ouverture automatique du matin : posée sur chaque poste, à la même
+#: visite que l'icône du Bureau.
+OUVERTURE = RACINE / "planifier-ouverture-poste.bat"
 README = RACINE / "README.md"
 #: La procédure imprimable, en texte brut : elle s'ouvre au Bloc-notes,
 #: se pose à côté du serveur, et ne suppose pas de savoir lire un Markdown.
@@ -26,7 +29,8 @@ CONSIGNE = RACINE / "INSTALLATION-SERVEUR.txt"
 GUIDE = RACINE / "Guide-installation-serveur.pdf"
 
 #: Tous les scripts d'installation serveur, pour les contrôles communs.
-SCRIPTS = [SERVEUR, POSTE, MAJ_SERVEUR, PLANIFIER]
+SCRIPTS = [SERVEUR, POSTE, MAJ_SERVEUR, PLANIFIER, OUVERTURE,
+           RACINE / "ouvrir-le-matin.bat"]
 
 PORT = "8501"
 
@@ -327,16 +331,16 @@ class TestConsigneImprimable:
         avant = _phrase().split("netsh advfirewall firewall add rule", 1)[0]
         assert "UNE SEULE LIGNE" in avant
 
-    def test_les_huit_etapes_y_sont_toutes(self):
+    def test_les_neuf_etapes_y_sont_toutes(self):
         texte = _phrase()
-        for numero in range(1, 9):
+        for numero in range(1, 10):
             assert f"ETAPE {numero} " in texte, f"ETAPE {numero} manquante"
 
     def test_elle_nomme_les_scripts_reellement_livres(self):
         """Une consigne qui nomme un fichier absent du dossier envoie
         chercher ce qui n'existe pas."""
         texte = _phrase()
-        for script in (SERVEUR, POSTE, PLANIFIER):
+        for script in (SERVEUR, POSTE, PLANIFIER, OUVERTURE):
             assert script.name in texte, script.name
 
     def test_la_recuperation_des_donnees_vient_en_premier(self):
@@ -403,13 +407,13 @@ class TestGuideImprimable:
         fitz = pytest.importorskip("pymupdf")
         with fitz.open(GUIDE) as document:
             pages = document.page_count
-        # couverture + 9 étapes (dont l'étape 0) + quotidien + dépannage
-        assert pages >= 12, f"{pages} pages : une étape s'est fait écraser"
+        # couverture + 10 étapes (dont l'étape 0) + quotidien + dépannage
+        assert pages >= 13, f"{pages} pages : une étape s'est fait écraser"
 
-    def test_les_neuf_etapes_y_sont(self):
+    def test_les_dix_etapes_y_sont(self):
         texte = self._texte_pdf()
         assert "AVANT DE COMMENCER" in texte
-        for numero in range(1, 9):
+        for numero in range(1, 10):
             assert f"ÉTAPE {numero}" in texte, f"ÉTAPE {numero} manquante"
 
     def test_il_dit_la_meme_chose_que_le_texte_brut(self):
