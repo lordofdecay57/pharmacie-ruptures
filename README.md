@@ -965,7 +965,11 @@ correspond à une panne qui, sinon, se découvre en pleine journée.
 7. Lancer **`creer-raccourci-poste.bat`** —
    [détail](#sur-chaque-poste-une-fois). Il pose l'icône du Bureau. Rien
    n'est installé sur le poste.
-8. **Avant** de supprimer l'ancienne installation d'un poste, récupérer ses
+8. Lancer **`planifier-ouverture-poste.bat`** —
+   [détail](#louverture-automatique-du-matin). L'utilitaire s'ouvrira tout
+   seul chaque matin à 08:00. Facultatif, mais c'est le geste qui fait
+   lire l'écran du matin.
+9. **Avant** de supprimer l'ancienne installation d'un poste, récupérer ses
    fichiers — [lesquels et pourquoi](#les-postes-déjà-équipés). Ce qui y a
    été scanné n'existe nulle part ailleurs.
 
@@ -1159,6 +1163,51 @@ Il trouve l'adresse tout seul si le dossier du serveur est partagé
 (`adresse-serveur.txt`, écrit à chaque démarrage) ; sinon il la demande, et
 accepte aussi bien `192.168.1.10` que l'adresse complète recopiée depuis le
 navigateur.
+
+### L'ouverture automatique du matin
+
+L'écran du matin — péremptions à traiter, commandes à facturer, commandes à
+passer — ne vaut que s'il est **lu avant** que la journée commence. Compter
+sur quelqu'un pour cliquer une icône à 8 heures, c'est compter sur le seul
+moment où personne n'a le temps.
+
+Double-cliquer une fois sur **`planifier-ouverture-poste.bat`**, sur chaque
+poste, depuis le dossier partagé :
+
+```
+planifier-ouverture-poste.bat              tous les jours à 08:00
+planifier-ouverture-poste.bat 07:45        à l'heure voulue
+planifier-ouverture-poste.bat /supprimer   retire la tâche
+```
+
+> **À refaire sur chaque poste.** Windows ne connaît que les tâches de la
+> machine où on les crée — il n'existe aucun réglage central. C'est la même
+> visite que `creer-raccourci-poste.bat` : autant enchaîner les deux.
+
+**« 08:00 heure de Calédonie » n'existe pas pour Windows :** il ne connaît
+que le fuseau réglé sur la machine. Le script affiche donc ce fuseau **et
+l'heure qu'il est**, et prévient si ce n'est pas celui de Nouméa (*Central
+Pacific Standard Time*, UTC+11). Un poste réglé ailleurs partirait à côté
+sans que rien ne le signale, et on mettrait des mois à s'en apercevoir.
+
+Trois problèmes se cachent derrière une demande qui paraît simple :
+
+| Le piège | Ce que fait le script |
+|---|---|
+| Une tâche « tous les jours à 08:00 » **ne part jamais** sur un poste allumé à 08h10 — c'est-à-dire le cas ordinaire d'une officine. | Elle repasse **tous les quarts d'heure pendant quatre heures**, puis renonce : à midi, personne n'a plus besoin qu'on lui ouvre son écran du matin. |
+| Ce rattrapage rouvrirait l'écran toutes les quinze minutes, en plein travail. | Un **témoin daté** : une ouverture par jour, pas deux. Il est **local au poste** — posé sur le partage, le premier poste ouvert priverait tous les autres. |
+| À 08:00, le serveur peut **encore être en train de démarrer**. Le navigateur n'afficherait qu'une page d'erreur, et le témoin du jour interdirait toute nouvelle tentative. | Le script vérifie que le serveur répond. S'il ne répond pas, **il ne marque rien** : la répétition suivante ouvrira dès qu'il sera debout. |
+
+Le script s'adapte tout seul à l'installation : si `adresse-serveur.txt`
+est là, il ouvre le navigateur sur le serveur ; sinon il démarre
+`lancer.bat` sur le poste.
+
+Une fois la fenêtre fermée en cours de journée, elle ne revient pas d'elle-
+même — l'icône 💊 du Bureau est là pour ça. Le lendemain matin, si.
+
+> La session Windows doit être **ouverte** au moment dit. Écran verrouillé,
+> c'est bien : la tâche part et la page attend derrière le verrou. Session
+> fermée, non — Windows ne lance rien pour un utilisateur absent.
 
 ### Les postes déjà équipés
 
@@ -1366,6 +1415,13 @@ pharmacie-ruptures/
 ├── maj-auto-desactiver.bat  # la désactive
 ├── lancer.bat                 # double-clic Windows
 ├── lancer.command              # double-clic Mac
+├── mettre-a-jour.bat        # mise à jour en un clic (poste isolé)
+├── lancer-serveur.bat       # démarre l'application POUR TOUTE la pharmacie
+├── mettre-a-jour-serveur.bat   # met à jour le serveur et le redémarre
+├── planifier-maj-serveur.bat   # la fait chaque nuit (le serveur ne dort pas)
+├── creer-raccourci-poste.bat   # icône du Bureau d'un poste, vers le serveur
+├── planifier-ouverture-poste.bat # ouvre l'utilitaire chaque matin à 08:00
+├── ouvrir-le-matin.bat      # ce que cette tâche lance (une fois par jour)
 ├── creer-raccourci.bat       # pose l'icône 💊 « Pharmacie » sur le Bureau
 ├── raccourci.py             # la même pose, appelable depuis l'application
 ├── pharmacie.ico            # icône du raccourci (16 → 256 px)
