@@ -17,7 +17,10 @@ REM    /sipremier   ne rien faire si l'icone a deja ete posee
 REM                 une fois sur ce poste
 REM ============================================================
 setlocal
-cd /d "%~dp0"
+REM  Aucun changement de repertoire : tout ce que ce script touche
+REM  est designe par %~dp0, le chemin de CE fichier. Il fonctionne
+REM  donc depuis un partage reseau (\\serveur\...), que cmd refuse
+REM  comme repertoire courant - il se rabattrait sur C:\Windows.
 
 set "SILENCE="
 set "SIPREMIER="
@@ -48,7 +51,7 @@ set "VER="
 for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" "%~dp0app.py" 2^>nul') do set "VER=%%~v"
 if not defined VER set "VER=?"
 REM  La lecture est sur sa propre ligne : une redirection accrochee a un
-REM  « if » d'une seule ligne est l'un des pieges classiques de cmd.
+REM  "if" d'une seule ligne est l'un des pieges classiques de cmd.
 set "DEJA="
 if not exist "%TEMOIN%" goto sans_temoin
 set /p DEJA=<"%TEMOIN%"

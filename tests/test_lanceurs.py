@@ -1,9 +1,27 @@
 # -*- coding: utf-8 -*-
-"""« Python n'est pas retrouvé après installation » — le blocage n°1.
+"""Les scripts .bat démarrent-ils là où on croit ?
 
-Signalé sur le serveur de la pharmacie, après une installation qui s'était
-pourtant bien déroulée. Trois causes, toutes invisibles depuis la fenêtre
-noire qui se contentait d'annoncer « Python n'est pas installé » :
+Deux pannes rencontrées coup sur coup à la pharmacie, toutes deux
+invisibles depuis la fenêtre noire.
+
+## Le dossier sur un partage réseau
+
+L'utilitaire vit sur `\\\\srv-lafoa\\KaoriPHARM\\Utilitaire Gestion de
+stock`. **cmd refuse un chemin UNC comme répertoire courant** : il se
+rabat sur `C:\\Windows` en annonçant seulement « Les chemins d'accès UNC
+ne sont pas pris en charge ». Tout ce qui suivait cherchait alors dans
+`C:\\Windows` — d'où, en cascade, « Could not open requirements.txt »,
+« can't open file C:\\Windows\\maj_auto.py », « File does not exist:
+app.py ». Trois erreurs, une seule cause, aucune ne la nommant.
+
+`pushd` monte un lecteur temporaire et résout tout. Les scripts qui
+n'ouvrent aucun fichier par un chemin relatif, eux, ne changent pas de
+répertoire du tout : tout y passe par `%~dp0`.
+
+## Python introuvable après installation
+
+Trois causes, toutes invisibles derrière un « Python n'est pas installé »
+adressé à quelqu'un qui venait précisément de l'installer :
 
 1. **Le faux `python.exe` de Windows.** Windows 10/11 pose un raccourci
    dans `WindowsApps` dont le seul rôle est d'ouvrir le Microsoft Store.
@@ -34,6 +52,24 @@ RACINE = Path(__file__).resolve().parent.parent
 LANCEURS = ["lancer.bat", "lancer-serveur.bat", "mettre-a-jour.bat",
             "mettre-a-jour-serveur.bat", "maj-auto-activer.bat"]
 
+#: Ceux qui lancent Python sur des fichiers désignés RELATIVEMENT
+#: (`app.py`, `requirements.txt`, `maj_auto.py`) : il leur faut un vrai
+#: répertoire courant, donc un lecteur monté quand le dossier est un
+#: partage réseau.
+AVEC_REPERTOIRE = ["lancer.bat", "lancer-serveur.bat", "mettre-a-jour.bat",
+                   "mettre-a-jour-serveur.bat"]
+
+#: Ceux qui désignent TOUT par `%~dp0` : leur donner un répertoire
+#: courant ne servirait qu'à laisser fuir un lecteur monté — et
+#: `creer-raccourci.bat`, appelé par les autres, le ferait à chaque
+#: démarrage, jusqu'à épuiser les lettres.
+SANS_REPERTOIRE = ["creer-raccourci.bat", "creer-raccourci-poste.bat",
+                   "maj-auto-activer.bat", "maj-auto-desactiver.bat",
+                   "planifier-maj-serveur.bat"]
+
+#: Tous les .bat livrés, pour les contrôles qui valent partout.
+TOUS = sorted(p.name for p in RACINE.glob("*.bat"))
+
 #: La sonde : elle DÉMARRE Python au lieu de chercher son nom.
 SONDE = "python --version >nul 2>nul"
 #: Le repli, quand la case « Add python.exe to PATH » a été oubliée.
@@ -56,6 +92,78 @@ def _instructions(nom: str) -> list:
     """
     return [ligne for ligne in _lignes(nom)
             if ligne.strip() and not ligne.strip().upper().startswith("REM")]
+
+
+class TestDossierReseau:
+    """Le dossier vit sur `\\\\srv-lafoa\\...` : cmd ne peut pas s'y placer.
+
+    Il ne refuse pas franchement — il annonce « Les chemins d'accès UNC ne
+    sont pas pris en charge », se met dans `C:\\Windows`, et continue. Les
+    erreurs qui suivent parlent alors de `requirements.txt`, de
+    `maj_auto.py`, de `app.py` : trois symptômes, jamais la cause.
+    """
+
+    @pytest.mark.parametrize("nom", TOUS)
+    def test_plus_aucun_cd_vers_le_dossier_du_script(self, nom):
+        """`cd /d` sur un chemin UNC échoue en laissant le script continuer
+        dans `C:\\Windows`. C'est la panne, à la ligne près."""
+        fautives = [ligne for ligne in _instructions(nom)
+                    if ligne.strip().lower().startswith(("cd ", "cd/"))]
+        assert not fautives, f"{nom} : {fautives}"
+
+    @pytest.mark.parametrize("nom", AVEC_REPERTOIRE)
+    def test_un_lecteur_est_monte_pour_le_dossier(self, nom):
+        """`pushd` monte un lecteur temporaire sur le partage : c'est la
+        seule façon d'avoir un répertoire courant valide."""
+        assert 'pushd "%~dp0"' in _texte(nom)
+
+    @pytest.mark.parametrize("nom", AVEC_REPERTOIRE)
+    def test_l_echec_du_montage_est_vu_et_nomme(self, nom):
+        """Un `pushd` qui échoue laisse le script dans `C:\\Windows` tout
+        comme `cd`. Le contrôle est celui qui ne peut pas mentir : ce
+        script est forcément dans son propre dossier."""
+        texte = _texte(nom)
+        assert 'if not exist "%~nx0" goto pas_de_dossier' in texte
+        assert "\n:pas_de_dossier\n" in texte
+
+    @pytest.mark.parametrize("nom", AVEC_REPERTOIRE)
+    def test_on_ne_tombe_pas_dans_le_message_du_dossier(self, nom):
+        lignes = _lignes(nom)
+        indice = lignes.index(":pas_de_dossier")
+        avant = [l.strip() for l in lignes[:indice] if l.strip()][-1]
+        assert avant.startswith(("exit /b", "goto ")), (
+            f"{nom} : on tombe dans :pas_de_dossier après « {avant} »")
+
+    @pytest.mark.parametrize("nom", AVEC_REPERTOIRE)
+    def test_le_message_dit_quoi_faire(self, nom):
+        texte = _texte(nom)
+        message = texte[texte.index(":pas_de_dossier"):]
+        assert "partage reseau" in message
+        assert "Connecter un lecteur reseau" in message
+
+    def test_la_nuit_ne_bloque_pas_sur_ce_message(self):
+        """`mettre-a-jour-serveur.bat` est lancé par une tâche planifiée :
+        un `pause` y attendrait jusqu'au matin."""
+        texte = _texte("mettre-a-jour-serveur.bat")
+        message = texte[texte.index(":pas_de_dossier"):]
+        assert 'if /i not "%~1"=="/silencieux" pause' in message
+
+    @pytest.mark.parametrize("nom", SANS_REPERTOIRE)
+    def test_les_autres_ne_changent_pas_de_repertoire(self, nom):
+        """Ils désignent tout par `%~dp0` : monter un lecteur ne leur
+        servirait à rien, et `creer-raccourci.bat` — appelé à CHAQUE
+        démarrage par `lancer.bat`, dans le même processus cmd — en
+        empilerait un par lancement jusqu'à épuiser les lettres."""
+        assert "pushd" not in _texte(nom), f"{nom} : montage inutile"
+
+    def test_le_serveur_relance_monte_son_propre_lecteur(self):
+        """La tâche de nuit relance le serveur détaché, puis se termine
+        aussitôt. L'enfant hérite du répertoire courant mais pas du
+        montage qui le rend valide : il doit refaire le sien, sinon le
+        serveur repart dans le vide et la pharmacie trouve porte close."""
+        ligne = next(l for l in _lignes("mettre-a-jour-serveur.bat")
+                     if l.startswith("start "))
+        assert 'cmd /c pushd "%~dp0" ^&' in ligne, ligne
 
 
 @pytest.mark.parametrize("nom", LANCEURS)

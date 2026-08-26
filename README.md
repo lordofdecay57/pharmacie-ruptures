@@ -1202,6 +1202,50 @@ scanné ne se trouve nulle part ailleurs :
   simplifie la sauvegarde — et la rend indispensable : il n'y a plus de
   copie sur les postes.
 
+### Le dossier posé sur un partage réseau
+
+Rien n'empêche de mettre le dossier sur un partage
+(`\\srv-lafoa\KaoriPHARM\Utilitaire Gestion de stock`) et de lancer les
+scripts depuis là. **Mais cmd refuse un chemin UNC comme répertoire
+courant** : il se rabat sur `C:\Windows` en annonçant seulement
+
+```
+Les chemins d'acces UNC ne sont pas pris en charge.
+Utilisation du repertoire Windows par defaut.
+```
+
+et tout ce qui suit cherche alors dans `C:\Windows`. On obtient trois
+erreurs en cascade — `Could not open requirements file`, `can't open file
+C:\Windows\maj_auto.py`, `File does not exist: app.py` — dont **aucune ne
+nomme la cause**.
+
+Les scripts montent désormais eux-mêmes un lecteur temporaire (`pushd`) et
+fonctionnent depuis un partage. Deux détails qui allaient de pair :
+
+- ceux qui n'ouvrent aucun fichier par un chemin relatif
+  (`creer-raccourci.bat`, `planifier-maj-serveur.bat`, les deux
+  `maj-auto-*.bat`) **ne changent plus de répertoire du tout** — tout y
+  passe par `%~dp0`. `creer-raccourci.bat` est appelé à chaque démarrage
+  dans le processus cmd de `lancer.bat` : y monter un lecteur en aurait
+  empilé un par lancement ;
+- la tâche de nuit relance le serveur **détaché**, puis se termine
+  aussitôt. L'enfant hérite du répertoire courant mais **pas** du montage
+  qui le rend valide : il refait le sien, sinon le serveur repartirait
+  dans le vide et la pharmacie trouverait porte close au matin.
+
+Si Windows ne peut vraiment pas monter de lecteur (plus une seule lettre
+libre), les scripts le **disent** au lieu de continuer ailleurs, et
+proposent les deux issues : connecter le partage à une lettre de lecteur,
+ou copier le dossier sur le disque local.
+
+> **Deux déploiements possibles, à ne pas mélanger.** Soit le serveur fait
+> tourner l'application (`lancer-serveur.bat` **sur le serveur**) et les
+> postes n'ont qu'une icône de navigateur — rien n'est installé chez eux ;
+> soit chaque poste lance `lancer.bat` depuis le partage, et **Python doit
+> alors être installé sur chaque poste**. Le premier est celui que décrit
+> [la procédure complète](#la-procédure-complète-dans-lordre) : une seule
+> mise à jour, une seule machine à surveiller.
+
 ## ⬆️ Le bouton d'installation (le chemin normal)
 
 Quand une nouvelle version est publiée, le bandeau l'annonce et un encadré

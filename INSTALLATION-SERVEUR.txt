@@ -95,6 +95,15 @@ ETAPE 1 - Installer Python et le dossier
 2. Copiez le dossier "pharmacie-ruptures" sur le serveur, par
    exemple dans Documents.
 
+   >> Un dossier partage convient aussi. Mais lancez-le alors
+      par une LETTRE DE LECTEUR (Z:\...) plutot que par son
+      chemin reseau (\\srv-lafoa\...) : Windows refuse un
+      chemin reseau comme dossier de travail et se rabat en
+      silence sur C:\Windows. Les scripts savent s'en sortir
+      seuls, mais la lettre de lecteur evite le detour.
+      Clic droit sur le dossier partage, puis
+      "Connecter un lecteur reseau".
+
 3. Si vous avez recupere des fichiers de donnees (voir plus
    haut), copiez-les MAINTENANT dans ce dossier, a cote de
    lancer.bat. C'est le moment : une fois l'utilitaire demarre,

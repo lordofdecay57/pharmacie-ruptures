@@ -14,7 +14,15 @@ REM  IMPORTANT : la fenetre noire qui s'ouvre EST l'application.
 REM  La fermer arrete l'utilitaire pour toute la pharmacie.
 REM ============================================================
 setlocal EnableDelayedExpansion
-cd /d "%~dp0"
+REM  pushd, et NON "cd /d" : le dossier peut vivre sur un partage
+REM  reseau. cmd REFUSE un chemin \\serveur\... comme repertoire
+REM  courant : il se rabat sur C:\Windows sans rien demander, et
+REM  tout ce qui suit cherche alors app.py dans C:\Windows.
+REM  pushd, lui, monte un lecteur temporaire le temps du script.
+pushd "%~dp0"
+REM  Le script est forcement dans son propre dossier : s'il n'y est
+REM  pas, c'est que pushd a echoue et qu'on est ailleurs.
+if not exist "%~nx0" goto pas_de_dossier
 title Serveur - Pilotage pharmacie  (NE PAS FERMER)
 
 REM --- Recherche de Python -------------------------------------
@@ -107,4 +115,22 @@ echo  le PATH qui manque : relancez l'installeur, choisissez Modify,
 echo  et cochez la case.
 echo.
 pause
+exit /b 1
+
+:pas_de_dossier
+echo.
+echo  [ERREUR] Impossible de se placer dans le dossier de l'utilitaire.
+echo.
+echo      %~dp0
+echo.
+echo  Ce dossier est sur un partage reseau, et Windows n'a pas pu lui
+echo  attribuer de lettre de lecteur temporaire.
+echo.
+echo  Deux solutions :
+echo    - connectez le partage a une lettre de lecteur (clic droit sur
+echo      le dossier reseau, puis "Connecter un lecteur reseau"), et
+echo      relancez depuis cette lettre ;
+echo    - ou copiez le dossier sur le disque de cet ordinateur.
+echo.
+if /i not "%~1"=="/silencieux" pause
 exit /b 1
