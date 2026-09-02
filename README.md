@@ -336,9 +336,45 @@ d'un inventaire ne doit pas dépendre de la date à laquelle on l'ouvre.
 | 🟢 OK | > 180 j | plus de six mois de marge |
 | ⚪ Sans date | — | péremption non renseignée |
 
+### L'écran de saisie : deux lignes, rien de plus
+
+C'est la demande de la pharmacie, mot pour mot : *« une ligne où on bipe et
+où on peut noter le nom du médicament, la ligne d'en dessous on clique sur
+entrée ou sortie, rien de plus »*. L'outil doit être utilisable **par
+quelqu'un qui ne connaît rien à l'informatique**.
+
+```
+┌──────────────────────────────────────────────────────────┬──────────┐
+│ 🔦 Douchez la boîte — ou tapez le nom du médicament…      │ Chercher │
+├──────────────────────────────┬───────────────────────────┴──────────┤
+│         ➕ Entrée            │            ➖ Sortie                  │
+└──────────────────────────────┴───────────────────────────────────────┘
+   ⌨️ Le code ne se lit pas ? Sortir à l'unité ?          ▸ (replié)
+```
+
+Le champ est **au-dessus** du sens : on bipe d'abord, on regarde le sens
+ensuite. Il reste choisi d'un scan à l'autre — on le règle une fois le
+matin.
+
+Ce que cela remplace : l'écran portait **deux dispositions différentes**
+selon le mode — trois boutons en Entrée, deux encadrés côte à côte en
+Sortie — et il fallait le relire à chaque bascule pour retrouver le champ.
+
+Tout le reste est **replié** dans une ligne dépliable : saisie manuelle,
+recherche par le nom, sortie à l'unité. Ce sont des exceptions — étiquette
+abîmée, boîte sans code-barres, dispensation à l'unité — et une exception
+affichée en permanence encombre le geste de tous les jours. Replié ne veut
+pas dire caché : **le titre nomme les deux cas**.
+
+La **base publique des médicaments** et l'**import du répertoire** ont
+quitté le flux principal pour la **colonne de gauche**, celle qui se replie.
+Ce sont des réglages qu'on fait une fois, pas des gestes de comptoir ; au
+milieu de l'écran, entre le scan et l'inventaire, ils occupaient la place de
+ce qu'on regarde tous les jours.
+
 ### Entrée ou sortie de stock
 
-Un sélecteur **Entrée / Sortie** commande le champ de scan.
+Le sélecteur **Entrée / Sortie**, sous le champ, commande le scan.
 
 - **Entrée** : la boîte scannée rejoint l'inventaire (voir ci-dessous) ;
 - **Sortie** : chaque scan retire **une boîte**. Le Data Matrix désigne la
@@ -512,17 +548,12 @@ un seul nombre possible, multiplicateur de tête pris en compte
 (« 3 piluliers de 30 comprimés » = 90). Dans le doute, la case reste à 0 —
 une quantité fausse sur un stock fermé ne se remarque pas.
 
-**Deux façons de sortir du stock**, présentées côte à côte en mode
-**Sortie**, dans deux encadrés de même poids :
+**Deux façons de sortir du stock** :
 
-| Encadré | Ce qu'il fait | Quand s'en servir |
+| | Ce qu'il fait | Quand s'en servir |
 |---|---|---|
-| **🔦 Le bip de la boîte** | chaque bip retire **une boîte entière** | le geste courant : la boîte part telle quelle |
-| **⌨️ Sortie manuelle** | on désigne le lot dans une liste, puis le nombre | étiquette illisible, ou sortie **à l'unité** |
-
-Le bouton de sortie manuelle était auparavant une case étroite collée au
-champ de scan : il ressemblait à un accessoire du champ, alors que c'est le
-seul chemin possible quand le code ne se lit pas.
+| **🔦 Le bip de la boîte** — le champ | chaque bip retire **une boîte entière** | le geste courant : la boîte part telle quelle |
+| **⌨️ Sortie manuelle** — dans le dépliant | on désigne le lot dans une liste, puis le nombre | étiquette illisible, ou sortie **à l'unité** |
 
 **Sortie manuelle** — la douchette ne lit pas tout : étiquette abîmée,
 boîte reconditionnée, produit sans code-barres. Le bouton ouvre la liste
@@ -767,10 +798,7 @@ casser le calcul des ruptures, et inversement.
 > 📄 Pour transmettre ce dossier à une tierce personne (collègue,
 > remplaçant…) : [`INSTALLATION.txt`](INSTALLATION.txt) est un pense-bête
 > minimal (texte brut, s'ouvre avec le Bloc-notes, aucun logiciel requis)
-> qui explique exactement quoi faire, dans l'ordre. Version illustrée et
-> plus détaillée : [`Guide-installation.pdf`](Guide-installation.pdf)
-> (installation de Python, téléchargement, premier lancement, mise à jour,
-> dépannage).
+> qui explique exactement quoi faire, dans l'ordre.
 >
 > 🖧 **Pour toute la pharmacie sur une seule base**, deux documents qui
 > disent la même procédure et répondent à deux situations :
@@ -830,8 +858,6 @@ pip install -r requirements.txt
 - **Windows** : double-cliquez sur l'icône 💊 **Pilotage pharmacie** du Bureau. Elle
   est créée automatiquement au premier lancement (voir ci-dessous) ; sinon,
   double-cliquez sur `lancer.bat` dans le dossier.
-- **Mac** : double-cliquez sur `lancer.command` (la première fois : clic droit
-  → Ouvrir, pour passer l'avertissement de sécurité).
 - **À la main** : `streamlit run app.py`
 
 ### 💊 L'icône du Bureau
@@ -1494,13 +1520,11 @@ version sans donner le moyen de la prendre.
 
 L'utilitaire se met à jour **tout seul**, à deux moments :
 
-- **à chaque lancement** (`lancer.bat` / `lancer.command`) — c'est le seul
-  instant où remplacer des fichiers est sans danger, l'application n'étant
-  pas encore démarrée ;
-- **à l'ouverture de session Windows**, si vous activez la tâche planifiée :
-  double-cliquez **`maj-auto-activer.bat`** une fois. Aucune fenêtre ne
-  s'affiche, la vérification est discrète.
-  (`maj-auto-desactiver.bat` fait l'inverse.)
+- **à chaque lancement** (`lancer.bat`) — c'est le seul instant où
+  remplacer des fichiers est sans danger, l'application n'étant pas encore
+  démarrée ;
+- **chaque nuit sur un serveur** (`planifier-maj-serveur.bat`), qui ne
+  redémarre jamais et ne passerait donc jamais par le point précédent.
 
 Trois règles de prudence, appliquées par `maj_auto.py` :
 
@@ -1580,10 +1604,7 @@ pharmacie-ruptures/
 ├── requirements.txt          # dépendances Python
 ├── maj_auto.py              # mise à jour automatique (testable, sans Streamlit)
 ├── presence.py              # qui utilise le dossier partagé en ce moment
-├── maj-auto-activer.bat     # active la vérification au démarrage de Windows
-├── maj-auto-desactiver.bat  # la désactive
 ├── lancer.bat                 # double-clic Windows
-├── lancer.command              # double-clic Mac
 ├── mettre-a-jour.bat        # mise à jour en un clic (poste isolé)
 ├── lancer-serveur.bat       # démarre l'application POUR TOUTE la pharmacie
 ├── mettre-a-jour-serveur.bat   # met à jour le serveur et le redémarre
@@ -1595,7 +1616,6 @@ pharmacie-ruptures/
 ├── creer-raccourci.bat       # pose l'icône 💊 « Pilotage pharmacie » sur le Bureau
 ├── raccourci.py             # la même pose, appelable depuis l'application
 ├── pharmacie.ico            # icône du raccourci (16 → 256 px)
-├── pharmacie.png            # même visuel en 1024 px (Mac, documentation)
 ├── outils/creer_icone.py    # régénère l'icône (outil de développement)
 ├── README.md
 └── tests/

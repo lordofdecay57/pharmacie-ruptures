@@ -1148,6 +1148,14 @@ def _barre_laterale(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
                          "confirmation.")
 
         st.divider()
+        # Réglages qu'on fait UNE FOIS, pas des gestes de comptoir. Au
+        # milieu de l'écran, entre le scan et l'inventaire, ils occupaient
+        # la place de ce qu'on regarde tous les jours — et il fallait les
+        # dépasser du regard à chaque boîte scannée.
+        _base_publique()
+        _import_repertoire()
+
+        st.divider()
         st.markdown("#### Mémoire")
         st.caption(f"{len(inventaire)} lot(s) · {len(repertoire)} produit(s) "
                    f"mémorisé(s)\n\n`{INVENTAIRE_PATH.name}`")
@@ -1172,6 +1180,9 @@ def rendre(etape, tuile_kpi) -> None:
     aujourdhui = _barre_laterale(inventaire, repertoire,
                                  st.session_state.get("sf_date", date.today()))
     st.session_state["sf_date"] = aujourdhui
+    # La barre latérale porte l'import du répertoire : il peut avoir ajouté
+    # des produits à l'instant, et l'écran doit les voir tout de suite.
+    inventaire, repertoire = _etat()
 
     message = st.session_state.pop("sf_message", None)
     if message:
@@ -1179,75 +1190,65 @@ def rendre(etape, tuile_kpi) -> None:
         (st.success if niveau == "ok" else st.warning)(texte)
 
     # --- Saisie ------------------------------------------------------------
+    # Deux lignes, et rien d'autre. C'est la demande de la pharmacie, et
+    # elle a raison : au comptoir on bipe, puis on dit dans quel sens.
+    # L'écran portait auparavant deux dispositions différentes selon le
+    # mode — trois boutons en Entrée, deux encadrés en Sortie — et il
+    # fallait relire l'écran à chaque bascule pour retrouver le champ.
     etape("1", "Scannez le produit",
-          "Douchette (code CIP ou Data Matrix) — ou saisie au clavier.")
-    # Entrée ou sortie : c'est la question la plus lourde de conséquences de
-    # l'écran (ajouter ou retirer du stock). Elle mérite deux boutons francs,
-    # pas deux puces — et un code couleur pour qu'une erreur saute aux yeux.
+          "Douchette ou clavier, puis le sens du mouvement.")
+
+    # LIGNE 1 — le champ. Le bouton qui l'accompagne tient sur la même
+    # ligne : une douchette valide toute seule, un nom tapé au clavier
+    # non, et le champ restait alors plein sans que rien ne se passe.
+    # C'est arrivé en officine — « DOLIPRA » écrit, aucune réaction.
+    col_champ, col_valider = st.columns([6, 1])
+    col_champ.text_input(
+        "Code scanné", key="sf_scan", on_change=_traiter_scan,
+        placeholder="🔦 Douchez la boîte — ou tapez le nom du médicament, "
+                    "puis Entrée",
+        label_visibility="collapsed")
+    col_valider.button("🔎 Chercher", use_container_width=True,
+                       on_click=_traiter_scan,
+                       help="Valide ce qui est écrit dans le champ — "
+                            "même chose que la touche Entrée.")
+
+    # LIGNE 2 — le sens. Sous le champ et non au-dessus : on bipe d'abord,
+    # on regarde le sens ensuite. Il reste choisi d'un scan à l'autre, donc
+    # on le règle une fois le matin.
     mode = st.segmented_control(
         "Sens du mouvement", [MODE_ENTREE, MODE_SORTIE],
         default=st.session_state.get("sf_mode_choisi", MODE_ENTREE),
-        label_visibility="collapsed", key="sf_mode", on_change=_garder_mode)
+        label_visibility="collapsed", key="sf_mode", on_change=_garder_mode,
+        width="stretch")
     if mode is None:  # premier rendu suivant une déselection
         mode = st.session_state.get("sf_mode_choisi", MODE_ENTREE)
     st.session_state["sf_mode_choisi"] = mode
-    # Un bouton « Chercher » à côté du champ, en plus de la touche Entrée.
-    # La douchette valide toute seule ; un nom tapé au clavier, non — et le
-    # champ restait alors plein sans que rien ne se passe. C'est exactement
-    # ce qui s'est produit en officine : « DOLIPRA » écrit, aucune réaction.
-    if mode == MODE_ENTREE:
-        col_scan, col_valider, col_manuel = st.columns([4, 1.3, 1.7])
-        col_scan.text_input(
-            "Code scanné", key="sf_scan", on_change=_traiter_scan,
-            placeholder="Douchez la boîte à ajouter — ou tapez un nom de "
-                        "médicament puis Entrée",
-            label_visibility="collapsed")
-        col_valider.button("🔎 Chercher", use_container_width=True,
-                           on_click=_traiter_scan,
-                           help="Valide ce qui est écrit dans le champ — "
-                                "même chose que la touche Entrée.")
-        col_manuel.button(
-            "⌨️ Saisie manuelle", use_container_width=True,
-            on_click=_saisie_manuelle_vierge,
-            help="Enregistrer une boîte dont le code ne se lit pas.")
-        # Rien sous les deux champs : ce qu'expliquait le paragraphe retiré
-        # (Data Matrix contre code linéaire, et « cherchez par le nom »)
-        # est déjà dit par les invites des champs eux-mêmes. Répété à chaque
-        # boîte scannée, il n'était plus lu — seulement contourné du regard.
-        _saisie_assistee()
-    else:
-        # Deux façons de sortir une boîte, deux encadrés de même poids. Le
-        # bouton « Sortie manuelle » était auparavant une case étroite collée
-        # au champ de scan : il ressemblait à un accessoire du champ, alors
-        # que c'est le seul chemin possible pour une étiquette illisible ou
-        # pour une dispensation à l'unité. Personne ne le voyait.
-        carte_bip, carte_main = st.columns(2)
-        with carte_bip:
-            with st.container(border=True):
-                st.markdown("#### 🔦 Le bip de la boîte")
-                st.text_input(
-                    "Code scanné", key="sf_scan", on_change=_traiter_scan,
-                    placeholder="Douchez la boîte à sortir"
-                                " (le champ se vide tout seul)",
-                    label_visibility="collapsed")
-                st.caption(
-                    "Chaque bip retire **une boîte entière**. Le Data Matrix "
-                    "désigne la boîte exacte ; un code-barres linéaire ne "
-                    "donne que le produit, et c'est alors le lot qui "
-                    "**périme le plus tôt** qui sort.")
-        with carte_main:
-            with st.container(border=True):
-                st.markdown("#### ⌨️ Sortie manuelle")
-                st.button(
-                    "Choisir la boîte dans la liste", use_container_width=True,
-                    key="sf_bouton_sortie_manuelle",
-                    on_click=_basculer_sortie_manuelle,
-                    help="Sans douchette : on désigne le lot, puis le "
-                         "nombre de boîtes ou d'unités.")
-                st.caption(
-                    "Pour une étiquette abîmée, une boîte sans code-barres — "
-                    "et pour sortir **quelques unités** plutôt qu'une boîte "
-                    "entière (le reste part en vrac, il reste à l'inventaire).")
+
+    # Tout le reste est replié. Ce sont des exceptions — étiquette abîmée,
+    # boîte sans code-barres, dispensation à l'unité — et une exception
+    # affichée en permanence encombre le geste de tous les jours. Le titre
+    # les nomme : replié ne veut pas dire caché.
+    with st.expander("⌨️ Le code ne se lit pas ? Sortir à l'unité ?"):
+        if mode == MODE_ENTREE:
+            st.button(
+                "⌨️ Saisie manuelle", use_container_width=True,
+                key="sf_bouton_saisie_manuelle",
+                on_click=_saisie_manuelle_vierge,
+                help="Enregistrer une boîte dont le code ne se lit pas.")
+            st.caption("Ou cherchez le médicament par son nom :")
+            _saisie_assistee()
+        else:
+            st.button(
+                "⌨️ Sortie manuelle", use_container_width=True,
+                key="sf_bouton_sortie_manuelle",
+                on_click=_basculer_sortie_manuelle,
+                help="Sans douchette : on désigne le lot, puis le "
+                     "nombre de boîtes ou d'unités.")
+            st.caption(
+                "Pour une étiquette abîmée, une boîte sans code-barres — et "
+                "pour sortir **quelques unités** plutôt qu'une boîte entière "
+                "(le reste part en vrac, il reste à l'inventaire).")
 
     if mode == MODE_SORTIE:
         tri_courant = st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION)
@@ -1260,11 +1261,6 @@ def rendre(etape, tuile_kpi) -> None:
             st.button("➕ Passer en Entrée", on_click=_passer_en_entree)
         elif st.session_state.get("sf_sortie_manuelle"):
             _panneau_sortie_manuelle(inventaire, aujourdhui, tri_courant)
-
-    if mode == MODE_ENTREE:
-        _base_publique()
-        _import_repertoire()
-        inventaire, repertoire = _etat()
 
     if "sf_en_attente" in st.session_state and mode == MODE_ENTREE:
         _formulaire_complement()

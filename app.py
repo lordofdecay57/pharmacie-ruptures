@@ -3,7 +3,7 @@
 
 Couche interface UNIQUEMENT : toute la logique métier vit dans les modules
 de calcul (commun.py, moteur_ruptures.py, stock_rotation.py). Lancement :
-``streamlit run app.py`` (ou double-clic sur lancer.bat / lancer.command).
+``streamlit run app.py`` (ou double-clic sur lancer.bat).
 
 Deux modules fonctionnels INDÉPENDANTS, chacun son onglet principal :
   📦 Gestion des stocks en rotation (stock_rotation.py) — stock min / max
@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.13"
+VERSION_APP = "6.14"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.

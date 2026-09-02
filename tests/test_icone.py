@@ -15,7 +15,6 @@ import pytest
 
 RACINE = Path(__file__).resolve().parent.parent
 ICONE = RACINE / "pharmacie.ico"
-APERCU = RACINE / "pharmacie.png"
 SCRIPT = RACINE / "creer-raccourci.bat"
 LANCEUR = RACINE / "lancer.bat"
 MISE_A_JOUR = RACINE / "mettre-a-jour.bat"
@@ -36,7 +35,6 @@ class TestIcone:
         """L'icône est livrée toute faite : le poste de la pharmacie n'a ni
         Pillow ni police emoji pour la fabriquer."""
         assert ICONE.is_file(), "pharmacie.ico manquant à la racine"
-        assert APERCU.is_file(), "pharmacie.png manquant à la racine"
 
     def test_toutes_les_tailles_windows(self):
         """Sans la petite taille, Windows réduit lui-même le 256 px et
@@ -76,9 +74,7 @@ class TestIcone:
         sys.path.insert(0, str(RACINE / "outils"))
         import creer_icone
 
-        ico, png = creer_icone.ecrire(tmp_path)
-        assert ico.read_bytes() == ICONE.read_bytes()
-        assert png.read_bytes() == APERCU.read_bytes()
+        assert creer_icone.ecrire(tmp_path).read_bytes() == ICONE.read_bytes()
 
 
 class TestScriptDeRaccourci:
