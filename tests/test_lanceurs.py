@@ -50,7 +50,7 @@ RACINE = Path(__file__).resolve().parent.parent
 #: Les tenir dans une seule liste : un nouveau lanceur qui oublierait la
 #: détection ramènerait exactement le blocage que ce fichier traite.
 LANCEURS = ["lancer.bat", "lancer-serveur.bat", "mettre-a-jour.bat",
-            "mettre-a-jour-serveur.bat", "maj-auto-activer.bat"]
+            "mettre-a-jour-serveur.bat"]
 
 #: Ceux qui lancent Python sur des fichiers désignés RELATIVEMENT
 #: (`app.py`, `requirements.txt`, `maj_auto.py`) : il leur faut un vrai
@@ -64,8 +64,8 @@ AVEC_REPERTOIRE = ["lancer.bat", "lancer-serveur.bat", "mettre-a-jour.bat",
 #: `creer-raccourci.bat`, appelé par les autres, le ferait à chaque
 #: démarrage, jusqu'à épuiser les lettres.
 SANS_REPERTOIRE = ["creer-raccourci.bat", "creer-raccourci-poste.bat",
-                   "maj-auto-activer.bat", "maj-auto-desactiver.bat",
-                   "planifier-maj-serveur.bat"]
+                   "planifier-maj-serveur.bat",
+                   "planifier-ouverture-poste.bat", "ouvrir-le-matin.bat"]
 
 #: Tous les .bat livrés, pour les contrôles qui valent partout.
 TOUS = sorted(p.name for p in RACINE.glob("*.bat"))
@@ -292,22 +292,31 @@ class TestModeSilencieux:
             assert not interdits, f"ligne {numero} : {interdits} — {ligne}"
 
 
-class TestTacheDeFond:
-    """La mise à jour au démarrage n'ouvre aucune fenêtre noire."""
+class TestPlusDeTacheAuDemarrage:
+    """`maj-auto-activer.bat` / `-desactiver.bat` ont été retirés.
 
-    def test_la_tache_reste_sans_fenetre(self):
-        """`pythonw` (ou `pyw`) et non `python` : la tâche se déclenche à
-        l'ouverture de session, une fenêtre noire surgissant sur le bureau
-        passerait pour un virus."""
-        texte = _texte("maj-auto-activer.bat")
-        assert 'set "PYW=pythonw"' in texte
-        assert 'set "PYW=pyw -3"' in texte
-        assert '/TR "%PYW% ' in texte
+    Ils posaient une tâche « vérifier une mise à jour à l'ouverture de
+    session ». Elle ne sert plus à rien : `lancer.bat` interroge déjà
+    `maj_auto` à CHAQUE démarrage de l'application, et sur un serveur
+    c'est `planifier-maj-serveur.bat` qui s'en charge. Deux fichiers de
+    moins dans un dossier où la pharmacie cherchait déjà lequel
+    double-cliquer.
+    """
 
-    def test_la_sonde_reste_la_version_console(self):
-        """`pythonw` rend la main aussitôt, sans attendre : cmd n'obtient
-        aucun code de sortie exploitable. On teste donc `python` / `py`,
-        dont cmd attend vraiment la fin, et on en déduit l'autre."""
-        texte = _texte("maj-auto-activer.bat")
-        assert "pythonw --version" not in texte
-        assert SONDE in texte
+    def test_les_scripts_ont_disparu(self):
+        for nom in ("maj-auto-activer.bat", "maj-auto-desactiver.bat"):
+            assert not (RACINE / nom).exists(), f"{nom} est revenu"
+
+    def test_plus_personne_ne_les_appelle(self):
+        """Un script qui renvoie vers un fichier absent envoie chercher ce
+        qui n'existe pas."""
+        for nom in TOUS:
+            texte = _texte(nom)
+            assert "maj-auto-activer" not in texte, nom
+            assert "maj-auto-desactiver" not in texte, nom
+
+    def test_la_mise_a_jour_reste_faite_a_chaque_lancement(self):
+        """C'est ce qui rend l'ancienne tâche superflue : sans cela, on
+        aurait supprimé le seul chemin de mise à jour d'un poste."""
+        for nom in ("lancer.bat", "lancer-serveur.bat"):
+            assert "maj_auto.py" in _texte(nom), nom

@@ -190,6 +190,7 @@ def page_avec_base(application_avec_base, pilote):
     onglet.wait_for_selector(".hero", timeout=60000)
     _onglet(onglet, ESPACE_STOCK_FERME).first.click()
     onglet.wait_for_timeout(6000)
+    _ouvrir_les_autres_gestes(onglet)
     yield onglet
     navigateur.close()
 
@@ -209,6 +210,22 @@ def _sans_exception(page) -> None:
     """Streamlit affiche les exceptions dans la page : rien ne doit passer."""
     assert page.locator('[data-testid="stException"]').count() == 0, (
         page.locator('[data-testid="stException"]').first.inner_text())
+
+
+def _ouvrir_les_autres_gestes(page) -> None:
+    """Déplie « Le code ne se lit pas ? Sortir à l'unité ? ».
+
+    L'écran de saisie tient désormais en DEUX lignes — on bipe, on dit le
+    sens — et tout le reste est replié : ce sont des exceptions, et une
+    exception affichée en permanence encombre le geste de tous les jours.
+    Replié ne veut pas dire caché : le titre nomme les deux cas.
+    """
+    if page.locator(".st-key-sf_auto_nom:visible, "
+                    ".st-key-sf_bouton_sortie_manuelle:visible, "
+                    ".st-key-sf_bouton_saisie_manuelle:visible").count():
+        return                              # déjà déplié
+    page.get_by_text("Le code ne se lit pas").first.click()
+    page.wait_for_timeout(2500)
 
 
 def _onglet_actif(page, cle: str) -> str:
@@ -359,7 +376,7 @@ class TestEspaceStockFerme:
         taper autre chose qu'un code."""
         champ = page.get_by_placeholder("Douchez la boîte")
         indication = champ.get_attribute("placeholder")
-        assert "nom de médicament" in indication
+        assert "nom du médicament" in indication
         # Dire qu'on peut taper un nom ne suffit pas : il faut dire que ça
         # ne part qu'une fois validé.
         assert "Entrée" in indication
@@ -396,6 +413,7 @@ class TestEspaceStockFerme:
         """Une étiquette abîmée, une boîte reconditionnée : la douchette ne
         lit pas tout. Le bouton était purement désactivé en mode Sortie —
         il n'existait alors AUCUNE façon de retirer une boîte."""
+        _ouvrir_les_autres_gestes(page)
         # « :visible » écarte le double de mesure que Streamlit rend en
         # taille nulle à côté de chaque bouton porteur d'une bulle d'aide.
         bouton = page.locator(
@@ -403,32 +421,37 @@ class TestEspaceStockFerme:
         assert bouton.count() == 1
         assert bouton.first.is_enabled()
 
-    def test_les_deux_chemins_de_sortie_ont_le_meme_poids(self, page):
-        """Le bouton de sortie manuelle était une case étroite collée au
-        champ de scan : il passait pour un accessoire du champ. C'est
-        pourtant le SEUL chemin quand l'étiquette ne se lit pas, et le seul
-        pour sortir à l'unité. Deux encadrés titrés, de même largeur."""
-        contenu = page.content()
-        assert "Le bip de la boîte" in contenu
-        assert "Sortie manuelle" in contenu
-        # Même largeur : deux colonnes de poids égal, pas 3 contre 1.
-        largeurs = page.evaluate(
+    def test_l_ecran_de_saisie_tient_en_deux_lignes(self, page):
+        """La demande de la pharmacie, mot pour mot : « une ligne où on bipe
+        et où on peut noter le nom du médicament, la ligne d'en dessous on
+        clique sur entrée ou sortie, rien de plus ».
+
+        L'écran portait deux dispositions différentes selon le mode — trois
+        boutons en Entrée, deux encadrés en Sortie — et il fallait le relire
+        à chaque bascule pour retrouver le champ.
+        """
+        champ = page.locator(".st-key-sf_scan")
+        sens = page.locator(".st-key-sf_mode")
+        assert champ.count() == 1 and sens.count() == 1
+        # Le champ AU-DESSUS du sens : on bipe d'abord, on regarde le sens
+        # ensuite. Il reste choisi d'un scan à l'autre.
+        positions = page.evaluate(
             """() => {
-                const champ = document.querySelector('.st-key-sf_scan');
-                const bouton = document.querySelector(
-                    '.st-key-sf_bouton_sortie_manuelle');
-                if (!champ || !bouton) return null;
-                const col = (n) => {
-                    let e = n;
-                    while (e && e.getAttribute(
-                        'data-testid') !== 'stColumn') e = e.parentElement;
-                    return e ? e.getBoundingClientRect().width : 0;
+                const y = (s) => {
+                    const e = document.querySelector(s);
+                    return e ? e.getBoundingClientRect().top : -1;
                 };
-                return [col(champ), col(bouton)];
+                return [y('.st-key-sf_scan'), y('.st-key-sf_mode')];
             }""")
-        assert largeurs, "les deux encadrés ne sont pas dans des colonnes"
-        gauche, droite = largeurs
-        assert abs(gauche - droite) < 0.05 * gauche, largeurs
+        assert positions[0] < positions[1], positions
+
+    def test_les_exceptions_sont_repliees(self, page):
+        """Étiquette abîmée, sortie à l'unité : des exceptions. Affichées en
+        permanence, elles encombraient le geste de tous les jours."""
+        contenu = page.content()
+        assert "Le code ne se lit pas" in contenu
+        # Replié ne veut pas dire caché : le titre nomme les deux cas.
+        assert "Sortir à l'unité" in contenu
 
     def test_le_bouton_ramene_en_entree(self, page):
         """Le seul geste qui débloque l'écran doit tenir en un clic."""
@@ -436,8 +459,11 @@ class TestEspaceStockFerme:
         page.wait_for_timeout(4000)
         _sans_exception(page)
         assert "Entrée" in _onglet_actif(page, "sf_mode")
-        assert page.get_by_role("button",
-                                name="Saisie manuelle").first.is_enabled()
+        # La saisie manuelle vit désormais dans le dépliant : c'est une
+        # exception (code illisible), pas le geste de tous les jours.
+        _ouvrir_les_autres_gestes(page)
+        assert page.locator(
+            ".st-key-sf_bouton_saisie_manuelle button:visible").is_enabled()
 
 
 class TestSortieALUnite:
@@ -451,6 +477,7 @@ class TestSortieALUnite:
     def _ouvrir_le_panneau(self, page_avec_stock):
         page = page_avec_stock
         if page.locator(".st-key-sf_sortie_choix").count() == 0:
+            _ouvrir_les_autres_gestes(page)
             page.locator(
                 ".st-key-sf_bouton_sortie_manuelle button:visible").click()
             page.wait_for_timeout(4000)

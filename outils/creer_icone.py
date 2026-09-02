@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Fabrique l'icône de l'application : une gélule blanche sur turquoise.
 
-Outil de développement : le résultat (``pharmacie.ico`` et ``pharmacie.png``)
+Outil de développement : le résultat (``pharmacie.ico``)
 est versionné dans le dépôt, de sorte que le poste de la pharmacie n'a
 **jamais** besoin de Pillow ni d'une police emoji pour afficher son raccourci.
 Ce script ne sert qu'à régénérer ces deux fichiers si le visuel change.
@@ -174,20 +174,22 @@ def assembler_ico(icone: Image.Image, tailles=TAILLES) -> bytes:
     return entete + annuaire + corps
 
 
-def ecrire(dossier: Path = RACINE) -> tuple:
-    """Écrit ``pharmacie.ico`` et ``pharmacie.png``; renvoie les deux chemins."""
-    icone = construire()
+def ecrire(dossier: Path = RACINE) -> Path:
+    """Écrit ``pharmacie.ico`` et renvoie son chemin.
+
+    Le PNG d'aperçu 1024 px qui l'accompagnait ne servait qu'à la
+    documentation, et descendait pourtant sur le poste de la pharmacie
+    à chaque mise à jour. Un fichier de plus à ne pas reconnaître dans
+    un dossier où l'on cherche déjà lancer.bat.
+    """
     ico = dossier / "pharmacie.ico"
-    png = dossier / "pharmacie.png"
-    ico.write_bytes(assembler_ico(icone))
-    icone.save(png, format="PNG")          # Mac, Linux, documentation
-    return ico, png
+    ico.write_bytes(assembler_ico(construire()))
+    return ico
 
 
 def main() -> int:
-    ico, png = ecrire()
-    for chemin in (ico, png):
-        print(f"{chemin.name} — {chemin.stat().st_size} octets")
+    ico = ecrire()
+    print(f"{ico.name} — {ico.stat().st_size} octets")
     return 0
 
 

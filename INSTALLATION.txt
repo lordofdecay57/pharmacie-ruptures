@@ -173,12 +173,14 @@ EN CAS DE PROBLEME
 - Vous voyez toujours l'ancienne version apres une mise a jour :
   Faites Ctrl + Maj + R dans le navigateur (rechargement force).
 
-Pour un guide plus detaille, avec des explications pour chaque
-etape, consultez le fichier :
+Si quelque chose ne fonctionne pas, double-cliquez sur :
 
-       Guide-installation.pdf
+       verifier-installation.bat
 
-(present dans ce meme dossier).
+Il ne repare rien et ne modifie rien : il regarde, et il dit ce
+qu'il voit - Python, les complements, l'application demarree ou
+non, la version, vos donnees. Chaque point est suivi de ce qu'il
+faut faire.
 
 
 ---------------------------------------------------------------
