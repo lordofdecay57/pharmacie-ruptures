@@ -393,14 +393,30 @@ def _traiter_sortie(code) -> None:
 
 
 def _traiter_scan() -> None:
-    """Rappel de la douchette : elle tape le code puis valide (Entrée).
+    """Le champ unique : douchette, nom tapé, ou ligne choisie dans la liste.
+
+    Les trois arrivaient par deux widgets superposés — un champ de scan et
+    une liste déroulante — et il fallait savoir lequel servait à quoi. Un
+    seul les reçoit désormais tous, et c'est ici qu'on les départage :
+    ce qui correspond EXACTEMENT à une ligne du catalogue vient de la
+    liste ; tout le reste est un code scanné ou un nom tapé.
 
     Le champ est vidé immédiatement pour que le scan suivant puisse être
     saisi sans intervention de l'opérateur.
     """
-    brut = st.session_state.get("sf_scan", "")
-    st.session_state["sf_scan"] = ""
+    brut = st.session_state.get("sf_scan") or ""
+    # `None` et non `""` : le widget est une liste à choix, et une chaîne
+    # vide n'y est pas une valeur valide — Streamlit la refuserait.
+    st.session_state["sf_scan"] = None
     if not str(brut).strip():
+        return
+
+    # Une ligne du catalogue a été choisie : nom, dosage et conditionnement
+    # arrivent ensemble, il n'y a rien à analyser.
+    medicament = _catalogue_par_libelle().get(brut)
+    if medicament:
+        st.session_state.pop("sf_en_attente", None)
+        _choisir_medicament(medicament)
         return
 
     code = stock_ferme.parser_code_scanne(brut)
@@ -512,8 +528,10 @@ def _traiter_scan() -> None:
             "avertissement",
             f"« {code.brut} » n'est pas un code-barres, et la base publique "
             "des médicaments n'est pas installée sur ce poste — il n'y a donc "
-            "rien à proposer. Installez-la (encadré ci-dessous) ou complétez "
-            "la fiche à la main." + rappel)
+            "rien à proposer. Le bouton « ⬇️ Installer la base des "
+            "médicaments », sous les boutons Entrée / Sortie, la met en "
+            "place en un téléchargement. Ou complétez la fiche à la main."
+            + rappel)
     elif not code.reconnu:
         # La base est là et ne connaît pas ce nom : ne JAMAIS rester muet,
         # c'est ce qui fait croire que l'application ne réagit pas.
@@ -556,52 +574,56 @@ def _choisir_medicament(medicament: dict) -> None:
               "reste que la date de péremption à saisir.")
 
 
-def _medicament_choisi_dans_la_liste() -> None:
-    """Une boîte vient d'être choisie dans la liste : la fiche est remplie.
+def _champ_unique() -> None:
+    """LE champ. Douchette, nom tapé, ligne choisie — un seul endroit.
 
-    En un seul geste — le nom, le dosage et le conditionnement sont dans la
-    même ligne. C'est ce qui remplace l'ancien parcours en deux temps
-    (choisir un nom, puis une présentation, puis valider).
-    """
-    libelle = st.session_state.get("sf_auto_nom")
-    # Remis à zéro tout de suite : sans cela, rechoisir la MÊME boîte après
-    # coup ne déclencherait rien, la valeur du menu n'ayant pas changé.
-    st.session_state["sf_auto_nom"] = None
-    medicament = _catalogue_par_libelle().get(libelle)
-    if medicament:
-        _choisir_medicament(medicament)
+    « Il convient de fusionner les deux barres de recherche en une seule et
+    unique. » Elles l'étaient devenues par accumulation : un champ de scan,
+    puis une liste déroulante ajoutée en dessous. Deux barres superposées
+    posent une question à chaque geste — *laquelle ?* — et c'est une
+    question de trop devant un comptoir.
 
+    Une liste déroulante `accept_new_options` fait les deux :
 
-def _saisie_assistee() -> None:
-    """Liste déroulante cherchable : les propositions viennent à la frappe.
+    - **on tape des lettres** → la liste se réduit à la frappe, dans le
+      navigateur (le catalogue lui est envoyé une fois) ; chaque ligne porte
+      le nom, le dosage ET la taille de la boîte, et un clic remplit tout ;
+    - **on douche une boîte** → le code ne ressemble à aucune ligne, la
+      liste propose de l'accepter tel quel, et la douchette valide déjà
+      par sa touche Entrée. Le code arrive alors brut dans `_traiter_scan`,
+      exactement comme avant.
 
-    C'est le navigateur qui filtre, pas le serveur : le catalogue lui est
-    envoyé une fois, et la liste se réduit **dès les premières lettres**,
-    sans validation ni aller-retour. Un champ texte ordinaire ne peut pas le
-    faire — Streamlit n'y réagit qu'à la validation, et l'écran semblait
-    alors ne rien faire.
-
-    Chaque ligne porte le nom, le dosage ET la taille de la boîte : taper
-    « doliprane 1000 » puis choisir suffit à tout renseigner, sans second
-    écran de confirmation.
+    Sans base installée, le catalogue est vide : le champ reste une saisie
+    libre, et la douchette continue de fonctionner.
     """
     catalogue = _catalogue()
-    if not catalogue:
-        # La liste vit maintenant dans le flux principal, et non plus à côté
-        # de l'encadré qui expliquait son absence. Sans ce mot, elle
-        # disparaît sans laisser de trace : on croit à une régression, alors
-        # qu'il manque simplement la base à installer.
-        st.caption("🔎 La recherche par nom demande la **base publique des "
-                   "médicaments** — installez-la depuis la colonne de "
-                   "gauche, elle se télécharge en une fois.")
-        return
     st.selectbox(
-        "Médicament", [m["libelle"] for m in catalogue], index=None,
-        key="sf_auto_nom", on_change=_medicament_choisi_dans_la_liste,
+        "Code scanné ou nom du médicament",
+        [m["libelle"] for m in catalogue], index=None,
+        key="sf_scan", on_change=_traiter_scan, accept_new_options=True,
         label_visibility="collapsed",
-        placeholder=f"🔎 Ou tapez les premières lettres du médicament — la "
-                    f"liste se réduit à la frappe ({len(catalogue)} boîtes "
-                    f"référencées)")
+        placeholder=(
+            "🔦 Douchez la boîte — ou tapez les premières lettres du "
+            f"médicament ({len(catalogue)} boîtes référencées)"
+            if catalogue else
+            "🔦 Douchez la boîte — ou tapez le nom du médicament "
+            "et appuyez sur Entrée"))
+    if catalogue:
+        return
+    # « En tapant doliprane, l'utilitaire ne propose toujours pas de
+    # liste. » La cause était juste : la base n'est pas installée. Mais le
+    # seul bouton pour l'installer vivait dans la colonne de gauche,
+    # REPLIÉE par défaut — on lisait donc « installez-la » sans jamais
+    # trouver où. Le remède appartient à l'endroit où la panne se voit.
+    st.caption("🔎 **Taper un nom demande la base publique des "
+               "médicaments**, qui n'est pas encore installée sur ce "
+               "poste : un code-barres ne contient que le code CIP, "
+               "jamais le nom. Un seul téléchargement, puis elle "
+               "fonctionne hors ligne.")
+    if st.button("⬇️ Installer la base des médicaments",
+                 use_container_width=True, type="primary",
+                 key="sf_base_installer"):
+        _telecharger_la_base()
 def _basculer_sortie_manuelle() -> None:
     """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
     st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
@@ -937,20 +959,31 @@ def _base_publique() -> None:
                        "profiter.")
 
         if not st.button("⬇️ Télécharger / mettre à jour la base",
-                         use_container_width=True,
+                         use_container_width=True, key="sf_base_barre",
                          type="primary" if not info["existe"] else "secondary"):
             return
-        try:
-            with st.spinner("Téléchargement de la base officielle…"):
-                table = base_medicaments.telecharger_table()
-            base_medicaments.sauver_table(table, BASE_MEDICAMENTS_PATH)
-        except ValueError as e:
-            st.error(str(e))
-            return
-        st.session_state["sf_message"] = (
-            "ok", f"🌐 Base des médicaments installée — {len(table)} codes. "
-                  "Les prochains scans afficheront le nom tout seuls.")
-        st.rerun()
+        _telecharger_la_base()
+
+
+def _telecharger_la_base() -> None:
+    """Télécharge et installe la base publique. Ne lève pas.
+
+    Extrait de l'encadré de la barre latérale pour servir AUSSI au bouton
+    du flux principal : deux copies de ce téléchargement finiraient par ne
+    plus écrire le même fichier, ni dire la même chose en cas d'échec.
+    """
+    try:
+        with st.spinner("Téléchargement de la base officielle…"):
+            table = base_medicaments.telecharger_table()
+        base_medicaments.sauver_table(table, BASE_MEDICAMENTS_PATH)
+    except ValueError as e:
+        st.error(str(e))
+        return
+    st.session_state["sf_message"] = (
+        "ok", f"🌐 Base des médicaments installée — {len(table)} codes. "
+              "Tapez maintenant les premières lettres d'un nom : la liste "
+              "se réduit à la frappe.")
+    st.rerun()
 
 
 def _import_repertoire() -> None:
@@ -1204,15 +1237,11 @@ def rendre(etape) -> None:
     etape("1", "Scannez le produit",
           "Douchette ou clavier, puis le sens du mouvement.")
 
-    # LIGNE 1 — le champ, et rien d'autre. Un bouton « Chercher » l'a
-    # accompagné : il ne faisait que ce que fait la touche Entrée, et
-    # faisait donc douter qu'Entrée suffise. L'invite le dit maintenant
-    # en toutes lettres, et la douchette valide de toute façon seule.
-    st.text_input(
-        "Code scanné", key="sf_scan", on_change=_traiter_scan,
-        placeholder="🔦 Douchez la boîte — ou tapez le nom du médicament "
-                    "et appuyez sur Entrée",
-        label_visibility="collapsed")
+    # LIGNE 1 — LE champ, un seul. Il a longtemps été deux : un champ de
+    # scan, et une liste déroulante en dessous pour chercher par le nom.
+    # Deux barres superposées posent une question à chaque geste —
+    # laquelle ? — et c'est une question de trop devant un comptoir.
+    _champ_unique()
 
     # LIGNE 2 — le sens. Sous le champ et non au-dessus : on bipe d'abord,
     # on regarde le sens ensuite. Il reste choisi d'un scan à l'autre, donc
@@ -1226,16 +1255,10 @@ def rendre(etape) -> None:
         mode = st.session_state.get("sf_mode_choisi", MODE_ENTREE)
     st.session_state["sf_mode_choisi"] = mode
 
-    # LIGNE 3 — la liste des médicaments, à la frappe. Elle avait été
-    # repliée avec les autres exceptions ; ce n'en est pas une. Une boîte
-    # sur deux entre par là : le code-barres linéaire ne porte pas le nom,
-    # et le Data Matrix d'un produit jamais vu non plus. Repliée, il fallait
-    # savoir qu'elle existait — et personne ne déplie « le code ne se lit
-    # pas ? » quand le code se lit très bien.
-    # Seulement en Entrée : en Sortie on désigne un lot de l'inventaire,
-    # pas un médicament du catalogue national.
-    if mode == MODE_ENTREE:
-        _saisie_assistee()
+    # Il n'y a plus de ligne 3 : la liste des médicaments a fusionné avec
+    # le champ de scan ci-dessus. Deux barres de recherche superposées
+    # posaient une question à chaque geste — laquelle ? — alors qu'elles
+    # menaient au même endroit.
 
     # Tout le reste est replié. Ce sont des exceptions — étiquette abîmée,
     # boîte sans code-barres, dispensation à l'unité — et une exception

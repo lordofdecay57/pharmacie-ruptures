@@ -1,5 +1,10 @@
 # Outil de gestion des ruptures de stock (pharmacie)
-streamlit>=1.32,<2   # borne haute : une majeure changerait l'interface
+# Plancher a 1.48 : c'est la version qui apporte `accept_new_options` sur
+# st.selectbox, et le champ unique du stock interne en depend entierement —
+# sans lui, il n'accepterait plus un code-barres absent du catalogue, et la
+# douchette ne servirait plus a rien. Borne haute : une majeure changerait
+# l'interface.
+streamlit>=1.48,<2
 pandas>=2.0
 openpyxl>=3.1        # lecture/écriture .xlsx
 xlrd>=2.0.1          # lecture des vieux .xls

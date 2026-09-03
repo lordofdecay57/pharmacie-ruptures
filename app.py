@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.21"
+VERSION_APP = "6.23"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -155,20 +155,23 @@ st.markdown("""
    écran par ailleurs aligné. Les trois gardent donc la même forme, et
    c'est le turquoise qui désigne celui-ci — il se voit d'aussi loin,
    sans rien décaler.
-   `:nth-child(2)` : le stock interne est le deuxième des trois onglets,
-   dans l'ordre où `app.py` les déclare. */
-.st-key-espace_travail button:nth-child(2) {
+   `:nth-child(1)` : le stock interne est le PREMIER des trois onglets —
+   il l'est devenu à la demande de la pharmacie, qui y passe ses journées.
+   Ce sélecteur suit donc l'ordre de déclaration dans `app.py` : les
+   déplacer sans le corriger colorerait le mauvais onglet, et un test le
+   vérifie sur ce que rend le navigateur. */
+.st-key-espace_travail button:nth-child(1) {
   border-color: #0d9488 !important; background: #f0fdfa !important;
 }
-.st-key-espace_travail button:nth-child(2) p { color: #0f766e !important; }
-.st-key-espace_travail button:nth-child(2)[aria-checked="true"],
+.st-key-espace_travail button:nth-child(1) p { color: #0f766e !important; }
+.st-key-espace_travail button:nth-child(1)[aria-checked="true"],
 .st-key-espace_travail
-  button:nth-child(2)[kind="segmented_controlActive"] {
+  button:nth-child(1)[kind="segmented_controlActive"] {
   background: #0d9488 !important; border-color: #0d9488 !important;
 }
-.st-key-espace_travail button:nth-child(2)[aria-checked="true"] p,
+.st-key-espace_travail button:nth-child(1)[aria-checked="true"] p,
 .st-key-espace_travail
-  button:nth-child(2)[kind="segmented_controlActive"] p {
+  button:nth-child(1)[kind="segmented_controlActive"] p {
   color: #ffffff !important;
 }
 
@@ -190,13 +193,32 @@ st.markdown("""
   margin-bottom: 10px !important;
   box-shadow: 0 3px 12px rgba(13,148,136,.22) !important;
 }
-.st-key-sf_scan input {
+/* Le champ est une LISTE déroulante et non plus une simple ligne de
+   texte : les deux barres de recherche ont fusionné, et c'est elle qui
+   reçoit aussi bien la douchette que les premières lettres d'un nom.
+   Le cadre à habiller est celui que Streamlit pose AUTOUR du champ —
+   `[role="group"]`, qui réunit la saisie et le chevron — et non l'`input`
+   lui-même : le styler seul laisserait le liseré gris par-dessus.
+   Le RÔLE ARIA, et non une classe interne : Streamlit 1.61 a remplacé
+   BaseWeb par React Aria sur ce composant, et un sélecteur
+   `data-baseweb` n'y accroche plus rien — il a été écrit, et il ne
+   colorait rien du tout. Le rôle, lui, décrit ce que la chose EST. */
+/* `min-height` et non `padding` : Streamlit fixe la hauteur de ce cadre,
+   et un rembourrage seul le laissait à ses 40 px d'origine — la zone
+   « agrandie » ne l'était plus du tout depuis que le champ est une liste. */
+.st-key-sf_scan [role="group"] {
   border: 2px solid #0d9488 !important; background: #ffffff !important;
-  border-radius: 10px !important; padding: 22px 18px !important;
-  font-size: 1.5rem !important; font-weight: 700 !important;
-  color: #134e4a !important;
+  border-radius: 10px !important; padding: 0 10px !important;
+  min-height: 68px !important; height: auto !important;
+  display: flex !important; align-items: center !important;
+  box-shadow: none !important;
 }
-/* L'invite reste lisible mais s'efface derrière ce qu'on tape. */
+.st-key-sf_scan input {
+  font-size: 1.5rem !important; font-weight: 700 !important;
+  color: #134e4a !important; background: transparent !important;
+}
+/* L'invite reste lisible mais s'efface derrière ce qu'on tape. Elle est
+   longue — elle nomme les deux gestes — donc plus petite que la saisie. */
 .st-key-sf_scan input::placeholder {
   font-weight: 400 !important; color: #5b7f7a !important;
   font-size: 1.02rem !important;
@@ -204,19 +226,9 @@ st.markdown("""
 /* Le champ ACTIF s'allume : la douchette n'écrit que dans le champ qui a
    le curseur, et un bip perdu parce que le curseur était ailleurs ne
    laisse aucune trace à l'écran. */
-.st-key-sf_scan input:focus {
+.st-key-sf_scan [role="group"]:focus-within {
   border-color: #0f766e !important;
   box-shadow: 0 0 0 4px rgba(15,118,110,.30) !important;
-}
-
-/* LA LISTE DES MÉDICAMENTS, juste sous les deux boutons de sens. Elle est
-   l'autre façon d'entrer une boîte — un code-barres linéaire ne porte pas
-   le nom du produit — et non une exception : elle vit donc dans le flux,
-   discrète, sans le panneau turquoise qui appartient au geste du scan. */
-.st-key-sf_auto_nom { margin-top: 10px; }
-.st-key-sf_auto_nom div[data-baseweb="select"] > div {
-  border: 2px dashed #0d9488 !important; border-radius: 10px !important;
-  background: #f0fdfa !important; padding: 6px 4px !important;
 }
 
 /* Entrée / Sortie du stock interne : les DEUX boutons les plus cliqués de
@@ -486,7 +498,7 @@ def _garder_espace() -> None:
     """
     if st.session_state.get("espace_travail") is None:
         st.session_state["espace_travail"] = st.session_state.get(
-            "espace_retenu", ESPACE_CADENCIER)
+            "espace_retenu", ESPACE_STOCK_FERME)
     st.session_state["espace_retenu"] = st.session_state["espace_travail"]
 
 
@@ -499,11 +511,11 @@ _proposer_raccourci()
 
 espace = st.segmented_control(
     "Espace de travail",
-    [ESPACE_CADENCIER, ESPACE_STOCK_FERME, ESPACE_COMMANDES],
-    default=ESPACE_CADENCIER, label_visibility="collapsed",
+    [ESPACE_STOCK_FERME, ESPACE_CADENCIER, ESPACE_COMMANDES],
+    default=ESPACE_STOCK_FERME, label_visibility="collapsed",
     key="espace_travail", width="stretch", on_change=_garder_espace)
 if espace is None:  # premier rendu suivant une déselection
-    espace = st.session_state.get("espace_retenu", ESPACE_CADENCIER)
+    espace = st.session_state.get("espace_retenu", ESPACE_STOCK_FERME)
 
 if espace == ESPACE_COMMANDES:
     import ui_commandes_speciales
