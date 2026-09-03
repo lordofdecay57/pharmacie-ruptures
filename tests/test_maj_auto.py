@@ -16,6 +16,7 @@ simulées.
 import io
 import os
 import socket
+import subprocess
 import time
 import zipfile
 from pathlib import Path
@@ -486,3 +487,72 @@ class TestCoherence:
         assert not (RACINE / "maj_auto.log").exists() or True
         assert "maj_auto.log" in (RACINE / ".gitignore").read_text(
             encoding="utf-8")
+
+
+class TestLArchiveNeContientQueLeProgramme:
+    """Le ZIP lui-même, et non plus seulement ce qu'on en installe.
+
+    Jusqu'ici l'archive descendait entière — 2,4 Mo de tests compris — et
+    c'est à l'installation qu'on les écartait. Celui qui téléchargeait le
+    ZIP à la main, lui, dépliait tout dans le dossier de l'officine.
+
+    ``export-ignore`` retire ces chemins de ce que produit ``git
+    archive``, et c'est exactement ce que GitHub exécute pour son bouton
+    « Download ZIP ». Les fichiers restent dans le dépôt : ils ne sont
+    pas supprimés, ils ne sont pas EXPORTÉS.
+    """
+
+    FICHIER = RACINE / ".gitattributes"
+
+    def _exportes_ignores(self) -> set:
+        chemins = set()
+        for ligne in self.FICHIER.read_text(encoding="utf-8").splitlines():
+            nu = ligne.strip()
+            if not nu or nu.startswith("#") or "export-ignore" not in nu:
+                continue
+            chemins.add(nu.split()[0].rstrip("/"))
+        return chemins
+
+    def test_le_fichier_existe(self):
+        assert self.FICHIER.is_file(), (
+            "sans .gitattributes, GitHub met TOUT dans le ZIP")
+
+    @pytest.mark.parametrize("dossier", ["tests", "outils"])
+    def test_les_dossiers_de_fabrication_ne_sont_pas_exportes(self, dossier):
+        assert dossier in self._exportes_ignores()
+
+    def test_aucun_dossier_de_developpement_suivi_n_est_oublie(self):
+        """Les deux listes doivent dire la même chose. ``maj_auto`` écarte
+        ces dossiers à l'installation ; l'archive doit les écarter à la
+        source. Un dossier ajouté d'un côté et oublié de l'autre remettrait
+        les tests dans le dossier de la pharmacie.
+
+        On interroge **git**, et non le disque : ``__pycache__`` et
+        ``.pytest_cache`` existent bien ici, mais ils sont ignorés — ils
+        n'entrent dans aucune archive, et les inscrire ne protégerait de
+        rien. Seul ce que git SUIT peut se retrouver dans le ZIP.
+        """
+        suivis = subprocess.run(
+            ["git", "ls-files"], cwd=RACINE, capture_output=True, text=True)
+        if suivis.returncode != 0:              # pragma: no cover
+            pytest.skip("dépôt git indisponible")
+        dossiers = {chemin.split("/")[0]
+                    for chemin in suivis.stdout.splitlines() if "/" in chemin}
+        a_exclure = dossiers & set(maj_auto.DOSSIERS_DE_DEVELOPPEMENT)
+        oublies = a_exclure - self._exportes_ignores()
+        assert not oublies, f"absents de .gitattributes : {sorted(oublies)}"
+
+    def test_le_programme_lui_reste_dans_l_archive(self):
+        """Le garde-fou dans l'autre sens : exclure `app.py` ou un `.bat`
+        livrerait un ZIP qui ne démarre pas."""
+        exclus = self._exportes_ignores()
+        for indispensable in ("app.py", "lancer.bat", "requirements.txt",
+                              "stock_ferme.py", "presence.py", "maj_auto.py",
+                              "pharmacie.ico", ".streamlit"):
+            assert indispensable not in exclus, indispensable
+
+    def test_maj_auto_garde_son_propre_filtre(self):
+        """Ceinture ET bretelles, volontairement : un poste peut installer
+        une archive plus ancienne, faite avant ce .gitattributes. Le filtre
+        de `maj_auto` est ce qui la rend inoffensive."""
+        assert set(maj_auto.DOSSIERS_DE_DEVELOPPEMENT) >= {"tests", "outils"}
