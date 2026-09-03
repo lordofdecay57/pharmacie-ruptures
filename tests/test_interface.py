@@ -138,7 +138,7 @@ def page_avec_stock(application_avec_stock, pilote):
     onglet.wait_for_selector(".hero", timeout=60000)
     _onglet(onglet, ESPACE_STOCK_FERME).first.click()
     onglet.wait_for_timeout(6000)
-    onglet.get_by_text("Sortie", exact=False).first.click()
+    _mode(onglet, "Sortie").first.click()
     onglet.wait_for_timeout(4000)
     yield onglet
     navigateur.close()
@@ -195,6 +195,35 @@ def page_avec_base(application_avec_base, pilote):
     navigateur.close()
 
 
+def _saisir(page, texte: str, attente: int = 5000):
+    """Saisit ``texte`` dans LE champ, puis valide — comme une douchette.
+
+    On **tape** au lieu de remplir d'un bloc : le champ est une liste
+    déroulante depuis la fusion des deux barres de recherche, et sa liste
+    de propositions — dont l'entrée qui accepte une valeur inédite, celle
+    que retient un code-barres — n'apparaît qu'à la frappe. Un
+    ``fill()`` poserait la valeur sans que rien ne s'ouvre, et la touche
+    Entrée n'aurait alors rien à valider.
+
+    Le délai de 8 ms par caractère est celui d'une douchette réelle : elle
+    tape vite, et c'est justement ce qu'il faut éprouver.
+    """
+    champ = page.get_by_placeholder("Douchez la boîte").first
+    champ.click()
+    # Vidé au clavier et non par `fill("")` : le champ garde peut-être une
+    # ligne choisie au test précédent, et remplacer la valeur d'une liste
+    # par une chaîne vide n'y désélectionne rien — la frappe suivante
+    # s'ajouterait derrière, et le code scanné serait illisible.
+    champ.press("Control+a")
+    champ.press("Delete")
+    page.wait_for_timeout(300)
+    champ.type(texte, delay=8)
+    page.wait_for_timeout(800)
+    champ.press("Enter")
+    page.wait_for_timeout(attente)
+    return champ
+
+
 def _onglet(page, libelle: str):
     """Le bouton d'onglet portant ce libellé, dans la barre des espaces.
 
@@ -204,6 +233,18 @@ def _onglet(page, libelle: str):
     """
     return page.locator(".st-key-espace_travail button").filter(
         has_text=libelle)
+
+
+def _mode(page, libelle: str):
+    """Le bouton Entrée ou Sortie, dans le sélecteur de sens.
+
+    Ciblé par la clé du widget plutôt que par le texte seul : « Entrée » et
+    « Sortie » se retrouvent partout ailleurs sur cet écran — dans les
+    messages de confirmation, dans les libellés du dépliant, dans le
+    tableau — et « le premier texte trouvé » finissait par désigner l'un
+    d'eux plutôt que le bouton.
+    """
+    return page.locator(".st-key-sf_mode button").filter(has_text=libelle)
 
 
 def _sans_exception(page) -> None:
@@ -220,10 +261,10 @@ def _ouvrir_les_autres_gestes(page) -> None:
     exception affichée en permanence encombre le geste de tous les jours.
     Replié ne veut pas dire caché : le titre nomme les deux cas.
     """
-    # « sf_auto_nom » ne compte PLUS comme témoin d'ouverture : la liste des
-    # médicaments a quitté le dépliant pour le flux principal, où elle est
-    # visible en permanence. L'y chercher ferait croire le dépliant déjà
-    # ouvert, et plus rien ne serait jamais déplié.
+    # La liste des médicaments ne compte PLUS comme témoin d'ouverture :
+    # elle a quitté le dépliant, puis fusionné avec le champ de scan, où
+    # elle est visible en permanence. L'y chercher ferait croire le
+    # dépliant déjà ouvert, et plus rien ne serait jamais déplié.
     if page.locator(".st-key-sf_bouton_sortie_manuelle:visible, "
                     ".st-key-sf_bouton_saisie_manuelle:visible").count():
         return                              # déjà déplié
@@ -270,9 +311,30 @@ class TestDemarrage:
         assert _onglet(page, ESPACE_CADENCIER).count() == 1
         assert _onglet(page, ESPACE_STOCK_FERME).count() == 1
 
+    def test_le_stock_interne_est_le_premier_onglet(self, page):
+        """« Passe inventaire interne en premier onglet, avant rupture de
+        stock. » C'est l'écran de la journée : on y bipe des boîtes toute
+        la matinée, quand le cadencier se consulte une fois le matin.
+
+        Premier ET ouvert d'emblée : un premier onglet qu'il faut cliquer
+        pour voir n'est premier que sur le papier.
+        """
+        libelles = page.evaluate(
+            """() => [...document.querySelectorAll(
+                    '.st-key-espace_travail button')].map(
+                b => b.innerText.replace(/\\s+/g, ' ').trim())""")
+        assert len(libelles) == 3, libelles
+        assert ESPACE_STOCK_FERME in libelles[0], libelles
+        assert ESPACE_CADENCIER in libelles[1], libelles
+        assert ESPACE_STOCK_FERME in _onglet_actif(page, "espace_travail")
+
     def test_depot_de_fichiers_demande_avant_analyse(self, page):
         """Sans cadencier, le parcours principal invite à en déposer un
-        plutôt que de planter."""
+        plutôt que de planter. Il faut l'ouvrir : ce n'est plus l'écran
+        d'arrivée."""
+        _onglet(page, ESPACE_CADENCIER).first.click()
+        page.wait_for_timeout(5000)
+        _sans_exception(page)
         assert "Déposez" in page.content()
 
     def test_recliquer_l_onglet_actif_ne_le_deselectionne_pas(self, page):
@@ -280,8 +342,10 @@ class TestDemarrage:
         affiché, donc toujours un onglet allumé. Sans ce garde-fou, un second
         clic éteignait tout et il fallait cliquer sur l'AUTRE pour s'en
         sortir."""
+        _onglet(page, ESPACE_CADENCIER).first.click()
+        page.wait_for_timeout(4000)
         assert ESPACE_CADENCIER in _onglet_actif(page, "espace_travail")
-        page.get_by_text(ESPACE_CADENCIER).first.click()
+        _onglet(page, ESPACE_CADENCIER).first.click()
         page.wait_for_timeout(4000)
         _sans_exception(page)
         assert ESPACE_CADENCIER in _onglet_actif(page, "espace_travail")
@@ -328,13 +392,21 @@ class TestDemarrage:
 
         Mesuré pendant que l'onglet est ÉTEINT, et c'est le cas qui compte :
         allumé, on l'a déjà trouvé. Sans cette règle il redeviendrait gris
-        comme ses voisins tant qu'on n'a pas cliqué dessus.
+        comme ses voisins dès qu'on regarde un autre espace — c'est
+        justement là qu'il faut pouvoir le retrouver.
+
+        On l'éteint donc ici même, plutôt que de compter sur le test
+        précédent : la règle CSS le désigne par sa POSITION
+        (`:nth-child`), et un test qui dépend d'un ordre d'exécution
+        cesserait de mordre le jour où cette position change.
         """
+        _onglet(page, ESPACE_CADENCIER).first.click()
+        page.wait_for_timeout(4000)
         onglets = self._mesurer_les_onglets(page)
-        douchette = onglets[1]
+        douchette = onglets[0]
         assert "Stock interne" in douchette["texte"], onglets
         assert douchette["bord"] == "rgb(13, 148, 136)", onglets
-        for autre in (onglets[0], onglets[2]):
+        for autre in (onglets[1], onglets[2]):
             assert autre["bord"] != douchette["bord"], onglets
 
     def test_le_libelle_de_l_onglet_tient_en_deux_mots(self, page):
@@ -360,6 +432,49 @@ class TestEspaceStockFerme:
                         "Base publique des médicaments",
                         "Pré-remplir les noms", "Classer par"):
             assert attendu in contenu, f"« {attendu} » absent de l'écran"
+
+    def test_sans_base_le_bouton_pour_l_installer_est_sur_l_ecran(self, page):
+        """« En tapant doliprane, l'utilitaire ne propose toujours pas de
+        liste. »
+
+        La cause était juste — la base publique n'était pas installée — mais
+        le seul bouton pour l'installer vivait dans la **colonne de gauche,
+        repliée par défaut**. On lisait donc « installez-la » sans jamais
+        trouver où. Le remède appartient à l'endroit où la panne se voit.
+
+        Cette application de test n'a **pas** de base : c'est exactement le
+        cas de l'officine sur la capture reçue.
+        """
+        bouton = page.locator(".st-key-sf_base_installer button:visible")
+        assert bouton.count() == 1, "aucun bouton d'installation dans le flux"
+        # Dans le FLUX, et collé au champ qu'il débloque : juste sous lui,
+        # au-dessus du dépliant des exceptions. Dans la barre latérale il
+        # serait hors de portée — c'était tout le problème.
+        positions = page.evaluate(
+            """() => {
+                const y = (s) => {
+                    const e = document.querySelector(s);
+                    return e ? e.getBoundingClientRect().top : -1;
+                };
+                const exceptions = [...document.querySelectorAll(
+                        '[data-testid="stExpander"]')].find(
+                    e => e.innerText.includes('Le code ne se lit pas'));
+                return {champ: y('.st-key-sf_scan'),
+                        bouton: y('.st-key-sf_base_installer'),
+                        depliant: exceptions
+                            ? exceptions.getBoundingClientRect().top : -1};
+            }""")
+        assert positions["depliant"] > 0, positions
+        assert (positions["champ"] < positions["bouton"]
+                < positions["depliant"]), positions
+
+    def test_sans_base_le_message_dit_ou_est_le_bouton(self, page):
+        """Le message renvoyait vers « l'encadré ci-dessous » — parti dans la
+        colonne de gauche depuis. Une consigne qui désigne un endroit vide
+        est pire que pas de consigne : on cherche."""
+        contenu = page.content()
+        assert "Installer la base des médicaments" in contenu
+        assert "encadré ci-dessous" not in contenu
 
     def test_classer_par_nom_est_selectionnable(self, page):
         """Le choix de l'ordre est sur l'écran, pas dans la barre latérale :
@@ -391,10 +506,7 @@ class TestEspaceStockFerme:
         assert "non installée" in page.content()
 
     def test_scan_d_un_produit_inconnu_ouvre_la_fiche(self, page):
-        champ = page.get_by_placeholder("Douchez la boîte")
-        champ.fill("0103400937000013" + "17280331" + "10LOT-TEST")
-        champ.press("Enter")
-        page.wait_for_timeout(5000)
+        _saisir(page, "0103400937000013" + "17280331" + "10LOT-TEST")
         _sans_exception(page)
         contenu = page.content()
         assert "Fiche du produit à enregistrer" in contenu
@@ -416,10 +528,7 @@ class TestEspaceStockFerme:
         """Sans base publique installée, il n'y a rien à proposer — mais ce
         qui vient d'être tapé doit au moins servir de nom. Le retaper dans
         la fiche juste en dessous n'aurait aucun sens."""
-        champ = page.get_by_placeholder("Douchez la boîte")
-        champ.fill("DOLIPRANE 1000 mg")
-        champ.press("Enter")
-        page.wait_for_timeout(5000)
+        _saisir(page, "DOLIPRANE 1000 mg")
         _sans_exception(page)
         assert page.get_by_role(
             "textbox", name="Nom du médicament").input_value() == \
@@ -430,10 +539,7 @@ class TestEspaceStockFerme:
         de plus que la touche Entrée, et deux façons de valider la même
         saisie, c'est déjà une question de trop : lequel des deux ? Le champ
         occupe désormais toute la ligne, et l'invite dit quoi faire."""
-        champ = page.get_by_placeholder("Douchez la boîte")
-        champ.fill("AMOXICILLINE 1 g")
-        champ.press("Enter")
-        page.wait_for_timeout(5000)
+        champ = _saisir(page, "AMOXICILLINE 1 g")
         _sans_exception(page)
         # Le champ se vide : la saisie a bien été prise en compte.
         assert champ.input_value() == ""
@@ -456,19 +562,16 @@ class TestEspaceStockFerme:
         """Même garde-fou pour Entrée / Sortie : un scan a toujours un sens,
         aucun des deux ne doit pouvoir rester éteint."""
         assert "Entrée" in _onglet_actif(page, "sf_mode")
-        page.get_by_text("Entrée", exact=False).first.click()
+        _mode(page, "Entrée").first.click()
         page.wait_for_timeout(4000)
         _sans_exception(page)
         assert "Entrée" in _onglet_actif(page, "sf_mode")
 
     def test_sortie_sur_inventaire_vide_est_refusee_proprement(self, page):
-        page.get_by_text("Sortie", exact=False).first.click()
+        _mode(page, "Sortie").first.click()
         page.wait_for_timeout(3000)
         assert "Sortie" in _onglet_actif(page, "sf_mode")
-        champ = page.get_by_placeholder("Douchez la boîte")
-        champ.fill("3400937000013")
-        champ.press("Enter")
-        page.wait_for_timeout(4000)
+        _saisir(page, "3400937000013", attente=4000)
         _sans_exception(page)
         assert "Sortie impossible" in page.content()
 
@@ -523,13 +626,20 @@ class TestEspaceStockFerme:
         présente dans la page ne prouve pas qu'elle s'applique."""
         style = page.evaluate(
             """() => {
-                const e = document.querySelector('.st-key-sf_scan input');
-                if (!e) return null;
-                const s = getComputedStyle(e);
+                // Deux éléments distincts depuis que le champ est une
+                // liste : le CADRE porte la couleur, la SAISIE porte le
+                // texte. Les mesurer au même endroit donnerait 16 px —
+                // la taille par défaut du conteneur, que personne ne lit.
+                const cadre = document.querySelector(
+                    '.st-key-sf_scan [role=\"group\"]');
+                const saisie = document.querySelector('.st-key-sf_scan input');
+                if (!cadre || !saisie) return null;
+                const s = getComputedStyle(cadre);
                 return {bord: s.borderTopColor,
                         epaisseur: parseFloat(s.borderTopWidth),
                         fond: s.backgroundColor,
-                        taille: parseFloat(s.fontSize)};
+                        taille: parseFloat(
+                            getComputedStyle(saisie).fontSize)};
             }""")
         assert style, "le champ de scan est introuvable"
         # Turquoise de l'application, et non le gris par défaut.
@@ -552,7 +662,7 @@ class TestEspaceStockFerme:
         fonds = page.evaluate(
             """() => {
                 const p = document.querySelector('.st-key-sf_scan');
-                const c = document.querySelector('.st-key-sf_scan input');
+                const c = document.querySelector('.st-key-sf_scan [role=\"group\"]');
                 if (!p || !c) return null;
                 return {panneau: getComputedStyle(p).backgroundColor,
                         champ: getComputedStyle(c).backgroundColor,
@@ -651,56 +761,70 @@ class TestSaisieAssistee:
 
     def test_le_menu_est_present(self, page_avec_base):
         _sans_exception(page_avec_base)
-        assert page_avec_base.locator(".st-key-sf_auto_nom").count() == 1
+        assert page_avec_base.locator(".st-key-sf_scan").count() == 1
 
-    def test_la_liste_vit_dans_le_flux_et_non_dans_le_depliant(
-            self, page_avec_base):
-        """« Ajoute la possibilité, comme avant, d'accéder à la liste de
-        médicaments en tapant les premières lettres. »
+    def test_il_n_y_a_QU_UNE_barre_de_recherche(self, page_avec_base):
+        """« Il convient de fusionner les deux barres de recherche en une
+        seule et unique. »
 
-        Elle avait été repliée avec les exceptions ; ce n'en est pas une.
-        Un code-barres linéaire ne porte pas le nom du produit : une boîte
-        sur deux entre par cette liste. Repliée, il fallait savoir qu'elle
-        existait — et personne ne déplie « le code ne se lit pas ? » quand
-        le code se lit très bien.
+        Elles l'étaient devenues par accumulation : un champ de scan, puis
+        une liste déroulante ajoutée en dessous. Deux barres superposées
+        posent une question à chaque geste — *laquelle ?* — et c'est une
+        question de trop devant un comptoir.
 
-        Vérifié par la POSITION, et non par la visibilité : le dépliant est
-        ouvert dans cette page de test, et « visible » n'y prouverait donc
-        rien. Au-dessus de lui, elle est forcément hors de lui.
+        Compté sur l'écran RENDU, et sur les champs de saisie visibles :
+        c'est ce que voit quelqu'un qui arrive devant, et non ce que le
+        code croit afficher.
         """
-        positions = page_avec_base.evaluate(
+        barres = page_avec_base.evaluate(
             """() => {
-                const y = (s) => {
-                    const e = document.querySelector(s);
-                    return e ? e.getBoundingClientRect().top : -1;
-                };
-                // CE dépliant-là, désigné par son titre : la barre latérale
-                // en porte d'autres, plus haut dans le document, et « le
-                // premier trouvé » désignait l'un d'eux.
-                const exceptions = [...document.querySelectorAll(
-                        '[data-testid="stExpander"]')].find(
-                    e => e.innerText.includes('Le code ne se lit pas'));
-                return {liste: y('.st-key-sf_auto_nom'),
-                        sens: y('.st-key-sf_mode'),
-                        depliant: exceptions
-                            ? exceptions.getBoundingClientRect().top : -1};
+                const zone = document.querySelector(
+                    '[data-testid="stMainBlockContainer"]') || document.body;
+                return [...zone.querySelectorAll('input')].filter(e => {
+                    const r = e.getBoundingClientRect();
+                    // Au-dessus du dépliant des exceptions : la zone de
+                    // saisie proprement dite. Plus bas vivent la recherche
+                    // de l'inventaire et les cases de la fiche.
+                    return r.width > 0 && r.height > 0 && r.top < 700;
+                }).map(e => e.placeholder || '(sans invite)');
             }""")
-        assert positions["depliant"] > 0, positions
-        assert positions["liste"] > 0, positions
-        # Sous les deux boutons de sens — on bipe d'abord — mais AU-DESSUS
-        # du dépliant des exceptions.
-        assert positions["sens"] < positions["liste"], positions
-        assert positions["liste"] < positions["depliant"], positions
+        assert len(barres) == 1, barres
+        assert "Douchez la boîte" in barres[0], barres
 
-    def test_l_invite_parle_des_premieres_lettres(self, page_avec_base):
-        """L'invite est tout ce qui dit que la liste réagit à la frappe :
-        un menu déroulant ordinaire ne le laisse pas deviner."""
+    def test_l_unique_barre_dit_les_deux_gestes(self, page_avec_base):
+        """L'invite est tout ce qui dit que ce champ fait les deux : bipe
+        une boîte, ou réagit aux premières lettres d'un nom. Un menu
+        déroulant ordinaire ne le laisse pas deviner."""
         invite = page_avec_base.locator(
-            ".st-key-sf_auto_nom input").first.get_attribute("placeholder")
+            ".st-key-sf_scan input").first.get_attribute("placeholder")
+        assert "Douchez la boîte" in invite, invite
         assert "premières lettres" in invite, invite
 
+    def test_la_douchette_ecrit_toujours_dans_ce_champ(self, page_avec_base):
+        """LE risque de la fusion, et il porte sur le geste principal.
+
+        Le champ est devenu une **liste** de 19 600 médicaments. Une
+        douchette n'y choisit rien : elle tape un Data Matrix qui ne
+        ressemble à aucune ligne, puis valide. Si la liste refusait une
+        valeur inédite, la pharmacie ne pourrait plus scanner du tout —
+        c'est `accept_new_options` qui l'en empêche, et cela se vérifie
+        avec un vrai code, tapé à la vitesse d'une douchette, séparateur
+        FNC1 compris.
+
+        Le code désigne une boîte de la base : elle doit entrer au stock
+        **sans fiche à compléter**, puisque le nom vient de la base et la
+        péremption du code.
+        """
+        _saisir(page_avec_base,
+                "01034009359558381728063010LOT7\x1d", attente=6000)
+        _sans_exception(page_avec_base)
+        contenu = page_avec_base.content()
+        assert "1 boîte" in contenu, "la boîte scannée n'est pas entrée"
+        assert "DOLIPRANE" in contenu
+        assert "30/06/2028" in contenu, contenu[:0]
+
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
-        champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
+        champ = page_avec_base.locator(".st-key-sf_scan input").first
         champ.click()
         page_avec_base.wait_for_selector("[role='option']", timeout=15000)
         depart = page_avec_base.locator("[role='option']").all_inner_texts()
@@ -713,7 +837,7 @@ class TestSaisieAssistee:
         assert not any("plaquette" in p for p in depart), depart
 
     def test_les_propositions_arrivent_a_la_frappe(self, page_avec_base):
-        champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
+        champ = page_avec_base.locator(".st-key-sf_scan input").first
         for lettre in "DOLI":
             champ.press(lettre)
         # Le tri de Streamlit est APPROXIMATIF : il fait remonter ce qui
@@ -727,7 +851,7 @@ class TestSaisieAssistee:
 
     def test_le_dosage_affine_dans_la_meme_liste(self, page_avec_base):
         """« puis le dosage pour affiner » : pas de second écran."""
-        champ = page_avec_base.locator(".st-key-sf_auto_nom input").first
+        champ = page_avec_base.locator(".st-key-sf_scan input").first
         champ.type(" 1000")
         page_avec_base.wait_for_function(
             "document.querySelectorAll(\"[role='option']\")[0]"
@@ -774,6 +898,10 @@ class TestModeDemonstration:
 
     def test_analyse_complete(self, page, application):
         _ouvrir(page, application)
+        # Le stock interne est désormais l'espace d'arrivée : le parcours
+        # cadencier s'ouvre par son onglet.
+        _onglet(page, ESPACE_CADENCIER).first.click()
+        page.wait_for_timeout(5000)
         page.get_by_role("button", name="Essayer avec des données de "
                                         "démonstration").click()
         page.wait_for_timeout(6000)
@@ -829,10 +957,7 @@ def deux_postes(serveur_partage, pilote):
 
 def _scanner_et_enregistrer(page, code: str, nom: str) -> None:
     """Un scan de code inconnu, complété à la main : le geste du comptoir."""
-    champ = page.get_by_placeholder("Douchez la boîte")
-    champ.fill(code)
-    champ.press("Enter")
-    page.wait_for_timeout(4000)
+    _saisir(page, code, attente=4000)
     page.get_by_role("textbox", name="Nom du médicament").fill(nom)
     page.get_by_role("textbox", name="Date de péremption").fill("062028")
     page.get_by_role("button", name="Ajouter au stock").click()

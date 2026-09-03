@@ -346,22 +346,46 @@ quelqu'un qui ne connaît rien à l'informatique**.
 ```
 ╔═════════════════════════════════════════════════════════════════════╗
 ║ ┌─────────────────────────────────────────────────────────────────┐ ║
-║ │  🔦 Douchez la boîte — ou tapez le nom, puis Entrée              │ ║  ← panneau turquoise
+║ │  🔦 Douchez la boîte — ou tapez les premières lettres          ⌄ │ ║  ← panneau turquoise
 ║ └─────────────────────────────────────────────────────────────────┘ ║
 ╚═════════════════════════════════════════════════════════════════════╝
 ┌──────────────────────────────┬──────────────────────────────────────┐
 │         ➕ Entrée            │            ➖ Sortie                  │
 └──────────────────────────────┴──────────────────────────────────────┘
-┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-  🔎 Ou tapez les premières lettres — la liste se réduit à la frappe
-└ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
    ⌨️ Le code ne se lit pas ? Sortir à l'unité ?          ▸ (replié)
 ```
 
-Un bouton **« 🔎 Chercher »** accompagnait le champ. Il a été retiré : il ne
-faisait rien de plus que la touche **Entrée**, et deux façons de valider la
-même saisie, c'est déjà une question de trop — *lequel des deux ?* Le champ
-occupe désormais toute la ligne, et son invite dit quoi faire.
+### Une seule barre, qui fait les deux
+
+Il y en a eu deux, par accumulation : un champ de scan, puis une liste
+déroulante ajoutée en dessous pour chercher par le nom. **Deux barres
+superposées posent une question à chaque geste** — *laquelle ?* — et c'est
+une question de trop devant un comptoir.
+
+Elles n'en font plus qu'une. C'est une liste déroulante qui **accepte aussi
+une valeur inédite**, et cela suffit à couvrir les deux gestes :
+
+| Ce qu'on fait | Ce qui se passe |
+|---|---|
+| **on tape des lettres** | la liste se réduit à la frappe ; chaque ligne porte le nom, le dosage **et** la taille de la boîte, et un clic remplit toute la fiche |
+| **on douche une boîte** | le code ne ressemble à aucune ligne : la liste propose de l'accepter tel quel, et la douchette valide déjà par sa touche **Entrée** |
+
+> **Le risque de cette fusion porte sur le geste principal**, et il est
+> testé comme tel : le champ est devenu une liste de 19 600 médicaments, et
+> une douchette n'y choisit rien. Un test navigateur tape un vrai Data
+> Matrix — séparateur FNC1 compris, à la vitesse d'une douchette — et
+> vérifie que la boîte entre au stock sans fiche à compléter. Si la liste
+> refusait une valeur inédite, la pharmacie ne pourrait plus scanner du
+> tout.
+
+Un bouton **« 🔎 Chercher »** avait accompagné le champ, avant cela. Il a
+été retiré pour la même raison : il ne faisait rien de plus que la touche
+**Entrée**.
+
+> Streamlit écrit **« Add: … »** au-dessus de la liste quand ce qu'on tape
+> n'y figure pas. C'est le seul mot d'anglais de l'écran, il vient du
+> composant et ne se traduit pas. Une douchette ne le lit pas ; c'est ce
+> qu'elle valide.
 
 **La zone où l'on douche repose sur un panneau turquoise**, et le champ y
 est **blanc au milieu** — c'est le contraste entre les deux qui se voit de
@@ -381,20 +405,25 @@ Ce que cela remplace : l'écran portait **deux dispositions différentes**
 selon le mode — trois boutons en Entrée, deux encadrés côte à côte en
 Sortie — et il fallait le relire à chaque bascule pour retrouver le champ.
 
-**La liste des médicaments est revenue dans le flux**, sous les deux
-boutons de sens, en mode Entrée. Elle avait été repliée avec les
-exceptions ; ce n'en est pas une. Un code-barres **linéaire ne porte pas le
-nom** du produit, et le Data Matrix d'une boîte jamais vue non plus : une
-entrée sur deux passe par là. Repliée, il fallait savoir qu'elle existait —
-et personne ne déplie *« le code ne se lit pas ? »* quand le code se lit
-très bien. On tape les **premières lettres**, la liste se réduit à la
-frappe, et chaque ligne porte le nom, le dosage **et** la taille de la
-boîte : un clic remplit toute la fiche.
+**La recherche par nom demande la base publique des médicaments.** Sans
+elle, le champ reste une saisie libre — la douchette continue de
+fonctionner — et **le bouton qui l'installe s'affiche juste en dessous** :
 
-> Elle demande la **base publique des médicaments**. Si elle n'est pas
-> installée, la ligne est remplacée par un mot qui le dit et renvoie vers
-> la colonne de gauche — sans quoi elle disparaîtrait sans laisser de
-> trace, et son absence passerait pour une panne.
+```
+🔎 Taper un nom demande la base publique des médicaments, qui n'est pas
+   encore installée sur ce poste…
+┌─────────────────────────────────────────────────────────────────────┐
+│              ⬇️  Installer la base des médicaments                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+> Le bouton **n'existait que dans la colonne de gauche**, repliée par
+> défaut. L'officine lisait donc *« installez-la »* sans jamais trouver
+> où, et la recherche par nom restait muette — signalée comme une panne.
+> Le remède appartient à l'endroit où la panne se voit. Le message
+> renvoyait d'ailleurs vers « l'encadré ci-dessous », parti dans la barre
+> latérale depuis : une consigne qui désigne un endroit vide est pire que
+> pas de consigne.
 
 Ne reste **replié** que ce qui est vraiment exceptionnel : la saisie
 manuelle d'une boîte absente du catalogue national, et la sortie à l'unité.
@@ -1686,6 +1715,13 @@ Le sélecteur d'**espace de travail**, en haut de l'écran, choisit entre le
 parcours « cadencier » (Modules 1 et 2, décrit ci-dessous) et le **stock
 interne** (Module 3), qui, lui, ne demande aucun fichier : on y scanne, on
 imprime.
+
+**Le stock interne est le premier onglet, et l'écran d'arrivée.** C'est
+celui de la journée : on y bipe des boîtes toute la matinée, quand le
+cadencier se consulte une fois le matin. Il était deuxième, et le cadencier
+s'ouvrait par défaut — il fallait donc un clic pour arriver là où l'on
+passe ses heures. Premier **et** ouvert d'emblée : un premier onglet qu'il
+faut cliquer pour voir n'est premier que sur le papier.
 
 **Les trois onglets ont la même taille**, et un seul est en couleur :
 **🔒 Stock interne** porte le turquoise de l'application en permanence —
