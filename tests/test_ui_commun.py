@@ -327,6 +327,37 @@ class TestColonnePeremption:
         assert partagees == tableaux, (
             f"{tableaux} tableaux mais {partagees} passent par la fabrique")
 
+    def test_aucun_compteur_au_dessus_de_l_inventaire(self):
+        """Cinq tuiles tenaient là — lots, boîtes, périmés, moins d'un
+        mois, moins de trois mois — au-dessus d'un tableau qui dit déjà
+        tout cela, ligne par ligne, avec le statut en tête. Elles
+        repoussaient l'inventaire lui-même sous la ligne de flottaison,
+        et c'est lui qu'on vient voir."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "ui_stock_ferme.py").read_text(encoding="utf-8")
+        code = [l for l in source.splitlines()
+                if not l.strip().startswith("#")]
+        for interdit in ("_bandeau_kpi", "tuile_kpi", "Moins de 3 mois",
+                         "Lots enregistrés"):
+            fautives = [l for l in code if interdit in l]
+            assert not fautives, f"{interdit} : {fautives}"
+
+    def test_le_module_ne_reclame_plus_de_tuiles(self):
+        """Un paramètre que personne n'utilise finit par masquer un
+        oubli : `rendre` ne prend plus que l'habillage des étapes."""
+        import inspect
+        import ui_stock_ferme
+        parametres = list(
+            inspect.signature(ui_stock_ferme.rendre).parameters)
+        assert parametres == ["etape"], parametres
+
+    def test_le_resume_reste_pour_le_document_imprime(self):
+        """Retirer les tuiles de l'ÉCRAN n'est pas retirer l'en-tête du
+        PDF : sur le papier, le total est la seule vue d'ensemble."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "stock_ferme.py").read_text(encoding="utf-8")
+        assert source.count("resume_inventaire(") >= 2
+
     def test_l_ecran_montre_la_vue_essentielle(self):
         """Une fonction qui existe mais que personne n'appelle ne simplifie
         aucun écran."""
