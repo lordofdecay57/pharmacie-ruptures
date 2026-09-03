@@ -57,6 +57,17 @@ COLONNES_REPERTOIRE = ["Code CIP", "Nom du produit", "Dosage",
 #: rien n'est perdu, y compris pour les produits saisis à la main.
 COLONNES_AFFICHEES = [c for c in COLONNES_STOCK_FERME if c != "Dosage"]
 
+#: Les TROIS seules colonnes de l'écran de tous les jours : le nom, le
+#: code CIP, et si la boîte est périmée. Demande de la pharmacie, mot
+#: pour mot — « rien de plus ».
+#:
+#: Onze colonnes tenaient ici : boîtes, unités par boîte, vrac, total,
+#: lot, date d'enregistrement, jours restants. Devant l'armoire on ne
+#: cherche que deux choses — est-ce le bon produit, et est-il encore
+#: bon. Le reste reste enregistré, s'ouvre dans le détail, et part
+#: entier dans le CSV et le PDF : rien n'est perdu, tout est rangé.
+COLONNES_ESSENTIELLES = ["Statut", "Nom du produit", "Code CIP"]
+
 #: Péremption imminente : la boîte ne passera pas le mois. C'est le palier
 #: qui déclenche une action immédiate — retrait, remplacement, ou emploi en
 #: priorité absolue.
@@ -888,6 +899,20 @@ def inventaire_affichable(inventaire: pd.DataFrame,
                .reset_index(drop=True))
     return tableau.reindex(
         columns=["Statut"] + COLONNES_AFFICHEES + ["Jours restants"])
+
+
+def vue_essentielle(inventaire: pd.DataFrame,
+                    aujourdhui: Optional[date] = None,
+                    tri: str = TRI_PEREMPTION) -> pd.DataFrame:
+    """L'inventaire réduit à ce qu'on lit debout devant l'armoire.
+
+    Le nom, le code CIP, et si la boîte est périmée. Le même ordre et les
+    mêmes lignes que la vue complète — on n'en retire que des colonnes,
+    jamais un lot : un inventaire qui cache des lignes ne serait plus un
+    inventaire.
+    """
+    return inventaire_affichable(inventaire, aujourdhui, tri).reindex(
+        columns=COLONNES_ESSENTIELLES)
 
 
 def normaliser_tableau_edite(edite: pd.DataFrame) -> pd.DataFrame:

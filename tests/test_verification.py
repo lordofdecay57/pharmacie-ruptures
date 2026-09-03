@@ -67,14 +67,26 @@ class TestIlNeToucheARien:
     c'est prudent — et on ne le lancerait pas.
     """
 
-    #: Tout ce qui écrit, déplace ou supprime.
-    DANGEREUX = ("robocopy", "del ", "erase ", "rmdir", "rd ", "move ",
-                 "copy ", "xcopy", "mkdir", "md ", "ren ", "schtasks",
-                 "taskkill", "stop-process", "pip install")
+    #: Commandes qui écrivent, déplacent ou suppriment. Cherchées en
+    #: DÉBUT de ligne : « rd » ou « md » comme simple sous-chaîne
+    #: attrapaient « abo(rd t)outes » au milieu d'une phrase française.
+    COMMANDES = ("del", "erase", "rd", "rmdir", "md", "mkdir", "ren",
+                 "rename", "move", "copy", "xcopy", "robocopy", "schtasks",
+                 "taskkill", "attrib", "reg")
+
+    #: Celles-ci sont assez distinctives pour être cherchées partout —
+    #: y compris au milieu d'un « powershell -Command ... ».
+    PARTOUT = ("stop-process", "remove-item", "pip install", "new-item")
 
     def test_aucune_commande_ne_modifie_le_poste(self):
-        fautives = [l for l in _instructions()
-                    if any(m in l.strip().lower() for m in self.DANGEREUX)]
+        fautives = []
+        for ligne in _instructions():
+            nu = ligne.strip().lower()
+            premier = nu.split()[0] if nu.split() else ""
+            if premier in self.COMMANDES:
+                fautives.append(ligne)
+            elif any(m in nu for m in self.PARTOUT):
+                fautives.append(ligne)
         assert not fautives, fautives
 
     def test_il_n_ecrit_dans_aucun_fichier(self):
@@ -127,6 +139,46 @@ class TestCeQuIlControle:
 
     def test_la_version_installee(self):
         assert 'findstr /b "VERSION_APP"' in _texte()
+
+    def test_les_deux_versions_sont_comparees(self):
+        """« J'ai téléchargé la dernière version, tes modifications
+        n'apparaissent pas. » Personne ne peut répondre à cela sans
+        comparer le numéro du dossier à celui du dépôt. Alors on les
+        affiche côte à côte, et on tranche."""
+        texte = _texte()
+        assert "maj_auto.version_publiee" in texte, (
+            "la version publiée n'est jamais lue : impossible de dire si "
+            "le dossier est à jour")
+        assert "Derniere version publiee" in texte
+        assert '"%VER%"=="%PUBLIEE%"' in texte
+
+    def test_la_version_publiee_vient_de_maj_auto(self):
+        """Deux façons de chercher le même numéro finiraient par ne plus
+        donner la même réponse — et le diagnostic dirait le contraire de
+        la mise à jour."""
+        assert "import maj_auto" in _texte()
+
+    def test_un_dossier_en_retard_dit_de_fermer_l_application_d_abord(self):
+        """La copie échoue en silence sur un fichier ouvert : c'est ce qui
+        a fait croire que la mise à jour était passée."""
+        texte = _texte()
+        message = texte[texte.index("Ce dossier n'est PAS a jour"):][:600]
+        assert "fermez" in message.lower()
+
+    def test_un_dossier_a_jour_dit_de_RELANCER(self):
+        """L'autre moitié de la même question : les fichiers sont bien
+        remplacés, mais Streamlit garde son programme en mémoire."""
+        texte = _texte()
+        message = texte[texte.index("Ce dossier est a jour"):][:600]
+        assert "RELANCEE" in message
+        assert "Ctrl + Maj + R" in message
+
+    def test_le_depot_injoignable_ne_bloque_pas_le_bilan(self):
+        """Poste hors ligne, réseau filtré : les sept autres contrôles
+        gardent tout leur sens."""
+        texte = _texte()
+        assert "if not defined PUBLIEE goto sans_comparaison" in texte
+        assert "\n:sans_comparaison\n" in texte
 
     def test_le_montage_est_reconnu(self):
         """`adresse-serveur.txt` dit à lui seul si l'application tourne

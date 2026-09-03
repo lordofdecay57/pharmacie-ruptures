@@ -109,12 +109,43 @@ echo            "Pharmacie" du Bureau. La fenetre noire qui
 echo            s'ouvre EST l'application : la fermer l'arrete.
 set "SOUCIS=1"
 
-REM --- 5. La version installee ---------------------------------
+REM --- 5. La version : celle du dossier ET celle publiee --------
+REM  "Mes modifications n'apparaissent pas" : la question revient a
+REM  chaque mise a jour, et personne ne peut y repondre sans
+REM  comparer les deux numeros. Alors on les affiche cote a cote.
 :verifier_version
 set "VER="
 for /f "tokens=2 delims== " %%v in ('findstr /b "VERSION_APP" "%~dp0app.py" 2^>nul') do set "VER=%%~v"
 if not defined VER set "VER=?"
-echo  [INFO]    Version installee : v%VER%
+echo  [INFO]    Version dans CE dossier : v%VER%
+
+if not defined PY goto sans_comparaison
+REM  La version publiee, lue par maj_auto lui-meme : deux facons de
+REM  la chercher finiraient par ne plus donner la meme reponse.
+set "PUBLIEE="
+for /f "delims=" %%v in ('%PY% -c "import sys; sys.path.insert(0, sys.argv[1]); import maj_auto; print(maj_auto.version_publiee(10))" "%~dp0." 2^>nul') do set "PUBLIEE=%%v"
+if not defined PUBLIEE goto sans_comparaison
+echo  [INFO]    Derniere version publiee : v%PUBLIEE%
+if "%VER%"=="%PUBLIEE%" goto version_a_jour
+
+echo  [PROBLEME] Ce dossier n'est PAS a jour.
+echo             Remplacez son contenu par l'archive du depot, en
+echo             gardant vos fichiers .csv et config.yaml.
+echo             ATTENTION : fermez d'abord toutes les fenetres
+echo             noires de l'application. Windows ne peut pas
+echo             remplacer un fichier qu'un programme tient ouvert,
+echo             et la copie echoue en silence.
+set "SOUCIS=1"
+goto sans_comparaison
+
+:version_a_jour
+echo  [OK]      Ce dossier est a jour.
+echo            Si l'ecran affiche encore l'ancienne version, c'est
+echo            que l'application n'a pas ete RELANCEE : elle garde
+echo            son programme en memoire. Fermez la fenetre noire,
+echo            rouvrez-la, puis Ctrl + Maj + R dans le navigateur.
+
+:sans_comparaison
 
 REM --- 6. Le mode d'installation -------------------------------
 if not exist "%~dp0adresse-serveur.txt" goto sans_adresse
