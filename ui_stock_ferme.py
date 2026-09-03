@@ -358,6 +358,19 @@ def _traiter_sortie(code) -> None:
     if _appliquer(mouvement) is None:
         return
     if not cible:
+        # Rien à sortir en BOÎTE ne veut pas dire rien à l'inventaire : il
+        # peut rester les comprimés d'une boîte entamée. Le dire, plutôt
+        # que d'envoyer chercher un produit qui est bien là.
+        inventaire, _ = _etat()
+        vrac = stock_ferme.vrac_sans_boite(inventaire, cip=code.cip)
+        if vrac:
+            st.session_state["sf_message"] = (
+                "avertissement",
+                f"Plus de boîte entière pour « {code.cip or code.brut} » — "
+                f"il reste {vrac} unité(s) d'une boîte entamée. Passez par "
+                "« ⌨️ Le code ne se lit pas ? Sortir à l'unité ? » pour les "
+                "dispenser.")
+            return
         st.session_state["sf_message"] = (
             "avertissement",
             f"Sortie impossible : « {code.cip or code.brut} » n'est pas à "

@@ -37,7 +37,7 @@ from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          sauver_inventaire, sauver_repertoire,
                          sortir_unites, statut_peremption, total_unites,
                          COLONNES_ESSENTIELLES, vue_essentielle,
-                         unites_disponibles)
+                         unites_disponibles, vrac_sans_boite)
 
 AUJOURDHUI = date(2026, 7, 31)
 GS = "\x1d"
@@ -453,6 +453,86 @@ class TestLotASortir:
                                  cible["peremption"], cible["lot"], boites=1)
         assert "B2" not in list(inv["Lot"])            # lot épuisé, ligne ôtée
         assert lot_a_sortir(inv, cip="3400912345678")["lot"] == "A1"
+
+
+class TestUnLotEntameNEstPasUneBoite:
+    """Une boîte ouverte n'a plus de boîte à sortir — et le disait quand même.
+
+    Le geste : on dispense trois comprimés d'une boîte de dix (la ligne
+    passe à zéro boîte, sept unités en vrac), puis on douche cette même
+    boîte en mode Sortie. ``retirer_entree`` retirait alors « une boîte »
+    de zéro — ``max(0, 0 - 1)`` — l'inventaire ne bougeait pas d'un iota,
+    et l'écran annonçait en vert « 1 boîte sortie ».
+
+    Pire avec plusieurs lots : la règle FEFO élisait le lot entamé, le plus
+    proche de la péremption, et la douchette ne sortait plus RIEN, même
+    avec quatre boîtes pleines sur la ligne d'à côté. Un stupéfiant sorti
+    de l'armoire et resté à l'inventaire, sans un mot.
+    """
+
+    NOM = "DOLIPRANE"
+    CIP = "3400912345678"
+    PEREMPTION = date(2027, 1, 31)
+
+    def _entame(self, boites=1, par_boite=10, unites=3, lot="ENTAME"):
+        inv = ajouter_entree(inventaire_vide(),
+                             _entree(lot=lot, peremption=self.PEREMPTION,
+                                     boites=boites,
+                                     unites_par_boite=par_boite), AUJOURDHUI)
+        inv, _ = sortir_unites(inv, self.CIP, self.NOM, self.PEREMPTION, lot,
+                               unites)
+        return inv
+
+    def test_le_lot_entame_n_a_plus_de_boite(self):
+        inv = self._entame()
+        assert int(inv.loc[0, "Boîtes"]) == 0
+        assert int(inv.loc[0, "Unités en vrac"]) == 7
+
+    def test_il_n_est_plus_propose_a_la_sortie(self):
+        """Le seul lot du produit est entamé : il n'y a pas de boîte à
+        sortir, et le dire vaut mieux que ne rien faire en silence."""
+        assert lot_a_sortir(self._entame(), cip=self.CIP) is None
+
+    def test_meme_designe_precisement_par_son_data_matrix(self):
+        """Le Data Matrix nomme CETTE boîte — elle n'est plus entière."""
+        assert lot_a_sortir(self._entame(), cip=self.CIP,
+                            peremption=self.PEREMPTION, lot="ENTAME") is None
+
+    def test_fefo_saute_le_lot_entame_et_prend_le_suivant(self):
+        """LE cas qui perdait des boîtes : le lot entamé périme le premier,
+        FEFO le choisissait, et rien ne sortait alors que quatre boîtes
+        pleines attendaient juste à côté."""
+        inv = self._entame()
+        inv = ajouter_entree(inv, _entree(lot="PLEIN", boites=4,
+                                          peremption=date(2028, 6, 30)),
+                             AUJOURDHUI)
+        cible = lot_a_sortir(inv, cip=self.CIP)
+        assert cible is not None and cible["lot"] == "PLEIN"
+        apres = retirer_entree(inv, cible["cip"], cible["nom"],
+                               cible["peremption"], cible["lot"], boites=1)
+        assert int(apres[apres["Lot"] == "PLEIN"]["Boîtes"].iloc[0]) == 3
+
+    def test_le_vrac_reste_sortable_a_l_unite(self):
+        """On écarte le lot de la sortie EN BOÎTE, pas de l'inventaire :
+        ses sept comprimés se dispensent toujours."""
+        inv = self._entame()
+        assert unites_disponibles(inv, self.CIP, self.NOM,
+                                  self.PEREMPTION, "ENTAME") == 7
+
+    def test_vrac_sans_boite_permet_de_dire_la_verite(self):
+        """« Ce produit n'est pas à l'inventaire » serait faux : il reste
+        sept comprimés. Ce n'est pas la même réponse, ni le même geste."""
+        assert vrac_sans_boite(self._entame(), cip=self.CIP) == 7
+
+    def test_le_vrac_d_un_lot_encore_entier_ne_compte_pas(self):
+        """Un lot qui GARDE une boîte se sort à la douchette : ses unités
+        en vrac n'ont pas à apparaître dans le message de repli."""
+        inv = self._entame(boites=2)          # une entamée, une entière
+        assert int(inv.loc[0, "Boîtes"]) == 1
+        assert vrac_sans_boite(inv, cip=self.CIP) == 0
+
+    def test_produit_absent_n_a_pas_de_vrac(self):
+        assert vrac_sans_boite(self._entame(), cip="9999999999999") == 0
 
 
 class TestCleLot:

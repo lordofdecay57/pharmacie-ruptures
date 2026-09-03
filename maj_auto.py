@@ -277,7 +277,17 @@ def executer(dossier: Path, forcer: bool = False,
     # sur CES fichiers. Le test du port ci-dessus ne les voit pas — il
     # n'interroge que cette machine. Les nommer plutôt que dire « occupé »
     # : le lendemain, on saura quel poste était resté ouvert.
-    occupes = presence.postes_actifs(dossier)
+    #
+    # Les AUTRES postes, pas tous : le nôtre laisse son marqueur derrière
+    # lui chaque fois que la fenêtre noire est fermée par la croix — ce
+    # qui est la façon documentée d'arrêter l'application, et qui tue cmd
+    # avant sa ligne « presence.py --sortir ». Ce marqueur restait valide
+    # seize heures, pendant lesquelles le poste refusait de se mettre à
+    # jour en s'accusant lui-même : « Dossier en cours d'utilisation par
+    # POSTE-COMPTOIR-2 » affiché SUR le poste COMPTOIR-2. La session de ce
+    # poste-ci, elle, est déjà couverte : `application_en_cours` répond
+    # avant, sur le port.
+    occupes = presence.autres_postes(dossier)
     if occupes:
         return (APPLICATION_EN_COURS,
                 "Dossier en cours d'utilisation par : "

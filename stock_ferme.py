@@ -635,6 +635,35 @@ def unites_disponibles(inventaire: pd.DataFrame, cip: str, nom: str,
     return 0
 
 
+def vrac_sans_boite(inventaire: pd.DataFrame, cip: str = "",
+                    nom: str = "") -> int:
+    """Unités en vrac de ce produit dans les lots SANS boîte entière.
+
+    Sert à dire la vérité quand un scan de sortie ne trouve rien à sortir :
+    « ce produit n'est pas à l'inventaire » serait faux s'il reste sept
+    comprimés d'une boîte entamée. Ce n'est pas la même réponse, et ce
+    n'est pas le même geste — il faut passer par la sortie à l'unité.
+    """
+    if inventaire is None or inventaire.empty:
+        return 0
+    tableau = inventaire.reindex(columns=COLONNES_STOCK_FERME)
+    cible_cip = re.sub(r"\D", "", str(cip or ""))
+    cible_nom = _texte(nom).upper()
+    total = 0
+    for _, ligne in tableau.iterrows():
+        if cible_cip:
+            if re.sub(r"\D", "", _texte(ligne["Code CIP"])) != cible_cip:
+                continue
+        elif _texte(ligne["Nom du produit"]).upper() != cible_nom:
+            continue
+        boites = int(pd.to_numeric(ligne["Boîtes"], errors="coerce") or 0)
+        if boites >= 1:
+            continue
+        total += int(pd.to_numeric(ligne["Unités en vrac"],
+                                   errors="coerce") or 0)
+    return total
+
+
 def sortir_unites(inventaire: pd.DataFrame, cip: str, nom: str,
                   peremption: Optional[date], lot: str,
                   unites: int) -> tuple:
@@ -750,9 +779,17 @@ def lot_a_sortir(inventaire: pd.DataFrame, cip: str = "", nom: str = "",
     fond de l'armoire.
 
     Le drapeau ``exact`` distingue les deux cas : à ``False``, le scan
-    désignait une boîte qui n'est pas à l'inventaire sous ce lot, et on
-    propose la plus proche de la péremption. L'interface doit le dire —
-    sortir un lot pour un autre en silence ruinerait la traçabilité.
+    désignait une boîte qui n'est pas sortable sous ce lot, et on propose
+    la plus proche de la péremption. L'interface doit le dire — sortir un
+    lot pour un autre en silence ruinerait la traçabilité.
+
+    Seuls les lots ayant au moins **une boîte entière** sont proposés. Un
+    lot entamé — plus de boîte, mais des comprimés en vrac — n'a rien à
+    décrémenter : ``retirer_entree`` y retirerait « une boîte » de zéro,
+    ce qui ne change rien, et l'écran annonçait pourtant une sortie
+    réussie. Pire, la règle FEFO élisait ce lot entamé comme le plus
+    proche de la péremption, et la douchette ne sortait alors plus rien
+    du tout, même avec des boîtes pleines juste à côté.
     """
     if inventaire is None or inventaire.empty:
         return None
@@ -767,6 +804,8 @@ def lot_a_sortir(inventaire: pd.DataFrame, cip: str = "", nom: str = "",
         cible = _texte(nom).upper()
         candidats = tableau[tableau["Nom du produit"].map(
             lambda v: _texte(v).upper()) == cible]
+    candidats = candidats[candidats["Boîtes"].map(
+        lambda v: int(pd.to_numeric(v, errors="coerce") or 0)) >= 1]
     if candidats.empty:
         return None
 

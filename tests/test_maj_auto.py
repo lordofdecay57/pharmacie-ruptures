@@ -14,13 +14,16 @@ simulées.
 """
 
 import io
+import os
 import socket
+import time
 import zipfile
 from pathlib import Path
 
 import pytest
 
 import maj_auto
+import presence
 from maj_auto import (APPLICATION_EN_COURS, CODE_DEJA_OUVERTE, DEJA_A_JOUR,
                       ECHEC, FICHIERS_PROTEGES,
                       INJOIGNABLE, MISE_A_JOUR, application_en_cours,
@@ -335,6 +338,73 @@ class TestExecuter:
             {"app.py": 'VERSION_APP = "3.4"\n'}))
         dossier = _installation(tmp_path, "3.0")
         assert maj_auto.main(["--dossier", str(dossier)]) == 0
+
+
+class TestPostesSurLeMemeDossier:
+    """Le dossier vit sur un partage : qui d'autre travaille dessus ?
+
+    Le test du port ne voit que cette machine. Les marqueurs de
+    ``presence.py`` disent qui d'autre a ouvert l'application sur CES
+    fichiers — et c'est le seul garde-fou pour les autres comptoirs.
+    """
+
+    def _sans_reseau(self, monkeypatch, publiee="3.4"):
+        monkeypatch.setattr(maj_auto, "application_en_cours", lambda *a: False)
+        monkeypatch.setattr(maj_auto, "version_publiee", lambda *a, **k: publiee)
+        monkeypatch.setattr(maj_auto, "_telecharger", lambda *a: _archive(
+            {"app.py": f'VERSION_APP = "{publiee}"\n'}))
+
+    def test_un_autre_poste_ouvert_reporte_la_mise_a_jour(self, tmp_path,
+                                                          monkeypatch):
+        """Remplacer les fichiers sous la session du comptoir voisin, c'est
+        son écran qui part en erreur au milieu d'un scan."""
+        dossier = _installation(tmp_path, "3.0")
+        self._sans_reseau(monkeypatch)
+        presence.entrer(dossier, "COMPTOIR-2")
+        resultat, message = executer(dossier)
+        assert resultat == APPLICATION_EN_COURS
+        assert "COMPTOIR-2" in message          # on NOMME le poste en cause
+        assert lire_version(dossier / "app.py") == "3.0"
+
+    def test_son_propre_marqueur_oublie_ne_bloque_pas_le_poste(self, tmp_path,
+                                                               monkeypatch):
+        """LE blocage silencieux : la mise à jour ne se faisait plus.
+
+        Fermer la fenêtre noire par la croix — la façon documentée
+        d'arrêter l'application — tue cmd avant sa dernière ligne,
+        ``presence.py --sortir``. Le marqueur du poste restait donc là, et
+        valait seize heures. Au lancement suivant, ``maj_auto`` s'y voyait
+        lui-même, refusait de se mettre à jour, et affichait « Dossier en
+        cours d'utilisation par POSTE-COMPTOIR-2 » **sur** le poste
+        COMPTOIR-2. La session en cours de ce poste-ci, elle, est déjà
+        couverte par le test du port, qui répond avant.
+        """
+        dossier = _installation(tmp_path, "3.0")
+        self._sans_reseau(monkeypatch)
+        presence.entrer(dossier)                # marqueur de CE poste
+        resultat, message = executer(dossier)
+        assert resultat == MISE_A_JOUR, message
+        assert lire_version(dossier / "app.py") == "3.4"
+
+    def test_un_marqueur_perime_ne_bloque_plus(self, tmp_path, monkeypatch):
+        """Un poste débranché ne doit pas figer la pharmacie pour toujours."""
+        dossier = _installation(tmp_path, "3.0")
+        self._sans_reseau(monkeypatch)
+        vieux = presence.marqueur(dossier, "POSTE-ETEINT")
+        presence.entrer(dossier, "POSTE-ETEINT")
+        ancien = time.time() - (presence.DUREE_MAX_H + 1) * 3600
+        os.utime(vieux, (ancien, ancien))
+        assert executer(dossier)[0] == MISE_A_JOUR
+
+    def test_le_port_passe_avant_les_marqueurs(self, tmp_path, monkeypatch):
+        """L'application de CE poste tourne : on s'arrête là, sans même
+        aller lire les marqueurs du partage."""
+        dossier = _installation(tmp_path, "3.0")
+        monkeypatch.setattr(maj_auto, "application_en_cours", lambda *a: True)
+        monkeypatch.setattr(
+            presence, "autres_postes",
+            lambda *a, **k: pytest.fail("le port répond : rien à lire"))
+        assert executer(dossier)[0] == APPLICATION_EN_COURS
 
 
 class TestApplicationEnCours:
