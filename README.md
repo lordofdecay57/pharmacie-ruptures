@@ -588,8 +588,19 @@ Deux règles portent tout le reste :
   convertit pas en comprimés : seul le vrac déjà compté peut sortir. Inventer
   un contenu donnerait un stock d'unités imaginaire.
 
-Un lot qui n'a plus de boîte pleine mais garde des unités en vrac **reste
-proposé** à la sortie : ces comprimés sont bien dans l'armoire.
+**Un lot entamé n'est plus une boîte.** Un lot qui n'a plus de boîte pleine
+mais garde des unités en vrac reste proposé à la **sortie manuelle** — ces
+comprimés sont bien dans l'armoire — mais il est écarté de la **sortie à la
+douchette**, qui retire une boîte entière. Il n'y a plus de boîte à retirer.
+
+> Corrigé après audit (v6.19), et ce bug-là coûtait des boîtes. Doucher un
+> lot entamé retirait « une boîte » de zéro : l'inventaire ne bougeait pas,
+> et l'écran annonçait pourtant en vert « 1 boîte sortie ». Pire, la règle
+> FEFO élisait ce lot entamé comme le plus proche de la péremption — la
+> douchette ne sortait alors **plus rien du tout**, même avec quatre boîtes
+> pleines juste à côté. Le scan répond désormais : « Plus de boîte entière —
+> il reste 7 unité(s) d'une boîte entamée », et renvoie vers la sortie à
+> l'unité ; s'il existe un autre lot avec des boîtes, c'est lui qui sort.
 
 Et si l'inventaire est **vide** alors qu'on est en mode Sortie, l'écran le
 dit et propose un bouton pour repasser en Entrée : chaque scan répondrait
@@ -605,8 +616,6 @@ la ligne de flottaison, et c'est lui qu'on vient voir.
 
 > L'en-tête du **PDF garde son total**. Sur le papier il n'y a pas de
 > défilement : le résumé y est la seule vue d'ensemble.
-
-### L'inventaire affiché : trois colonnes
 
 Autre demande de la pharmacie, mot pour mot : *« au niveau de l'inventaire
 affiché on doit avoir seulement le nom du médicament, son CIP et savoir
@@ -1501,6 +1510,18 @@ Le marqueur **périme au bout de 16 heures** — une journée de travail. Un
 poste éteint brutalement laisse le sien : sans péremption, une seule
 coupure de courant figerait la pharmacie sur sa version pour toujours, et
 personne ne saurait pourquoi.
+
+**Les AUTRES postes, pas tous** — corrigé après audit (v6.19). Fermer la
+fenêtre noire par la croix est la façon documentée d'arrêter l'application,
+et elle tue `cmd` avant sa dernière ligne, `presence.py --sortir` : le poste
+laisse donc son propre marqueur derrière lui à peu près chaque soir. Au
+lancement suivant, `maj_auto` s'y voyait lui-même, refusait de se mettre à
+jour, et affichait « Dossier en cours d'utilisation par : COMPTOIR-2 »
+**sur** le poste COMPTOIR-2. La mise à jour automatique ne se faisait plus
+pendant seize heures, sans que rien ne le dise — c'est l'explication du
+« j'ai téléchargé la dernière version, tes modifications n'apparaissent
+pas ». La session en cours de ce poste-ci, elle, reste couverte : le test du
+port répond avant, et c'est lui qui la protège.
 
 La conséquence pratique est la bonne : **la mise à jour se fait au premier
 lancement du matin**, quand personne d'autre n'est encore ouvert. C'est
