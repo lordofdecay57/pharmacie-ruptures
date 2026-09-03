@@ -58,7 +58,7 @@ except ImportError:  # pragma: no cover - environnement sans rapidfuzz
 
 COUVERTURE_SANS_DATE_JOURS = 30   # objectif de couverture quand pas de réappro
 #: DLUO à moins de ~3 mois → alerte informative avant de commander plus.
-#: Même seuil que le palier « < 3 mois » du Module 3 (stock fermé), pour que
+#: Même seuil que le palier « < 3 mois » du Module 3 (stock interne), pour que
 #: « péremption proche » désigne la même chose d'un module à l'autre. Les
 #: deux modules restent indépendants : c'est une cohérence de vocabulaire,
 #: pas un couplage de code.

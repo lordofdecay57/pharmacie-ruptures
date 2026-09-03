@@ -22,7 +22,7 @@ import pandas as pd
 
 def dossier_donnees() -> Path:
     """Dossier où l'application range SES données (config, historique,
-    inventaire du stock fermé).
+    inventaire du stock interne).
 
     Par défaut le dossier du programme, ce qui rend l'installation
     autonome : on copie le dossier, on double-clique, tout est là.

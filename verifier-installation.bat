@@ -183,7 +183,7 @@ REM --- 8. Les donnees de la pharmacie --------------------------
 echo.
 echo  Donnees de la pharmacie presentes dans ce dossier :
 set "AUCUNE=1"
-call :fichier "stock_ferme.csv" "inventaire du stock ferme"
+call :fichier "stock_ferme.csv" "inventaire du stock interne"
 call :fichier "stock_ferme_produits.csv" "produits memorises"
 call :fichier "commandes_speciales.csv" "commandes speciales"
 call :fichier "historique_commandes.csv" "historique des analyses"

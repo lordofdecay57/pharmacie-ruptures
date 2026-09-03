@@ -51,7 +51,7 @@ MESSAGE_FICHIER_BLOQUE = (
 def _colonnes_vue() -> dict:
     """Mise en forme du tableau, partagée par toutes ses apparitions.
 
-    Tout est centré, comme dans le stock fermé : sur des colonnes larges,
+    Tout est centré, comme dans le stock interne : sur des colonnes larges,
     un nombre collé au bord droit finit loin de son en-tête.
     """
     # Colonnes de DATE et de nombre pouvant être vides : déclarées en
@@ -97,7 +97,7 @@ def _colonnes_vue() -> dict:
 def _etat() -> pd.DataFrame:
     """Les dossiers, relus dès qu'un autre poste écrit.
 
-    Même précaution que le stock fermé : sur un serveur partagé, garder la
+    Même précaution que le stock interne : sur un serveur partagé, garder la
     photo prise à l'ouverture ferait réenregistrer plus tard une version qui
     ignore la facturation saisie au comptoir d'à côté.
     """
@@ -166,10 +166,10 @@ def _catalogue() -> list:
 
 
 def _inventaire_stock_ferme() -> pd.DataFrame:
-    """L'inventaire du stock fermé, lu SANS importer son module.
+    """L'inventaire du stock interne, lu SANS importer son module.
 
     Le rapprochement a besoin des boîtes physiques, mais ce module n'a pas à
-    dépendre du stock fermé : on lit son fichier, colonnes utiles seulement.
+    dépendre du stock interne : on lit son fichier, colonnes utiles seulement.
     S'il n'existe pas, le rapprochement dira simplement « 0 au stock ».
     """
     if not INVENTAIRE_PATH.exists():
@@ -178,7 +178,7 @@ def _inventaire_stock_ferme() -> pd.DataFrame:
         tableau = pd.read_csv(INVENTAIRE_PATH, sep=";", dtype=str,
                               encoding="utf-8-sig").fillna("")
     except Exception:
-        _journal.warning("Inventaire du stock fermé illisible : %s",
+        _journal.warning("Inventaire du stock interne illisible : %s",
                          INVENTAIRE_PATH)
         return pd.DataFrame(columns=["Code CIP", "Boîtes"])
     return tableau.reindex(columns=["Code CIP", "Boîtes"]).fillna("")
@@ -364,7 +364,7 @@ def _formulaire_nouveau() -> None:
     else:
         st.caption("Base publique des médicaments absente : le nom et le "
                    "code CIP sont à taper à la main. Installez-la depuis "
-                   "l'espace « Stock fermé » pour les voir se remplir seuls.")
+                   "l'espace « Stock interne » pour les voir se remplir seuls.")
 
     with st.form("cs_nouveau", clear_on_submit=True):
         c1, c2, c3 = st.columns([2, 3, 2])
@@ -603,8 +603,8 @@ def _rapprochement(dossiers: pd.DataFrame) -> None:
     if rapprochement.empty:
         return
     ecarts = cs.ecarts_a_verifier(rapprochement)
-    titre = ("✅ Dossiers et stock fermé d'accord" if ecarts.empty else
-             f"⚠️ {len(ecarts)} écart(s) entre les dossiers et le stock fermé")
+    titre = ("✅ Dossiers et stock interne d'accord" if ecarts.empty else
+             f"⚠️ {len(ecarts)} écart(s) entre les dossiers et le stock interne")
     with st.expander(titre, expanded=not ecarts.empty):
         st.caption(
             "Le code CIP identifie un produit, pas une boîte : si deux "

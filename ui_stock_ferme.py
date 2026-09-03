@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Interface du Module 3 — Gestion d'un stock fermé.
+"""Interface du Module 3 — Gestion d'un stock interne.
 
 Écran autonome : il ne dépend d'aucun fichier déposé (ni cadencier, ni
 ruptures fournisseurs). Toute la logique métier est dans ``stock_ferme.py`` ;
@@ -121,7 +121,7 @@ def _etat():
             # en cours désignent des positions qui ne veulent plus rien dire.
             st.session_state["sf_generation"] = (
                 st.session_state.get("sf_generation", 0) + 1)
-        _journal.info("Stock fermé — %d lot(s) relus depuis %s",
+        _journal.info("Stock interne — %d lot(s) relus depuis %s",
                       len(st.session_state["sf_inventaire"]), INVENTAIRE_PATH)
 
     empreinte_repertoire = stock_ferme.empreinte_fichier(REPERTOIRE_PATH)
@@ -1091,7 +1091,7 @@ def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date,
     a_imprimer = (stock_ferme.filtrer_inventaire(
         inventaire, statuts=stock_ferme.STATUTS_A_TRAITER,
         aujourdhui=aujourdhui, tri=tri) if retrait_seul else inventaire)
-    titre = "Stock fermé — lots à retirer" if retrait_seul else "Stock fermé"
+    titre = "Stock interne — lots à retirer" if retrait_seul else "Stock interne"
     prefixe = "stock_ferme_retrait" if retrait_seul else "stock_ferme"
     nombre = len(stock_ferme.inventaire_affichable(a_imprimer, aujourdhui, tri))
     st.caption(f"{nombre} lot(s) dans le document.")
@@ -1116,7 +1116,7 @@ def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date,
 def _barre_laterale(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
                     aujourdhui: date) -> date:
     with st.sidebar:
-        st.markdown("## 🔒 Stock fermé")
+        st.markdown("## 🔒 Stock interne")
         st.caption("Inventaire tenu à part du stock officinal : armoire "
                    "sécurisée, dotation d'urgence, trousse, réserve de garde.")
 
@@ -1183,20 +1183,15 @@ def rendre(etape) -> None:
     etape("1", "Scannez le produit",
           "Douchette ou clavier, puis le sens du mouvement.")
 
-    # LIGNE 1 — le champ. Le bouton qui l'accompagne tient sur la même
-    # ligne : une douchette valide toute seule, un nom tapé au clavier
-    # non, et le champ restait alors plein sans que rien ne se passe.
-    # C'est arrivé en officine — « DOLIPRA » écrit, aucune réaction.
-    col_champ, col_valider = st.columns([6, 1])
-    col_champ.text_input(
+    # LIGNE 1 — le champ, et rien d'autre. Un bouton « Chercher » l'a
+    # accompagné : il ne faisait que ce que fait la touche Entrée, et
+    # faisait donc douter qu'Entrée suffise. L'invite le dit maintenant
+    # en toutes lettres, et la douchette valide de toute façon seule.
+    st.text_input(
         "Code scanné", key="sf_scan", on_change=_traiter_scan,
-        placeholder="🔦 Douchez la boîte — ou tapez le nom du médicament, "
-                    "puis Entrée",
+        placeholder="🔦 Douchez la boîte — ou tapez le nom du médicament "
+                    "et appuyez sur Entrée",
         label_visibility="collapsed")
-    col_valider.button("🔎 Chercher", use_container_width=True,
-                       on_click=_traiter_scan,
-                       help="Valide ce qui est écrit dans le champ — "
-                            "même chose que la touche Entrée.")
 
     # LIGNE 2 — le sens. Sous le champ et non au-dessus : on bipe d'abord,
     # on regarde le sens ensuite. Il reste choisi d'un scan à l'autre, donc

@@ -28,7 +28,7 @@ DEMARRAGE_MAX_S = 60
 #: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
 ESPACE_CADENCIER = "Cadencier — stock & ruptures"
-ESPACE_STOCK_FERME = "Stock fermé — inventaire scanné"
+ESPACE_STOCK_FERME = "Stock interne — inventaire scanné"
 ESPACE_COMMANDES = "Commandes spéciales"
 
 
@@ -83,7 +83,7 @@ def application(tmp_path_factory):
     """Streamlit lancé sur des données JETABLES, sans base publique.
 
     ``PHARMACIE_DONNEES`` déplace la configuration, l'historique et
-    l'inventaire du stock fermé dans un dossier temporaire. Sans cette
+    l'inventaire du stock interne dans un dossier temporaire. Sans cette
     variable, ces fichiers vivent à côté du programme (et non dans le
     répertoire de lancement) : le test lirait — et écraserait — les données
     réelles de la pharmacie.
@@ -131,7 +131,7 @@ def application_avec_stock(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def page_avec_stock(application_avec_stock, pilote):
-    """Onglet ouvert sur le stock fermé, en mode Sortie, inventaire rempli."""
+    """Onglet ouvert sur le stock interne, en mode Sortie, inventaire rempli."""
     navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
     onglet = navigateur.new_page(viewport={"width": 1400, "height": 1100})
     onglet.goto(application_avec_stock, wait_until="domcontentloaded")
@@ -183,7 +183,7 @@ def page(application, pilote):
 
 @pytest.fixture(scope="module")
 def page_avec_base(application_avec_base, pilote):
-    """Onglet ouvert sur l'espace « stock fermé », base publique installée."""
+    """Onglet ouvert sur l'espace « stock interne », base publique installée."""
     navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
     onglet = navigateur.new_page(viewport={"width": 1400, "height": 1100})
     onglet.goto(application_avec_base, wait_until="domcontentloaded")
@@ -277,6 +277,47 @@ class TestDemarrage:
         _sans_exception(page)
         assert ESPACE_CADENCIER in _onglet_actif(page, "espace_travail")
 
+    def test_l_onglet_ou_l_on_douche_ressort_des_autres(self, page):
+        """« Agrandir l'onglet doucher, il faut que ça ressorte par rapport
+        au reste. »
+
+        Trois onglets de même taille se parcourent du regard, un par un,
+        même quand l'un porte une couleur. Celui où l'on prend la douchette
+        est donc PLUS GRAND que les deux autres — c'est le geste de tous les
+        jours, les deux autres sont des consultations.
+
+        Mesuré ici pendant que l'onglet est ÉTEINT, et c'est le cas qui
+        compte : allumé, on l'a déjà trouvé. Et mesuré sur ce que rend le
+        navigateur — une règle CSS présente dans la page ne prouve pas
+        qu'elle s'applique, et `align-items` a précisément le pouvoir
+        d'étirer les trois à la même hauteur.
+        """
+        onglets = page.evaluate(
+            """() => [...document.querySelectorAll(
+                    '.st-key-espace_travail button')].map(b => {
+                const r = b.getBoundingClientRect(), s = getComputedStyle(b);
+                const p = b.querySelector('p');
+                return {texte: b.innerText.replace(/\\s+/g, ' ').trim(),
+                        largeur: r.width, hauteur: r.height,
+                        bord: s.borderTopColor,
+                        police: parseFloat(
+                            getComputedStyle(p || b).fontSize)};
+            })""")
+        assert len(onglets) == 3, onglets
+        douchette = onglets[1]
+        autres = [onglets[0], onglets[2]]
+        assert "Stock interne" in douchette["texte"], onglets
+        # Hauteur et taille de police, pas largeur : la barre passe à la
+        # ligne quand la fenêtre est étroite, et un onglet seul sur sa ligne
+        # s'étale sur toute la largeur. Un test sur la largeur ne mesurerait
+        # que le hasard de la coupure.
+        for autre in autres:
+            assert douchette["hauteur"] > autre["hauteur"], onglets
+            assert douchette["police"] > autre["police"], onglets
+        # La taille s'ajoute à la couleur, elle ne la remplace pas : le
+        # turquoise reste porté même éteint.
+        assert douchette["bord"] == "rgb(13, 148, 136)", onglets
+
 
 class TestEspaceStockFerme:
     """Le module 3 doit fonctionner SANS aucun fichier déposé."""
@@ -356,13 +397,14 @@ class TestEspaceStockFerme:
             "textbox", name="Nom du médicament").input_value() == \
             "DOLIPRANE 1000 mg"
 
-    def test_le_bouton_chercher_vaut_la_touche_entree(self, page):
-        """La douchette valide toute seule ; un nom tapé au clavier, non.
-        Sans ce bouton, le champ restait plein et il ne se passait
-        strictement rien — c'est le blocage rencontré en officine."""
+    def test_la_touche_entree_suffit(self, page):
+        """Un bouton « Chercher » accompagnait le champ. Il ne faisait rien
+        de plus que la touche Entrée, et deux façons de valider la même
+        saisie, c'est déjà une question de trop : lequel des deux ? Le champ
+        occupe désormais toute la ligne, et l'invite dit quoi faire."""
         champ = page.get_by_placeholder("Douchez la boîte")
         champ.fill("AMOXICILLINE 1 g")
-        page.get_by_role("button", name="Chercher").click()
+        champ.press("Enter")
         page.wait_for_timeout(5000)
         _sans_exception(page)
         # Le champ se vide : la saisie a bien été prise en compte.
@@ -370,6 +412,7 @@ class TestEspaceStockFerme:
         assert page.get_by_role(
             "textbox", name="Nom du médicament").input_value() == \
             "AMOXICILLINE 1 g"
+        assert page.get_by_role("button", name="Chercher").count() == 0
 
     def test_le_champ_invite_a_taper_un_nom(self, page):
         """La présélection ne sert à rien si personne ne sait qu'on peut

@@ -314,7 +314,7 @@ class _FauxStreamlit:
 
 @pytest.fixture
 def ecran(tmp_path, monkeypatch):
-    """L'écran du stock fermé, branché sur des fichiers jetables."""
+    """L'écran du stock interne, branché sur des fichiers jetables."""
     pytest.importorskip("streamlit")
     import ui_stock_ferme
 

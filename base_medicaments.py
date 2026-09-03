@@ -17,7 +17,7 @@ sur le poste : le téléchargement n'a lieu que lorsqu'on le demande, et
 l'identification fonctionne ensuite **hors ligne**.
 
 ISOLATION : ce module ne connaît ni le cadencier, ni les ruptures, ni le
-stock fermé. Il ne sait faire qu'une chose — répondre « quel médicament
+stock interne. Il ne sait faire qu'une chose — répondre « quel médicament
 porte ce code ? ».
 """
 
@@ -120,7 +120,7 @@ def unites_par_boite(presentation: str) -> int:
     Lu dans le libellé officiel du conditionnement. En cas de doute — deux
     nombres possibles, forme non dénombrable, libellé alambiqué — on rend
     ``0`` plutôt qu'une valeur inventée : une quantité fausse sur un stock
-    fermé est pire qu'une case vide, elle ne se remarque pas.
+    interne est pire qu'une case vide, elle ne se remarque pas.
     """
     texte = _aplatir(presentation)
     valeurs = {int(m.group(1)) for m in _MOTIF_UNITES.finditer(texte)}

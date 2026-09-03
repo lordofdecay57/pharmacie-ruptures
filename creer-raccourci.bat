@@ -113,7 +113,7 @@ REM  postes ou le Bureau est redirige (OneDrive, profil itinerant), le
 REM  chemin en dur pointe sur un dossier vide que personne ne voit.
 REM  Une seule ligne entre guillemets : cmd ne reinterprete alors ni le
 REM  point-virgule ni les parentheses.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$bureau = [Environment]::GetFolderPath('Desktop'); if (-not $bureau) { exit 1 }; $chemin = Join-Path $bureau $env:NOM; $lien = (New-Object -ComObject WScript.Shell).CreateShortcut($chemin); $lien.TargetPath = $env:CIBLE; $lien.WorkingDirectory = $env:APP; $lien.Description = 'Pilotage pharmacie - stock, ruptures et stock ferme'; if (Test-Path $env:ICONE) { $lien.IconLocation = $env:ICONE }; $lien.Save(); if (Test-Path $chemin) { Write-Host ('  Icone posee sur le Bureau : ' + $chemin) } else { exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$bureau = [Environment]::GetFolderPath('Desktop'); if (-not $bureau) { exit 1 }; $chemin = Join-Path $bureau $env:NOM; $lien = (New-Object -ComObject WScript.Shell).CreateShortcut($chemin); $lien.TargetPath = $env:CIBLE; $lien.WorkingDirectory = $env:APP; $lien.Description = 'Pilotage pharmacie - stock, ruptures et stock interne'; if (Test-Path $env:ICONE) { $lien.IconLocation = $env:ICONE }; $lien.Save(); if (Test-Path $chemin) { Write-Host ('  Icone posee sur le Bureau : ' + $chemin) } else { exit 1 }"
 if not errorlevel 1 goto pose
 
 REM --- Repli : un raccourci Internet (.url) --------------------

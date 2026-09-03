@@ -483,7 +483,7 @@ class TestRapprochementStock:
 
     def test_sans_inventaire_le_rapprochement_reste_lisible(self):
         rapprochement = cs.rapprochement_stock(_dossier(boites=1), None)
-        assert rapprochement.iloc[0]["Présent au stock fermé"] == 0
+        assert rapprochement.iloc[0]["Présent au stock interne"] == 0
 
 
 class TestFichier:
