@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.20"
+VERSION_APP = "6.21"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -174,28 +174,49 @@ st.markdown("""
 
 /* LA ZONE OÙ L'ON DOUCHE. C'est le point de départ de tout l'écran, et
    c'était un champ de texte gris comme les autres : rien ne disait que
-   c'est là que ça se passe. Elle est maintenant encadrée de turquoise,
-   sur fond clair, et le texte y est plus grand — un code scanné se relit
-   d'un coup d'œil, sans se pencher.
-   Ciblé par la clé du widget (st-key-sf_scan) : les autres champs de
-   l'application restent inchangés. */
+   c'est là que ça se passe.
+   Un premier essai s'était contenté de teinter le champ en #f0fdfa — un
+   turquoise si pâle qu'à l'écran de l'officine il passait pour du blanc.
+   La zone porte donc maintenant un vrai PANNEAU coloré, et le champ y est
+   blanc AU MILIEU : c'est le contraste entre les deux qui se voit de
+   loin, pas la teinte du champ seul.
+   Ciblé par la clé du widget (st-key-sf_scan), qui enveloppe le champ :
+   les autres champs de l'application restent inchangés. */
+.st-key-sf_scan {
+  background: #ccfbf1 !important;
+  border: 2px solid #0d9488 !important;
+  border-radius: 16px !important;
+  padding: 16px 18px !important;
+  margin-bottom: 10px !important;
+  box-shadow: 0 3px 12px rgba(13,148,136,.22) !important;
+}
 .st-key-sf_scan input {
-  border: 2px solid #0d9488 !important; background: #f0fdfa !important;
-  border-radius: 10px !important; padding: 14px 16px !important;
-  font-size: 1.15rem !important; font-weight: 600 !important;
+  border: 2px solid #0d9488 !important; background: #ffffff !important;
+  border-radius: 10px !important; padding: 22px 18px !important;
+  font-size: 1.5rem !important; font-weight: 700 !important;
   color: #134e4a !important;
 }
 /* L'invite reste lisible mais s'efface derrière ce qu'on tape. */
 .st-key-sf_scan input::placeholder {
   font-weight: 400 !important; color: #5b7f7a !important;
-  font-size: .98rem !important;
+  font-size: 1.02rem !important;
 }
 /* Le champ ACTIF s'allume : la douchette n'écrit que dans le champ qui a
    le curseur, et un bip perdu parce que le curseur était ailleurs ne
    laisse aucune trace à l'écran. */
 .st-key-sf_scan input:focus {
-  border-color: #0f766e !important; background: #ffffff !important;
-  box-shadow: 0 0 0 4px rgba(13,148,136,.22) !important;
+  border-color: #0f766e !important;
+  box-shadow: 0 0 0 4px rgba(15,118,110,.30) !important;
+}
+
+/* LA LISTE DES MÉDICAMENTS, juste sous les deux boutons de sens. Elle est
+   l'autre façon d'entrer une boîte — un code-barres linéaire ne porte pas
+   le nom du produit — et non une exception : elle vit donc dans le flux,
+   discrète, sans le panneau turquoise qui appartient au geste du scan. */
+.st-key-sf_auto_nom { margin-top: 10px; }
+.st-key-sf_auto_nom div[data-baseweb="select"] > div {
+  border: 2px dashed #0d9488 !important; border-radius: 10px !important;
+  background: #f0fdfa !important; padding: 6px 4px !important;
 }
 
 /* Entrée / Sortie du stock interne : les DEUX boutons les plus cliqués de

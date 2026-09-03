@@ -587,13 +587,21 @@ def _saisie_assistee() -> None:
     """
     catalogue = _catalogue()
     if not catalogue:
-        return          # base absente : l'encadré ci-dessous le dit déjà
+        # La liste vit maintenant dans le flux principal, et non plus à côté
+        # de l'encadré qui expliquait son absence. Sans ce mot, elle
+        # disparaît sans laisser de trace : on croit à une régression, alors
+        # qu'il manque simplement la base à installer.
+        st.caption("🔎 La recherche par nom demande la **base publique des "
+                   "médicaments** — installez-la depuis la colonne de "
+                   "gauche, elle se télécharge en une fois.")
+        return
     st.selectbox(
         "Médicament", [m["libelle"] for m in catalogue], index=None,
         key="sf_auto_nom", on_change=_medicament_choisi_dans_la_liste,
         label_visibility="collapsed",
-        placeholder=f"🔎 Tapez le nom du médicament, puis le dosage pour "
-                    f"affiner ({len(catalogue)} boîtes référencées)")
+        placeholder=f"🔎 Ou tapez les premières lettres du médicament — la "
+                    f"liste se réduit à la frappe ({len(catalogue)} boîtes "
+                    f"référencées)")
 def _basculer_sortie_manuelle() -> None:
     """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
     st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
@@ -1218,6 +1226,17 @@ def rendre(etape) -> None:
         mode = st.session_state.get("sf_mode_choisi", MODE_ENTREE)
     st.session_state["sf_mode_choisi"] = mode
 
+    # LIGNE 3 — la liste des médicaments, à la frappe. Elle avait été
+    # repliée avec les autres exceptions ; ce n'en est pas une. Une boîte
+    # sur deux entre par là : le code-barres linéaire ne porte pas le nom,
+    # et le Data Matrix d'un produit jamais vu non plus. Repliée, il fallait
+    # savoir qu'elle existait — et personne ne déplie « le code ne se lit
+    # pas ? » quand le code se lit très bien.
+    # Seulement en Entrée : en Sortie on désigne un lot de l'inventaire,
+    # pas un médicament du catalogue national.
+    if mode == MODE_ENTREE:
+        _saisie_assistee()
+
     # Tout le reste est replié. Ce sont des exceptions — étiquette abîmée,
     # boîte sans code-barres, dispensation à l'unité — et une exception
     # affichée en permanence encombre le geste de tous les jours. Le titre
@@ -1228,9 +1247,8 @@ def rendre(etape) -> None:
                 "⌨️ Saisie manuelle", use_container_width=True,
                 key="sf_bouton_saisie_manuelle",
                 on_click=_saisie_manuelle_vierge,
-                help="Enregistrer une boîte dont le code ne se lit pas.")
-            st.caption("Ou cherchez le médicament par son nom :")
-            _saisie_assistee()
+                help="Enregistrer une boîte dont le code ne se lit pas, et "
+                     "qui n'est pas non plus au catalogue national.")
         else:
             st.button(
                 "⌨️ Sortie manuelle", use_container_width=True,
