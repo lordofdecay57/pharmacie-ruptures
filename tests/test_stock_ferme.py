@@ -36,6 +36,7 @@ from stock_ferme import (COLONNES_STOCK_FERME, EntreeStock, STATUT_CRITIQUE,
                          repertoire_vide, resume_inventaire, retirer_entree,
                          sauver_inventaire, sauver_repertoire,
                          sortir_unites, statut_peremption, total_unites,
+                         COLONNES_ESSENTIELLES, vue_essentielle,
                          unites_disponibles)
 
 AUJOURDHUI = date(2026, 7, 31)
@@ -592,6 +593,75 @@ class TestDosageDansLeNom:
         relu = charger_inventaire(chemin)
         assert relu.iloc[0]["Nom du produit"] == "MORPHINE 10 mg/mL"
         assert relu.iloc[0]["Dosage"] == ""
+
+
+class TestVueEssentielle:
+    """L'inventaire de tous les jours : trois colonnes, rien de plus.
+
+    Demande de la pharmacie, mot pour mot : « au niveau de l'inventaire
+    affiché on doit avoir seulement le nom du médicament, son CIP et
+    savoir s'il est périmé, rien de plus ».
+
+    Onze colonnes tenaient là — boîtes, unités par boîte, vrac, total,
+    lot, date d'enregistrement, jours restants. Devant l'armoire on ne
+    cherche que deux choses : est-ce le bon produit, et est-il encore
+    bon.
+    """
+
+    def _inventaire(self):
+        inv = inventaire_vide()
+        for nom, cip, peremption in (
+                ("ZOLPIDEM", "3400930000011", date(2020, 1, 1)),
+                ("AMOXICILLINE", "3400930000028", date(2028, 1, 31))):
+            inv = ajouter_entree(inv, _entree(nom=nom, cip=cip,
+                                              peremption=peremption),
+                                 AUJOURDHUI)
+        return inv
+
+    def test_exactement_trois_colonnes(self):
+        vue = vue_essentielle(self._inventaire(), AUJOURDHUI)
+        assert list(vue.columns) == ["Statut", "Nom du produit", "Code CIP"]
+        assert list(vue.columns) == COLONNES_ESSENTIELLES
+
+    def test_un_inventaire_vide_garde_ses_colonnes(self):
+        """Sans elles, le tableau vide s'afficherait sans en-tête et on
+        croirait l'écran cassé."""
+        assert list(vue_essentielle(inventaire_vide()).columns) \
+            == COLONNES_ESSENTIELLES
+
+    def test_le_perime_se_voit(self):
+        """« Savoir s'il est périmé » : c'est la seule des trois colonnes
+        qui ne se lit pas sur la boîte."""
+        vue = vue_essentielle(self._inventaire(), AUJOURDHUI)
+        statuts = dict(zip(vue["Nom du produit"], vue["Statut"]))
+        assert statuts["ZOLPIDEM"] == STATUT_PERIME
+        assert statuts["AMOXICILLINE"] == STATUT_OK
+
+    def test_aucune_ligne_n_est_perdue(self):
+        """On retire des COLONNES, jamais un lot : un inventaire qui cache
+        des lignes ne serait plus un inventaire."""
+        inv = self._inventaire()
+        complete = inventaire_affichable(inv, AUJOURDHUI)
+        assert len(vue_essentielle(inv, AUJOURDHUI)) == len(complete)
+
+    def test_le_meme_ordre_que_la_vue_complete(self):
+        """Les deux tableaux sont l'un sous l'autre à l'écran : deux ordres
+        différents feraient chercher la même ligne deux fois."""
+        inv = self._inventaire()
+        for tri in (TRI_PEREMPTION, TRI_NOM):
+            essentielle = vue_essentielle(inv, AUJOURDHUI, tri)
+            complete = inventaire_affichable(inv, AUJOURDHUI, tri)
+            assert list(essentielle["Nom du produit"]) \
+                == list(complete["Nom du produit"]), tri
+
+    def test_le_dosage_reste_fondu_dans_le_nom(self):
+        """Il fait partie de la dénomination : deux boîtes du même produit
+        ne se distinguent que par lui."""
+        inv = ajouter_entree(
+            inventaire_vide(),
+            _entree(nom="DOLIPRANE", dosage="1000 mg"), AUJOURDHUI)
+        assert vue_essentielle(inv, AUJOURDHUI)["Nom du produit"][0] \
+            == "DOLIPRANE 1000 mg"
 
 
 class TestSortieALUnite:

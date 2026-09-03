@@ -314,13 +314,45 @@ class TestColonnePeremption:
         assert configuration["format"] == "MM/YYYY"
         assert configuration["type"] == "date"
 
-    def test_la_meme_colonne_sert_aux_deux_tableaux(self):
-        """Le tableau modifiable et la vue filtrée doivent s'afficher pareil :
-        deux réglages séparés finiraient par diverger."""
+    def test_tous_les_tableaux_partagent_la_meme_fabrique(self):
+        """Vue essentielle, vue filtrée détaillée, tableau modifiable : les
+        trois doivent s'afficher pareil. Des réglages séparés finiraient
+        par diverger, et la même péremption s'écrirait de deux façons d'un
+        tableau à l'autre."""
         source = (pathlib.Path(__file__).parent.parent
                   / "ui_stock_ferme.py").read_text(encoding="utf-8")
-        # Les deux tableaux passent par la MÊME fabrique de colonnes.
-        assert source.count("column_config=_colonnes_inventaire()") == 2
+        tableaux = source.count("st.dataframe(") + source.count(
+            "st.data_editor(")
+        partagees = source.count("column_config=_colonnes_inventaire()")
+        assert partagees == tableaux, (
+            f"{tableaux} tableaux mais {partagees} passent par la fabrique")
+
+    def test_l_ecran_montre_la_vue_essentielle(self):
+        """Une fonction qui existe mais que personne n'appelle ne simplifie
+        aucun écran."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "ui_stock_ferme.py").read_text(encoding="utf-8")
+        assert "stock_ferme.vue_essentielle(" in source
+
+    def test_le_detail_est_replie_sous_le_tableau(self):
+        """Quantités, lot, péremption exacte : on en a besoin pour
+        corriger, jamais pour lire l'inventaire devant l'armoire."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "ui_stock_ferme.py").read_text(encoding="utf-8")
+        assert 'st.expander("🔧 Voir le détail' in source
+        # Le tableau essentiel vient AVANT le dépliant : c'est lui qu'on
+        # regarde, l'autre est l'exception.
+        assert source.index("stock_ferme.vue_essentielle(") \
+            < source.index('st.expander("🔧 Voir le détail')
+
+    def test_l_impression_garde_tout(self):
+        """Réduire l'ÉCRAN n'est pas réduire la liste papier : sur le
+        papier on coche des quantités, et il n'y a pas de dépliant."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "stock_ferme.py").read_text(encoding="utf-8")
+        exports = source[source.index("def exporter_csv"):]
+        assert "COLONNES_ESSENTIELLES" not in exports, (
+            "le CSV et le PDF doivent rester complets")
 
     def test_l_impression_garde_la_date_complete(self):
         """Sur le papier, il n'y a pas de colonne « Jours restants » pour

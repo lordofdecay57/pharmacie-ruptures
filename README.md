@@ -585,6 +585,31 @@ Et si l'inventaire est **vide** alors qu'on est en mode Sortie, l'écran le
 dit et propose un bouton pour repasser en Entrée : chaque scan répondrait
 sinon « ce produit n'est pas à l'inventaire », sans issue visible.
 
+### L'inventaire affiché : trois colonnes
+
+Autre demande de la pharmacie, mot pour mot : *« au niveau de l'inventaire
+affiché on doit avoir seulement le nom du médicament, son CIP et savoir
+s'il est périmé, rien de plus »*.
+
+| Statut | Nom du produit | Code CIP |
+|---|---|---|
+| ⛔ Périmé | ZOLPIDEM 10 mg | 3400930000011 |
+| 🟢 OK | AMOXICILLINE 1 g | 3400930000028 |
+
+Onze colonnes tenaient là : boîtes, unités par boîte, vrac, total, lot,
+date d'enregistrement, jours restants. Devant l'armoire on ne cherche que
+**deux choses** — est-ce le bon produit, et est-il encore bon. Le statut est
+la seule des trois qui ne se lise pas sur la boîte.
+
+Le détail s'ouvre d'un clic, sous le tableau : **🔧 Voir le détail et
+corriger les quantités**. C'est là que vit le tableau modifiable. On ne
+retire que des **colonnes**, jamais un lot : un inventaire qui cache des
+lignes ne serait plus un inventaire.
+
+> Le **CSV et le PDF restent complets**. Réduire l'écran n'est pas réduire
+> la liste papier : sur le papier on coche des quantités devant l'armoire,
+> et il n'y a pas de dépliant. Un test l'interdit.
+
 **Classement** — deux ordres, pour deux gestes différents :
 
 | Ordre | À quelle question il répond |

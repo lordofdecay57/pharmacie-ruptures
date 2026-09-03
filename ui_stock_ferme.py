@@ -1291,18 +1291,33 @@ def rendre(etape, tuile_kpi) -> None:
     if filtre_actif and vue_filtree.empty:
         st.info("Aucun lot ne correspond à ce filtre.")
 
-    # Le tableau ne devient modifiable que sur l'inventaire ENTIER : corriger
-    # une vue filtrée réécrirait le stock en perdant les lignes masquées.
+    # TROIS colonnes : le nom, le code CIP, et si la boîte est périmée.
+    # Demande de la pharmacie, mot pour mot — « rien de plus ». Onze
+    # colonnes tenaient ici ; devant l'armoire on ne cherche que deux
+    # choses : est-ce le bon produit, et est-il encore bon.
+    st.dataframe(
+        stock_ferme.vue_essentielle(
+            vue_filtree if filtre_actif else inventaire, aujourdhui, tri),
+        use_container_width=True, hide_index=True,
+        column_config=_colonnes_inventaire())
     if filtre_actif:
-        st.dataframe(
-            stock_ferme.inventaire_affichable(vue_filtree, aujourdhui, tri),
-            use_container_width=True, hide_index=True,
-            column_config=_colonnes_inventaire())
-        st.caption(f"{len(vue_filtree)} lot(s) affiché(s). Videz la recherche "
-                   "et décochez le filtre pour corriger l'inventaire.")
-        corrige = None
-    else:
-        corrige = _tableau_editable(inventaire, aujourdhui, tri)
+        st.caption(f"{len(vue_filtree)} lot(s) sur {len(inventaire)}.")
+
+    # Le détail — quantités, lot, péremption exacte — reste à une clic. Il
+    # ne se corrige que sur l'inventaire ENTIER : rectifier une vue filtrée
+    # réécrirait le stock en perdant les lignes masquées.
+    corrige = None
+    with st.expander("🔧 Voir le détail et corriger les quantités"):
+        if filtre_actif:
+            st.dataframe(
+                stock_ferme.inventaire_affichable(vue_filtree, aujourdhui,
+                                                  tri),
+                use_container_width=True, hide_index=True,
+                column_config=_colonnes_inventaire())
+            st.caption("Videz la recherche et décochez le filtre pour "
+                       "corriger l'inventaire.")
+        else:
+            corrige = _tableau_editable(inventaire, aujourdhui, tri)
     if corrige is not None:
         _enregistrer_corrections(corrige)
         st.rerun()
