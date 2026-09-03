@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.15"
+VERSION_APP = "6.16"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -136,6 +136,32 @@ st.markdown("""
 .st-key-espace_travail button[aria-checked="true"] p,
 .st-key-espace_travail button[kind="segmented_controlActive"] p {
   color: #ffffff !important;
+}
+
+/* LA ZONE OÙ L'ON DOUCHE. C'est le point de départ de tout l'écran, et
+   c'était un champ de texte gris comme les autres : rien ne disait que
+   c'est là que ça se passe. Elle est maintenant encadrée de turquoise,
+   sur fond clair, et le texte y est plus grand — un code scanné se relit
+   d'un coup d'œil, sans se pencher.
+   Ciblé par la clé du widget (st-key-sf_scan) : les autres champs de
+   l'application restent inchangés. */
+.st-key-sf_scan input {
+  border: 2px solid #0d9488 !important; background: #f0fdfa !important;
+  border-radius: 10px !important; padding: 14px 16px !important;
+  font-size: 1.15rem !important; font-weight: 600 !important;
+  color: #134e4a !important;
+}
+/* L'invite reste lisible mais s'efface derrière ce qu'on tape. */
+.st-key-sf_scan input::placeholder {
+  font-weight: 400 !important; color: #5b7f7a !important;
+  font-size: .98rem !important;
+}
+/* Le champ ACTIF s'allume : la douchette n'écrit que dans le champ qui a
+   le curseur, et un bip perdu parce que le curseur était ailleurs ne
+   laisse aucune trace à l'écran. */
+.st-key-sf_scan input:focus {
+  border-color: #0f766e !important; background: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(13,148,136,.22) !important;
 }
 
 /* Entrée / Sortie du stock fermé : les DEUX boutons les plus cliqués de

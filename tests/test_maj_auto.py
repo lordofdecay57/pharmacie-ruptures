@@ -162,6 +162,84 @@ class TestInstallerArchive:
                           dossier)
         assert (dossier / "mes_notes.txt").exists()
 
+    def test_un_fichier_ouvert_ailleurs_annule_TOUT(self, tmp_path):
+        """Le cas réel : l'Explorateur garde `pharmacie.ico` ouvert pour
+        chaque raccourci du Bureau qui pointe dessus. La copie avançait
+        jusque-là puis s'arrêtait — laissant un `app.py` neuf sur un
+        `ui_stock_ferme.py` ancien, donc un écran qui plante sur une
+        fonction qui n'existe pas encore.
+
+        Un dossier à moitié mis à jour est pire qu'un dossier en retard.
+        """
+        import maj_auto as module
+        dossier = _installation(tmp_path, "3.0")
+        (dossier / "pharmacie.ico").write_bytes(b"ancienne icone")
+        archive = _archive({"app.py": 'VERSION_APP = "3.4"\n',
+                            "pharmacie.ico": "neuve",
+                            "ui_stock_ferme.py": "# neuf\n"})
+
+        # Windows refuse le remplacement ; ailleurs, on simule le refus.
+        vrai = module.fichiers_bloques
+        module.fichiers_bloques = lambda d, r: ["pharmacie.ico"]
+        try:
+            with pytest.raises(module.FichiersBloques) as echec:
+                installer_archive(archive, dossier)
+        finally:
+            module.fichiers_bloques = vrai
+
+        assert "pharmacie.ico" in str(echec.value)
+        assert "Rien n'a été modifié" in str(echec.value)
+        # RIEN n'a bougé, pas même les fichiers qui, eux, étaient libres.
+        assert lire_version(dossier / "app.py") == "3.0"
+        assert not (dossier / "ui_stock_ferme.py").exists()
+
+    def test_un_fichier_libre_ne_bloque_rien(self, tmp_path):
+        dossier = _installation(tmp_path, "3.0")
+        (dossier / "app.py").write_text("x", encoding="utf-8")
+        assert maj_auto.fichiers_bloques(dossier, ["app.py"]) == []
+
+    def test_un_fichier_qu_on_ne_peut_pas_reecrire_est_detecte(self,
+                                                              tmp_path):
+        """Windows verrouille, un partage en lecture seule refuse : dans
+        les deux cas le fichier ne peut pas être remplacé, et il faut le
+        savoir AVANT d'avoir touché aux autres.
+
+        Un vrai verrou Windows n'est pas reproductible ici, et les droits
+        de fichier ne le sont pas non plus sous root. On prend donc un
+        chemin qui refuse `open(..., "r+b")` de façon certaine : il
+        emprunte exactement le même code, jusqu'à l'`OSError`."""
+        (tmp_path / "pharmacie.ico").mkdir()
+        assert maj_auto.fichiers_bloques(tmp_path, ["pharmacie.ico"]) \
+            == ["pharmacie.ico"]
+
+    def test_un_fichier_absent_ne_bloque_rien(self, tmp_path):
+        """Un fichier neuf ne peut être ouvert par personne."""
+        assert maj_auto.fichiers_bloques(tmp_path, ["jamais_vu.py"]) == []
+
+    def test_le_controle_precede_la_moindre_ecriture(self, tmp_path):
+        """Vérifier au fil de l'eau reviendrait à s'arrêter au milieu."""
+        source = (RACINE / "maj_auto.py").read_text(encoding="utf-8")
+        corps = source[source.index("def installer_archive"):]
+        assert corps.index("fichiers_bloques(") < corps.index("shutil.copy2")
+
+    def test_le_blocage_remonte_comme_un_echec_explicite(self, tmp_path,
+                                                         monkeypatch):
+        """`executer` ne lève jamais : le blocage doit ressortir en message
+        français, pas en trace Python."""
+        import maj_auto as module
+        dossier = _installation(tmp_path, "3.0")
+        monkeypatch.setattr(module, "application_en_cours", lambda: False)
+        monkeypatch.setattr(module, "version_publiee", lambda *a, **k: "3.4")
+        monkeypatch.setattr(module, "_telecharger",
+                            lambda *a, **k: _archive(
+                                {"app.py": 'VERSION_APP = "3.4"\n'}))
+        monkeypatch.setattr(module, "fichiers_bloques",
+                            lambda d, r: ["pharmacie.ico"])
+        resultat, message = module.executer(dossier)
+        assert resultat == ECHEC
+        assert "pharmacie.ico" in message
+        assert lire_version(dossier / "app.py") == "3.0"
+
     def test_archive_illisible(self, tmp_path):
         with pytest.raises(Exception):
             installer_archive(b"pas une archive", _installation(tmp_path))

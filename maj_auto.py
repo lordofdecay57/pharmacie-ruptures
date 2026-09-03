@@ -171,12 +171,56 @@ def version_publiee(delai_s: float = _DELAI_RESEAU_S) -> str:
     return trouve.group(1) if trouve else ""
 
 
+class FichiersBloques(RuntimeError):
+    """Des fichiers sont ouverts ailleurs : rien n'a été touché."""
+
+    def __init__(self, noms):
+        self.noms = list(noms)
+        super().__init__(
+            "Fichiers ouverts par un autre programme : "
+            + ", ".join(self.noms)
+            + ". Fermez l'application (et Excel), puis recommencez. "
+              "Rien n'a été modifié.")
+
+
+def fichiers_bloques(destination: Path, relatifs) -> list:
+    """Ceux que Windows refuse de remplacer, AVANT d'avoir rien touché.
+
+    Le cas réel : l'Explorateur garde `pharmacie.ico` ouvert pour chaque
+    raccourci du Bureau qui pointe dessus. La copie avançait alors
+    jusque-là puis s'arrêtait, laissant le dossier **à moitié** en
+    nouvelle version — un `app.py` neuf sur un `ui_stock_ferme.py`
+    ancien, donc un écran qui plante sur une fonction qui n'existe pas
+    encore. Mieux vaut ne rien faire du tout et dire quel fichier
+    fermer.
+
+    ``r+b`` ouvre en lecture-écriture sans rien tronquer : c'est un
+    essai, pas une modification.
+    """
+    bloques = []
+    for relatif in relatifs:
+        cible = Path(destination) / relatif
+        if not cible.exists():
+            continue                    # un fichier neuf ne bloque rien
+        try:
+            with open(cible, "r+b"):
+                pass
+        except OSError:
+            bloques.append(str(relatif))
+    return bloques
+
+
 def installer_archive(archive: bytes, destination: Path) -> int:
     """Déploie l'archive sur le dossier de l'application.
 
     Les fichiers de la pharmacie sont préservés, et rien n'est supprimé :
     une mise à jour ajoute ou remplace, elle ne fait jamais le ménage.
     Renvoie le nombre de fichiers écrits.
+
+    **Tout ou rien** : si un seul fichier est ouvert ailleurs, on
+    n'écrit rien. Un dossier à moitié mis à jour est pire qu'un dossier
+    en retard — il mélange deux versions du programme, et l'écran
+    plante sur une fonction qui n'existe pas encore.
     """
     destination = Path(destination)
     with zipfile.ZipFile(io.BytesIO(archive)) as zip_archive:
@@ -187,7 +231,7 @@ def installer_archive(archive: bytes, destination: Path) -> int:
             source = Path(travail) / racine
             if not source.is_dir():
                 raise ValueError("archive inattendue : dossier racine absent")
-            ecrits = 0
+            a_ecrire = []
             for fichier in sorted(source.rglob("*")):
                 if not fichier.is_file():
                     continue
@@ -199,11 +243,19 @@ def installer_archive(archive: bytes, destination: Path) -> int:
                 # au milieu de cent fichiers que personne ne reconnaît.
                 if set(relatif.parts[:-1]) & set(DOSSIERS_DE_DEVELOPPEMENT):
                     continue
+                a_ecrire.append((fichier, relatif))
+
+            # On regarde TOUT avant d'écrire quoi que ce soit.
+            bloques = fichiers_bloques(destination,
+                                       [r for _, r in a_ecrire])
+            if bloques:
+                raise FichiersBloques(bloques)
+
+            for fichier, relatif in a_ecrire:
                 cible = destination / relatif
                 cible.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(fichier, cible)
-                ecrits += 1
-    return ecrits
+    return len(a_ecrire)
 
 
 def executer(dossier: Path, forcer: bool = False,
