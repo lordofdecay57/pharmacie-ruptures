@@ -1613,6 +1613,32 @@ Vos données — inventaire du stock interne, historique, réglages, base des
 médicaments — ne sont **jamais** écrasées. Le déroulement est consigné dans
 `maj_auto.log`.
 
+### Ce que contient le ZIP téléchargé
+
+**34 fichiers, 718 Ko** — le programme, et rien d'autre.
+
+Le dépôt contient aussi tout ce qui sert à **fabriquer** le programme :
+2,4 Mo de tests, les outils qui dessinent l'icône et composent le guide PDF.
+L'archive les emportait tous. `maj_auto` les écartait bien à l'installation,
+mais celui qui télécharge le ZIP **à la main** dépliait tout dans le dossier
+de l'officine — cent fichiers inconnus autour de `lancer.bat`, et personne
+ne lance un utilitaire dont il ne reconnaît aucun fichier.
+
+`.gitattributes` marque ces chemins `export-ignore` : c'est le mécanisme que
+GitHub applique à son bouton **Download ZIP** comme à l'URL que `maj_auto`
+télécharge. Les fichiers **restent dans le dépôt** — ils ne sont pas
+supprimés, ils ne sont pas *exportés*, et la suite de tests continue de
+tourner.
+
+> Le filtre de `maj_auto` reste en place, volontairement : un poste peut
+> installer une archive plus ancienne, faite avant ce fichier. Un test
+> vérifie que les deux listes ne divergent pas.
+
+**Sur votre partage, le ménage reste à faire une fois** : une mise à jour
+ajoute et remplace, elle ne supprime jamais. Les dossiers `tests` et
+`outils` déjà déposés y sont encore — vous pouvez les effacer à la main,
+rien n'en dépend.
+
 > Une mise à jour automatique installe du code sans relecture préalable. Si
 > vous préférez garder la main, désactivez la tâche planifiée : le bandeau
 > continuera de signaler les nouvelles versions, et `mettre-a-jour.bat`

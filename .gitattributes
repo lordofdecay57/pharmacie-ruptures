@@ -1,0 +1,27 @@
+# Ce que le ZIP téléchargé ne doit PAS contenir.
+#
+# Le dossier de l'officine ne reçoit que le programme. Le dépôt, lui,
+# contient aussi tout ce qui sert à le FABRIQUER : 2,4 Mo de tests, les
+# outils qui dessinent l'icône et fabriquent le guide PDF. Déversés dans
+# le dossier de la pharmacie, ils noyaient « lancer.bat » sous une
+# centaine de fichiers que personne ne reconnaît — et personne ne lance
+# un utilitaire dont il ne reconnaît aucun fichier.
+#
+# « export-ignore » retire ces chemins de l'archive que produit
+# « git archive » — c'est exactement ce que GitHub exécute pour le
+# bouton « Download ZIP » et pour l'URL que « maj_auto.py » télécharge.
+# Les fichiers restent dans le dépôt : ils ne sont pas supprimés, ils
+# ne sont pas EXPORTÉS. La suite de tests continue donc de tourner.
+#
+# ATTENTION : cette liste double celle de « DOSSIERS_DE_DEVELOPPEMENT »
+# dans maj_auto.py, qui écarte les mêmes dossiers À L'INSTALLATION. Les
+# deux sont nécessaires — l'une nettoie l'archive, l'autre protège les
+# postes qui installeraient une archive plus ancienne, faite avant ce
+# fichier. Un test vérifie qu'elles ne divergent pas.
+
+tests/          export-ignore
+outils/         export-ignore
+
+# Fichiers de service du dépôt : ils ne disent rien à la pharmacie.
+.gitattributes  export-ignore
+.gitignore      export-ignore
