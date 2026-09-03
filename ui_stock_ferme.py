@@ -870,25 +870,6 @@ def _formulaire_complement() -> None:
 # Écran
 # ---------------------------------------------------------------------------
 
-def _bandeau_kpi(resume: dict, tuile) -> None:
-    st.markdown('<div class="kpi-row">' + "".join([
-        tuile("Lots enregistrés", resume["lignes"], "accent",
-              sous=f'{resume["references"]} référence(s)'),
-        tuile("Boîtes", resume["boites"], "accent",
-              sous=(f'{resume["unites"]} unité(s) au total'
-                    if resume["unites"] else "conditionnement non renseigné")),
-        tuile("⛔ Périmés", resume["perimes"],
-              "critical" if resume["perimes"] else "",
-              sous="à retirer du stock"),
-        tuile("🔴 Moins d'un mois", resume["imminents"],
-              "critical" if resume["imminents"] else "",
-              sous="ne passeront pas le mois"),
-        tuile("🟠 Moins de 3 mois", resume["critiques"],
-              "serious" if resume["critiques"] else "",
-              sous=f'{resume["vigilance"]} autre(s) sous 6 mois'),
-    ]) + "</div>", unsafe_allow_html=True)
-
-
 def _base_publique() -> None:
     """Installation et mise à jour de la base publique des médicaments.
 
@@ -1170,11 +1151,15 @@ def _barre_laterale(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
     return aujourdhui
 
 
-def rendre(etape, tuile_kpi) -> None:
+def rendre(etape) -> None:
     """Affiche l'écran complet du module.
 
-    ``etape`` et ``tuile_kpi`` sont les fonctions d'habillage de ``app.py``,
-    passées en paramètre pour garder ce module indépendant de l'application.
+    ``etape`` est la fonction d'habillage de ``app.py``, passée en
+    paramètre pour garder ce module indépendant de l'application.
+
+    Les compteurs du haut — lots, boîtes, périmés, moins d'un mois,
+    moins de trois mois — ont été retirés : le tableau dit la même chose
+    ligne par ligne, et ils repoussaient l'inventaire hors de l'écran.
     """
     inventaire, repertoire = _etat()
     aujourdhui = _barre_laterale(inventaire, repertoire,
@@ -1268,10 +1253,12 @@ def rendre(etape, tuile_kpi) -> None:
 
     # --- Inventaire --------------------------------------------------------
     st.divider()
-    etape("2", "Inventaire", "Une ligne par lot : la péremption appartient "
-                             "à la boîte, pas au produit.")
-    _bandeau_kpi(stock_ferme.resume_inventaire(inventaire, aujourdhui),
-                 tuile_kpi)
+    # Ni tuiles ni explication : cinq compteurs tenaient ici — lots,
+    # boîtes, périmés, moins d'un mois, moins de trois mois — au-dessus
+    # d'un tableau qui dit déjà tout cela, ligne par ligne, avec le
+    # statut en tête. Ils repoussaient l'inventaire lui-même sous la
+    # ligne de flottaison, et c'est lui qu'on vient voir.
+    etape("2", "Inventaire", "")
 
     col_rech, col_tri, col_filtre = st.columns([3, 2, 2])
     recherche = col_rech.text_input(

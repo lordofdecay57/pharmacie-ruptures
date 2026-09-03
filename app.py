@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.16"
+VERSION_APP = "6.17"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -461,7 +461,7 @@ if espace == ESPACE_STOCK_FERME:
     # Sans sous-titre : la barre latérale décrit déjà ce qu'est ce stock, et
     # l'étape 1 dit quoi faire. Le répéter ici n'ajoutait qu'une ligne.
     _entete_espace("🔒 Stock fermé", variante="ferme")
-    ui_stock_ferme.rendre(_etape, _tuile_kpi)
+    ui_stock_ferme.rendre(_etape)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
 _entete_espace(

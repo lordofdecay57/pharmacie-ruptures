@@ -591,6 +591,17 @@ Et si l'inventaire est **vide** alors qu'on est en mode Sortie, l'écran le
 dit et propose un bouton pour repasser en Entrée : chaque scan répondrait
 sinon « ce produit n'est pas à l'inventaire », sans issue visible.
 
+### L'inventaire affiché : trois colonnes, et rien au-dessus
+
+**Les cinq compteurs ont disparu.** « Lots enregistrés », « Boîtes »,
+« ⛔ Périmés », « 🔴 Moins d'un mois », « 🟠 Moins de 3 mois » tenaient une
+bande entière au-dessus d'un tableau qui dit déjà tout cela — ligne par
+ligne, avec le statut en tête. Ils repoussaient l'inventaire lui-même sous
+la ligne de flottaison, et c'est lui qu'on vient voir.
+
+> L'en-tête du **PDF garde son total**. Sur le papier il n'y a pas de
+> défilement : le résumé y est la seule vue d'ensemble.
+
 ### L'inventaire affiché : trois colonnes
 
 Autre demande de la pharmacie, mot pour mot : *« au niveau de l'inventaire
