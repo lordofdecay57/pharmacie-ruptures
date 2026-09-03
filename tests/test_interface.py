@@ -28,7 +28,7 @@ DEMARRAGE_MAX_S = 60
 #: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
 ESPACE_CADENCIER = "Cadencier — stock & ruptures"
-ESPACE_STOCK_FERME = "Stock interne — inventaire scanné"
+ESPACE_STOCK_FERME = "Stock interne"
 ESPACE_COMMANDES = "Commandes spéciales"
 
 
@@ -257,9 +257,15 @@ class TestDemarrage:
 
     def test_les_deux_espaces_sont_proposes(self, page):
         """Les deux espaces ne partagent rien : le choix doit être visible
-        dès l'arrivée, pas caché dans un menu."""
-        assert page.get_by_text(ESPACE_CADENCIER).count() >= 1
-        assert page.get_by_text(ESPACE_STOCK_FERME).count() >= 1
+        dès l'arrivée, pas caché dans un menu.
+
+        Visé par la clé du groupe d'onglets : depuis que le libellé s'est
+        raccourci en « Stock interne », il apparaît AUSSI comme titre de
+        l'espace une fois celui-ci ouvert — un simple `get_by_text` ne
+        prouverait donc plus que l'onglet existe.
+        """
+        assert _onglet(page, ESPACE_CADENCIER).count() == 1
+        assert _onglet(page, ESPACE_STOCK_FERME).count() == 1
 
     def test_depot_de_fichiers_demande_avant_analyse(self, page):
         """Sans cadencier, le parcours principal invite à en déposer un
@@ -277,22 +283,13 @@ class TestDemarrage:
         _sans_exception(page)
         assert ESPACE_CADENCIER in _onglet_actif(page, "espace_travail")
 
-    def test_l_onglet_ou_l_on_douche_ressort_des_autres(self, page):
-        """« Agrandir l'onglet doucher, il faut que ça ressorte par rapport
-        au reste. »
+    def _mesurer_les_onglets(self, page) -> list:
+        """Ce que REND le navigateur pour les trois onglets d'espace.
 
-        Trois onglets de même taille se parcourent du regard, un par un,
-        même quand l'un porte une couleur. Celui où l'on prend la douchette
-        est donc PLUS GRAND que les deux autres — c'est le geste de tous les
-        jours, les deux autres sont des consultations.
-
-        Mesuré ici pendant que l'onglet est ÉTEINT, et c'est le cas qui
-        compte : allumé, on l'a déjà trouvé. Et mesuré sur ce que rend le
-        navigateur — une règle CSS présente dans la page ne prouve pas
-        qu'elle s'applique, et `align-items` a précisément le pouvoir
-        d'étirer les trois à la même hauteur.
+        Le style calculé, et non la règle CSS écrite : une règle présente
+        dans la page ne prouve pas qu'elle s'applique.
         """
-        onglets = page.evaluate(
+        return page.evaluate(
             """() => [...document.querySelectorAll(
                     '.st-key-espace_travail button')].map(b => {
                 const r = b.getBoundingClientRect(), s = getComputedStyle(b);
@@ -303,27 +300,55 @@ class TestDemarrage:
                         police: parseFloat(
                             getComputedStyle(p || b).fontSize)};
             })""")
+
+    def test_les_trois_onglets_ont_la_meme_taille(self, page):
+        """« Harmonise la taille des onglets avec les deux autres. »
+
+        L'onglet du stock interne a été agrandi, puis ramené : deux fois
+        plus haut que ses voisins, il déséquilibrait une barre par ailleurs
+        alignée. Les trois gardent donc la même forme — c'est la couleur,
+        et elle seule, qui désigne celui où l'on douche.
+
+        Hauteur et taille de police, pas largeur : la barre passe à la
+        ligne quand la fenêtre est étroite, et un onglet seul sur sa ligne
+        s'étale sur toute la largeur. Un test sur la largeur ne mesurerait
+        que le hasard de la coupure.
+        """
+        onglets = self._mesurer_les_onglets(page)
         assert len(onglets) == 3, onglets
+        assert len({o["hauteur"] for o in onglets}) == 1, onglets
+        assert len({o["police"] for o in onglets}) == 1, onglets
+
+    def test_l_onglet_ou_l_on_douche_ressort_en_couleur(self, page):
+        """Un seul des trois espaces se pratique la douchette à la main :
+        celui-là doit se repérer sans lire.
+
+        Mesuré pendant que l'onglet est ÉTEINT, et c'est le cas qui compte :
+        allumé, on l'a déjà trouvé. Sans cette règle il redeviendrait gris
+        comme ses voisins tant qu'on n'a pas cliqué dessus.
+        """
+        onglets = self._mesurer_les_onglets(page)
         douchette = onglets[1]
-        autres = [onglets[0], onglets[2]]
         assert "Stock interne" in douchette["texte"], onglets
-        # Hauteur et taille de police, pas largeur : la barre passe à la
-        # ligne quand la fenêtre est étroite, et un onglet seul sur sa ligne
-        # s'étale sur toute la largeur. Un test sur la largeur ne mesurerait
-        # que le hasard de la coupure.
-        for autre in autres:
-            assert douchette["hauteur"] > autre["hauteur"], onglets
-            assert douchette["police"] > autre["police"], onglets
-        # La taille s'ajoute à la couleur, elle ne la remplace pas : le
-        # turquoise reste porté même éteint.
         assert douchette["bord"] == "rgb(13, 148, 136)", onglets
+        for autre in (onglets[0], onglets[2]):
+            assert autre["bord"] != douchette["bord"], onglets
+
+    def test_le_libelle_de_l_onglet_tient_en_deux_mots(self, page):
+        """« Supprime l'intitulé inventaire scanné. » L'onglet nomme un
+        espace, il ne le décrit pas : la description tenait la moitié de la
+        barre pour dire ce que l'écran montre juste en dessous."""
+        assert _onglet(page, "Stock interne").count() == 1
+        assert "inventaire scanné" not in page.content()
 
 
 class TestEspaceStockFerme:
     """Le module 3 doit fonctionner SANS aucun fichier déposé."""
 
     def test_ecran_complet(self, page):
-        page.get_by_text(ESPACE_STOCK_FERME).first.click()
+        # Par l'onglet, pas par le texte : « Stock interne » titre aussi
+        # l'espace une fois ouvert.
+        _onglet(page, ESPACE_STOCK_FERME).first.click()
         page.wait_for_timeout(5000)
         _sans_exception(page)
         contenu = page.content()

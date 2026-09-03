@@ -1664,13 +1664,19 @@ parcours « cadencier » (Modules 1 et 2, décrit ci-dessous) et le **stock
 interne** (Module 3), qui, lui, ne demande aucun fichier : on y scanne, on
 imprime.
 
-L'onglet **🔒 Stock interne** ne ressemble pas aux deux autres : il est plus
-grand, et il porte le turquoise de l'application en permanence — allumé
-comme éteint — quand les deux autres restent neutres. C'est le seul des
-trois où l'on prend la douchette en main : il doit se repérer **sans
-lire**, et trois onglets de même taille se parcourent quand même du regard,
-un par un. Les deux autres sont des consultations ; celui-là est le geste
-de tous les jours.
+**Les trois onglets ont la même taille**, et un seul est en couleur :
+**🔒 Stock interne** porte le turquoise de l'application en permanence —
+allumé comme éteint — quand les deux autres restent neutres. C'est le seul
+des trois où l'on prend la douchette en main, et il doit se repérer **sans
+lire**.
+
+> Il a d'abord été agrandi, puis ramené à la taille des autres : deux fois
+> plus haut que ses voisins, il déséquilibrait une barre par ailleurs
+> alignée. La couleur suffit à le désigner, et elle ne décale rien.
+
+Son libellé disait **« Stock interne — inventaire scanné »**. La moitié de
+la place partait à décrire ce que l'écran montre juste en dessous : un
+onglet **nomme** un espace, il ne le décrit pas.
 
 1. **Déposez au moins le cadencier** (`.xlsx`, `.xls`, `.csv` ou `.pdf`) —
    il suffit pour la Gestion des stocks en rotation. Déposez aussi les
