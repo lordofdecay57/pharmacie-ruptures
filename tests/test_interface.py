@@ -445,6 +445,29 @@ class TestEspaceStockFerme:
             }""")
         assert positions[0] < positions[1], positions
 
+    def test_la_zone_de_scan_ressort_en_couleur(self, page):
+        """C'est le point de départ de tout l'écran, et c'était un champ
+        gris comme les autres : rien ne disait que c'est là que ça se
+        passe. On lit le style CALCULÉ par le navigateur — une règle CSS
+        présente dans la page ne prouve pas qu'elle s'applique."""
+        style = page.evaluate(
+            """() => {
+                const e = document.querySelector('.st-key-sf_scan input');
+                if (!e) return null;
+                const s = getComputedStyle(e);
+                return {bord: s.borderTopColor,
+                        epaisseur: parseFloat(s.borderTopWidth),
+                        fond: s.backgroundColor,
+                        taille: parseFloat(s.fontSize)};
+            }""")
+        assert style, "le champ de scan est introuvable"
+        # Turquoise de l'application, et non le gris par défaut.
+        assert style["bord"] == "rgb(13, 148, 136)", style
+        assert style["epaisseur"] >= 2, style
+        assert style["fond"] != "rgba(0, 0, 0, 0)", style
+        # Un code scanné doit se relire sans se pencher.
+        assert style["taille"] >= 17, style
+
     def test_les_exceptions_sont_repliees(self, page):
         """Étiquette abîmée, sortie à l'unité : des exceptions. Affichées en
         permanence, elles encombraient le geste de tous les jours."""

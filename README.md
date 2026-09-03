@@ -352,6 +352,12 @@ quelqu'un qui ne connaît rien à l'informatique**.
    ⌨️ Le code ne se lit pas ? Sortir à l'unité ?          ▸ (replié)
 ```
 
+**La zone où l'on douche ressort en couleur** : encadrée de turquoise, sur
+fond clair, texte plus grand — un code scanné se relit d'un coup d'œil,
+sans se pencher. Et elle **s'allume quand elle a le curseur** : une
+douchette n'écrit que dans le champ actif, et un bip perdu parce que le
+curseur était ailleurs ne laisse aucune trace à l'écran.
+
 Le champ est **au-dessus** du sens : on bipe d'abord, on regarde le sens
 ensuite. Il reste choisi d'un scan à l'autre — on le règle une fois le
 matin.
@@ -1550,6 +1556,14 @@ L'utilitaire se met à jour **tout seul**, à deux moments :
   démarrée ;
 - **chaque nuit sur un serveur** (`planifier-maj-serveur.bat`), qui ne
   redémarre jamais et ne passerait donc jamais par le point précédent.
+
+**Tout ou rien.** Si un seul fichier est ouvert par un autre programme,
+`maj_auto` **n'écrit rien** et dit lequel fermer. Le cas réel : l'Explorateur
+garde `pharmacie.ico` ouvert pour chaque raccourci du Bureau qui pointe
+dessus ; la copie avançait jusque-là puis s'arrêtait, laissant le dossier **à
+moitié** en nouvelle version — un `app.py` neuf sur un `ui_stock_ferme.py`
+ancien, donc un écran qui plante sur une fonction qui n'existe pas encore.
+Un dossier à moitié mis à jour est pire qu'un dossier en retard.
 
 Trois règles de prudence, appliquées par `maj_auto.py` :
 
