@@ -111,7 +111,7 @@ if errorlevel 1 (
 REM --- 4. Installation des nouveaux fichiers ------------------
 REM  On ne remplace ni ce script, ni vos donnees personnelles
 REM  (mapping des colonnes, historique des analyses, etat du stock
-REM  min/max et inventaire du stock ferme).
+REM  min/max et inventaire du stock interne).
 echo  [4/5] Installation des fichiers...
 REM  /R:2 /W:5 : DEUX essais, cinq secondes d'attente. Par defaut
 REM  robocopy reessaie UN MILLION de fois, trente secondes entre

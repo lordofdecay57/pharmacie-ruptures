@@ -38,7 +38,7 @@ ANCIENS_NOMS = ("Pharmacie.lnk", "Pharmacie.url")
 NOM_LANCEUR = "lancer.bat"
 NOM_ICONE = "pharmacie.ico"
 
-DESCRIPTION = "Pilotage pharmacie - stock, ruptures et stock ferme"
+DESCRIPTION = "Pilotage pharmacie - stock, ruptures et stock interne"
 
 _DELAI_S = 20
 

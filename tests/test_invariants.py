@@ -178,7 +178,7 @@ class TestModuleRuptures:
 
 
 class TestModuleStockFerme:
-    """Ce qui ne doit JAMAIS arriver à un inventaire de stock fermé."""
+    """Ce qui ne doit JAMAIS arriver à un inventaire de stock interne."""
 
     def _inventaire(self, graine=5, nombre=40):
         hasard = random.Random(graine)
@@ -258,7 +258,7 @@ class TestIsolationDesModules:
     """Les modules métier ne s'importent jamais l'un l'autre.
 
     C'est ce qui garantit qu'on peut faire évoluer la politique de stock
-    sans risquer de casser les ruptures, et le stock fermé sans toucher aux
+    sans risquer de casser les ruptures, et le stock interne sans toucher aux
     commandes spéciales. Une dépendance ajoutée par commodité un jour de
     hâte se paie des mois plus tard, et rien ne la signale — sauf ce test.
     """
@@ -294,7 +294,7 @@ class TestIsolationDesModules:
             "doit rester indépendante")
 
     def test_le_stock_ferme_et_les_commandes_s_ignorent(self):
-        """Le rapprochement du module 4 lit le FICHIER du stock fermé, pas
+        """Le rapprochement du module 4 lit le FICHIER du stock interne, pas
         son code : c'est ce qui permet de faire évoluer l'un sans l'autre."""
         assert "stock_ferme" not in self._imports("commandes_speciales")
         assert "commandes_speciales" not in self._imports("stock_ferme")

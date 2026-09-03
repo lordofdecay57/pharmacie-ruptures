@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests du Module 3 — Gestion d'un stock fermé (stock_ferme.py).
+"""Tests du Module 3 — Gestion d'un stock interne (stock_ferme.py).
 
 Deux points font tout l'intérêt de ce module et sont donc couverts en
 priorité :
@@ -718,7 +718,7 @@ class TestSortieALUnite:
         assert apres.empty
 
     def test_la_ligne_disparait_une_fois_videe(self):
-        """Un stock fermé se contrôle boîte à boîte : une ligne à zéro n'est
+        """Un stock interne se contrôle boîte à boîte : une ligne à zéro n'est
         que du bruit sur la liste imprimée."""
         apres, pris = self._sortir(self._lot(boites=0, vrac=12), 12)
         assert pris == 12
@@ -969,7 +969,7 @@ class TestTriAlphabetique:
         import io
         inv = self._inventaire([("ZOLPIDEM", date(2026, 8, 5))])
         with pdfplumber.open(io.BytesIO(
-                exporter_pdf(inv, "Stock fermé", AUJOURDHUI, TRI_NOM))) as pdf:
+                exporter_pdf(inv, "Stock interne", AUJOURDHUI, TRI_NOM))) as pdf:
             texte = pdf.pages[0].extract_text()
         assert "Classement" in texte and "A-Z" in texte
         # La flèche « → » du libellé d'écran n'existe pas dans les polices

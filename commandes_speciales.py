@@ -23,7 +23,7 @@ Un dossier = un patient + un médicament, suivi dans le temps. Les dates y
 sont mises à jour au fil des commandes et des facturations.
 
 ISOLATION : ce module ne lit ni le cadencier, ni les ruptures, ni
-l'inventaire du stock fermé. Le rapprochement avec les boîtes physiques est
+l'inventaire du stock interne. Le rapprochement avec les boîtes physiques est
 fait par l'appelant, qui lui passe l'inventaire — le module ne va rien
 chercher tout seul.
 """
@@ -139,7 +139,7 @@ def parser_date(valeur) -> Optional[date]:
     """Date saisie à la main → date, ou ``None`` si illisible.
 
     Accepte les chiffres seuls (``12082026``), les formats français et
-    l'ISO. Les mêmes tolérances que la péremption du stock fermé : sur un
+    l'ISO. Les mêmes tolérances que la péremption du stock interne : sur un
     comptoir, taper les barres obliques est du temps perdu.
     """
     if isinstance(valeur, datetime):
@@ -533,7 +533,7 @@ def resume(dossier: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Rapprochement avec les boîtes physiques du stock fermé
+# Rapprochement avec les boîtes physiques du stock interne
 # ---------------------------------------------------------------------------
 
 def rapprochement_stock(dossier: pd.DataFrame,
@@ -551,7 +551,7 @@ def rapprochement_stock(dossier: pd.DataFrame,
     information que les données ne contiennent pas.
     """
     colonnes = ["Code CIP", "Nom du produit", "Annoncé par les dossiers",
-                "Présent au stock fermé", "Écart"]
+                "Présent au stock interne", "Écart"]
     if dossier is None or dossier.empty:
         return pd.DataFrame(columns=colonnes)
 
@@ -574,13 +574,13 @@ def rapprochement_stock(dossier: pd.DataFrame,
     lignes = []
     for cip in sorted(set(annonce) | set(present)):
         if cip not in annonce:
-            continue            # produit du stock fermé sans dossier : normal
+            continue            # produit du stock interne sans dossier : normal
         attendu, reel = annonce.get(cip, 0), present.get(cip, 0)
         lignes.append({
             "Code CIP": cip,
             "Nom du produit": noms.get(cip, ""),
             "Annoncé par les dossiers": attendu,
-            "Présent au stock fermé": reel,
+            "Présent au stock interne": reel,
             "Écart": reel - attendu,
         })
     return pd.DataFrame(lignes, columns=colonnes)

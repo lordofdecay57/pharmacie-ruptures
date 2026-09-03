@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.17"
+VERSION_APP = "6.18"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -113,7 +113,15 @@ st.markdown("""
    manquer. Ciblé par la clé du widget (st-key-espace_travail) pour ne pas
    déformer les autres groupes de boutons de l'application. */
 .st-key-espace_travail { margin: 12px 0 4px 0; }
-.st-key-espace_travail [data-testid="stButtonGroup"] { gap: 10px; }
+/* `align-items` ne sert à rien tant que Streamlit dispose ce groupe en
+   bloc — il l'a fait en flex par le passé, et le fera peut-être encore.
+   La règle est là pour ce jour-là : en flex, l'alignement par défaut
+   étirerait les trois onglets à la hauteur du plus haut, et l'onglet où
+   l'on douche — volontairement plus grand, voir plus bas — n'aurait
+   soudain plus rien de plus grand que ses voisins. */
+.st-key-espace_travail [data-testid="stButtonGroup"] {
+  gap: 10px; align-items: center;
+}
 .st-key-espace_travail button {
   padding: 15px 20px !important; border-radius: 10px !important;
   border: 1px solid rgba(11,11,11,.14) !important;
@@ -135,6 +143,36 @@ st.markdown("""
 }
 .st-key-espace_travail button[aria-checked="true"] p,
 .st-key-espace_travail button[kind="segmented_controlActive"] p {
+  color: #ffffff !important;
+}
+
+/* L'ONGLET OÙ L'ON DOUCHE. Trois espaces de travail, et un seul se
+   pratique la douchette à la main : celui-là doit se repérer sans lire.
+   Il porte donc le turquoise de l'application en permanence — allumé
+   comme éteint — quand les deux autres restent neutres.
+   La couleur seule ne suffisait pas : trois onglets de même taille se
+   parcourent quand même du regard, un par un. Celui-ci est donc AUSSI
+   plus grand — plus haut, plus large, texte plus gros — pour qu'il se
+   distingue par sa forme avant même sa couleur. C'est le geste de tous
+   les jours ; les deux autres sont des consultations.
+   `:nth-child(2)` : le stock interne est le deuxième des trois onglets,
+   dans l'ordre où `app.py` les déclare. */
+.st-key-espace_travail button:nth-child(2) {
+  border-color: #0d9488 !important; background: #f0fdfa !important;
+  border-width: 2px !important;
+  padding: 26px 34px !important; border-radius: 14px !important;
+  box-shadow: 0 2px 10px rgba(13,148,136,.20) !important;
+}
+.st-key-espace_travail button:nth-child(2) p { color: #0f766e !important;
+  font-size: 1.45rem !important; font-weight: 800 !important; }
+.st-key-espace_travail button:nth-child(2)[aria-checked="true"],
+.st-key-espace_travail
+  button:nth-child(2)[kind="segmented_controlActive"] {
+  background: #0d9488 !important; border-color: #0d9488 !important;
+}
+.st-key-espace_travail button:nth-child(2)[aria-checked="true"] p,
+.st-key-espace_travail
+  button:nth-child(2)[kind="segmented_controlActive"] p {
   color: #ffffff !important;
 }
 
@@ -164,7 +202,7 @@ st.markdown("""
   box-shadow: 0 0 0 4px rgba(13,148,136,.22) !important;
 }
 
-/* Entrée / Sortie du stock fermé : les DEUX boutons les plus cliqués de
+/* Entrée / Sortie du stock interne : les DEUX boutons les plus cliqués de
    toute l'application — chaque boîte scannée passe par l'un ou l'autre.
    Ils sont donc traités en grand, et chacun garde sa couleur MÊME éteint :
    savoir dans quel sens on travaille ne doit pas demander à lire. */
@@ -308,14 +346,14 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 # ---------------------------------------------------------------------------
 # Choix de l'espace de travail
 #
-# Le stock fermé (Module 3) ne travaille sur AUCUN fichier déposé : il a son
+# Le stock interne (Module 3) ne travaille sur AUCUN fichier déposé : il a son
 # propre inventaire et ses propres exports. Le brancher ici, avant l'étape 1,
 # lui évite d'être bloqué par les garde-fous « déposez d'abord le cadencier »
 # du parcours principal — et matérialise son indépendance.
 # ---------------------------------------------------------------------------
 
 ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
-ESPACE_STOCK_FERME = "🔒  Stock fermé — inventaire scanné"
+ESPACE_STOCK_FERME = "🔒  Stock interne — inventaire scanné"
 ESPACE_COMMANDES = "💠  Commandes spéciales"
 
 DOSSIER_APP = Path(__file__).resolve().parent
@@ -436,7 +474,7 @@ def _garder_espace() -> None:
 
 
 # Avant l'aiguillage : la barre latérale des deux espaces est construite
-# plus bas, chacune de son côté, et l'espace « stock fermé » s'arrête sur un
+# plus bas, chacune de son côté, et l'espace « stock interne » s'arrête sur un
 # st.stop(). Poser la proposition ici est le seul endroit d'où elle est
 # visible dans les deux.
 _proposer_mise_a_jour()
@@ -460,7 +498,7 @@ if espace == ESPACE_STOCK_FERME:
     import ui_stock_ferme
     # Sans sous-titre : la barre latérale décrit déjà ce qu'est ce stock, et
     # l'étape 1 dit quoi faire. Le répéter ici n'ajoutait qu'une ligne.
-    _entete_espace("🔒 Stock fermé", variante="ferme")
+    _entete_espace("🔒 Stock interne", variante="ferme")
     ui_stock_ferme.rendre(_etape)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 

@@ -1,4 +1,4 @@
-"""Module 3 — Gestion d'un stock fermé (inventaire à lots et péremptions).
+"""Module 3 — Gestion d'un stock interne (inventaire à lots et péremptions).
 
 Destiné aux stocks tenus à part du stock officinal courant : armoire de
 stupéfiants, dotation d'urgence, trousse, réserve de garde, rétrocessions…
@@ -84,7 +84,7 @@ STATUT_VIGILANCE = "🟡 < 6 mois"
 STATUT_OK = "🟢 OK"
 STATUT_INCONNU = "⚪ Sans date"
 
-#: Bornes d'une péremption plausible. Un stock fermé contient des boîtes
+#: Bornes d'une péremption plausible. Un stock interne contient des boîtes
 #: périmées depuis longtemps (elles y sont pour être retirées) et des boîtes
 #: qui périment loin — mais pas en l'an 9999. Sans ces bornes, une faute de
 #: frappe sur l'année (« 31129999 », « 082207 ») passait sans un mot et la
@@ -591,7 +591,7 @@ def retirer_entree(inventaire: pd.DataFrame, cip: str, nom: str,
     """Sortie de stock : décrémente le lot, et supprime la ligne à zéro.
 
     Une ligne dont il ne reste ni boîte ni unité disparaît de l'inventaire :
-    un stock fermé se contrôle boîte à boîte, une ligne à zéro n'est que du
+    un stock interne se contrôle boîte à boîte, une ligne à zéro n'est que du
     bruit sur la liste imprimée.
     """
     if inventaire is None or inventaire.empty:
@@ -1018,7 +1018,7 @@ def sauver_inventaire(inventaire: pd.DataFrame, chemin: Path) -> None:
 #
 # La mécanique est dans ``stockage_partage`` — verrou de fichier, écriture
 # atomique, empreinte relevée sous le verrou. Ces noms restent exposés ici
-# parce que c'est par ce module que l'interface du stock fermé y accède.
+# parce que c'est par ce module que l'interface du stock interne y accède.
 
 DELAI_VERROU_S = stockage_partage.DELAI_VERROU_S
 AGE_VERROU_ABANDONNE_S = stockage_partage.AGE_VERROU_ABANDONNE_S
@@ -1055,7 +1055,7 @@ def charger_inventaire(chemin: Path) -> pd.DataFrame:
         tableau = pd.read_csv(chemin, sep=";", dtype=str,
                               encoding="utf-8-sig").fillna("")
     except Exception:
-        _journal.warning("Inventaire du stock fermé illisible : %s", chemin)
+        _journal.warning("Inventaire du stock interne illisible : %s", chemin)
         return inventaire_vide()
     tableau = tableau.reindex(columns=COLONNES_STOCK_FERME)
     for colonne in ("Boîtes", "Unités par boîte", "Unités en vrac",
@@ -1329,7 +1329,7 @@ _TRI_PDF = {TRI_PEREMPTION: "péremption la plus proche",
             TRI_NOM: "nom du produit (A-Z)"}
 
 
-def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock fermé",
+def exporter_pdf(inventaire: pd.DataFrame, titre: str = "Stock interne",
                  aujourdhui: Optional[date] = None,
                  tri: str = TRI_PEREMPTION) -> bytes:
     """Liste de stock en PDF, prête à imprimer pour le contrôle physique.

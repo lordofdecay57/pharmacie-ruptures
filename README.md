@@ -11,7 +11,7 @@ Application **locale** (elle tourne sur votre PC, hors-ligne) organisée en
   avec les listes de ruptures **GPNC** (`ruptgpnc_ia`, fournisseur
   principal) et **UNIPHARMA** (`ruptocdp_ia`, dépannage) pour produire le
   fichier Excel de commande quotidien.
-- **🔒 Gestion du stock fermé** (`stock_ferme.py`) — inventaire tenu **à
+- **🔒 Gestion du stock interne** (`stock_ferme.py`) — inventaire tenu **à
   part** du stock officinal (armoire sécurisée, dotation d'urgence, trousse,
   réserve de garde), rempli **à la douchette** boîte par boîte, avec la date
   de péremption de **chaque** boîte. Ne lit aucun fichier : il a son propre
@@ -262,7 +262,7 @@ solution** (anticiper l'information patient, contacter GPNC).
   moteur les rapproche automatiquement (CIP en priorité, sinon libellé +
   fuzzy matching).
 
-## 🔒 Module 3 — Gestion du stock fermé
+## 🔒 Module 3 — Gestion du stock interne
 
 Inventaire tenu **à part** du stock officinal courant : armoire de
 stupéfiants, dotation d'urgence, trousse, réserve de garde, rétrocessions.
@@ -344,13 +344,18 @@ entrée ou sortie, rien de plus »*. L'outil doit être utilisable **par
 quelqu'un qui ne connaît rien à l'informatique**.
 
 ```
-┌──────────────────────────────────────────────────────────┬──────────┐
-│ 🔦 Douchez la boîte — ou tapez le nom du médicament…      │ Chercher │
-├──────────────────────────────┬───────────────────────────┴──────────┤
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🔦 Douchez la boîte — ou tapez le nom du médicament, puis Entrée     │
+├──────────────────────────────┬──────────────────────────────────────┤
 │         ➕ Entrée            │            ➖ Sortie                  │
-└──────────────────────────────┴───────────────────────────────────────┘
+└──────────────────────────────┴──────────────────────────────────────┘
    ⌨️ Le code ne se lit pas ? Sortir à l'unité ?          ▸ (replié)
 ```
+
+Un bouton **« 🔎 Chercher »** accompagnait le champ. Il a été retiré : il ne
+faisait rien de plus que la touche **Entrée**, et deux façons de valider la
+même saisie, c'est déjà une question de trop — *lequel des deux ?* Le champ
+occupe désormais toute la ligne, et son invite dit quoi faire.
 
 **La zone où l'on douche ressort en couleur** : encadrée de turquoise, sur
 fond clair, texte plus grand — un code scanné se relit d'un coup d'œil,
@@ -525,10 +530,9 @@ ordinaire de l'écran reste à **0,19 s**. Un champ texte ordinaire ne peut
 pas le faire — Streamlit n'y réagit qu'à la validation, et l'écran semble
 alors ne rien faire.
 
-Le champ de scan accepte aussi un nom tapé au clavier, suivi d'**Entrée**
-(ou du bouton « 🔎 Chercher ») : si une seule boîte porte ce nom, la fiche
-se remplit directement ; sinon on est renvoyé vers la liste, où les dosages
-se départagent.
+Le champ de scan accepte aussi un nom tapé au clavier, suivi d'**Entrée** :
+si une seule boîte porte ce nom, la fiche se remplit directement ; sinon on
+est renvoyé vers la liste, où les dosages se départagent.
 
 Cette recherche par nom accepte plusieurs mots dans le désordre (« 1000 doliprane »),
 ignore accents et casse, et fait remonter d'abord les noms qui
@@ -552,7 +556,7 @@ sans un mot ressemble à une application qui ne réagit pas. Le nombre d'unités
 lorsqu'il est certain : forme dénombrable (comprimés, gélules, sachets…),
 un seul nombre possible, multiplicateur de tête pris en compte
 (« 3 piluliers de 30 comprimés » = 90). Dans le doute, la case reste à 0 —
-une quantité fausse sur un stock fermé ne se remarque pas.
+une quantité fausse sur un stock interne ne se remarque pas.
 
 **Deux façons de sortir du stock** :
 
@@ -744,9 +748,9 @@ gestes dans la réalité. Facturer sort une boîte du stock ; recevoir en fait
 entrer une. Laisser corriger deux cases à la main laisserait l'avance
 fausse.
 
-### Rapprochement avec le stock fermé
+### Rapprochement avec le stock interne
 
-Les boîtes de commandes spéciales sont aussi scannées au stock fermé
+Les boîtes de commandes spéciales sont aussi scannées au stock interne
 (module 3). Le module compare, **par code CIP**, ce que les dossiers
 annoncent et ce qui est physiquement là — et signale les écarts : une boîte
 reçue mais jamais scannée, ou scannée sans être rattachée à un dossier.
@@ -802,7 +806,7 @@ stockage_partage.py   Écriture d'un fichier PARTAGÉ entre plusieurs postes :
                         qu'à un seul endroit, la dupliquer serait la voir
                         diverger, et une divergence ici perd des données.
 
-stock_ferme.py        MODULE 3 — logique métier pure du stock fermé.
+stock_ferme.py        MODULE 3 — logique métier pure du stock interne.
   (stockage_partage   Lecture des codes scannés (Data Matrix GS1, CIP13,
    seulement)          CIP7), inventaire par lot, péremptions, exports
                        CSV et PDF. Ne lit aucun fichier déposé.
@@ -815,7 +819,7 @@ commandes_speciales.py MODULE 4 — logique métier pure des commandes
   (stockage_partage    spéciales. Les deux horloges (22 jours de la caisse,
    seulement)          délai d'import mesuré), la décision de commander, le
                        rapprochement par CIP. Ne va RIEN chercher tout seul :
-                       l'inventaire du stock fermé lui est passé en
+                       l'inventaire du stock interne lui est passé en
                        paramètre.
 
 ui_commandes_speciales.py Interface Streamlit du MODULE 4.
@@ -830,7 +834,7 @@ app.py                 Interface Streamlit UNIQUEMENT — importe les modules
 l'autre : la mutualisation passe exclusivement par `commun.py`.
 `stock_ferme.py` et `commandes_speciales.py` n'importent que
 `stockage_partage.py`, et jamais l'un l'autre — un test le vérifie. Le
-rapprochement du module 4 avec les boîtes du stock fermé se fait donc en
+rapprochement du module 4 avec les boîtes du stock interne se fait donc en
 LISANT son fichier, sans dépendre de son code. C'est ce qui
 garantit qu'on peut faire évoluer la politique de stock sans risquer de
 casser le calcul des ruptures, et inversement.
@@ -1584,7 +1588,7 @@ Trois règles de prudence, appliquées par `maj_auto.py` :
 | Le poste est **hors ligne** | rien n'est tenté, aucun message |
 | La version publiée est **identique ou plus ancienne** | aucun téléchargement (seul `app.py` est lu, quelques Ko) |
 
-Vos données — inventaire du stock fermé, historique, réglages, base des
+Vos données — inventaire du stock interne, historique, réglages, base des
 médicaments — ne sont **jamais** écrasées. Le déroulement est consigné dans
 `maj_auto.log`.
 
@@ -1598,7 +1602,7 @@ médicaments — ne sont **jamais** écrasées. Le déroulement est consigné da
 Double-cliquez sur **`mettre-a-jour.bat`** : il télécharge la dernière
 version depuis GitHub, remplace les fichiers programme et relance l'app —
 **sans toucher à vos données** (`config.yaml`, `historique_commandes.csv`,
-l'état du stock min/max et l'inventaire du stock fermé sont préservés). Après la mise à jour, vérifiez le numéro de version dans le
+l'état du stock min/max et l'inventaire du stock interne sont préservés). Après la mise à jour, vérifiez le numéro de version dans le
 bandeau. Si le numéro n'a pas changé, faites **Ctrl + Maj + R** dans le
 navigateur (cache de page).
 
@@ -1610,8 +1614,16 @@ l'analyse tourne sur un jeu fictif sans toucher à votre configuration.
 
 Le sélecteur d'**espace de travail**, en haut de l'écran, choisit entre le
 parcours « cadencier » (Modules 1 et 2, décrit ci-dessous) et le **stock
-fermé** (Module 3), qui, lui, ne demande aucun fichier : on y scanne, on
+interne** (Module 3), qui, lui, ne demande aucun fichier : on y scanne, on
 imprime.
+
+L'onglet **🔒 Stock interne** ne ressemble pas aux deux autres : il est plus
+grand, et il porte le turquoise de l'application en permanence — allumé
+comme éteint — quand les deux autres restent neutres. C'est le seul des
+trois où l'on prend la douchette en main : il doit se repérer **sans
+lire**, et trois onglets de même taille se parcourent quand même du regard,
+un par un. Les deux autres sont des consultations ; celui-là est le geste
+de tous les jours.
 
 1. **Déposez au moins le cadencier** (`.xlsx`, `.xls`, `.csv` ou `.pdf`) —
    il suffit pour la Gestion des stocks en rotation. Déposez aussi les
@@ -1641,16 +1653,16 @@ pharmacie-ruptures/
 ├── commun.py                # fonctions pures partagées (parsing, fichiers, stats)
 ├── stock_rotation.py        # Module 1 — stock min/max, pur, testable indépendamment
 ├── moteur_ruptures.py       # Module 2 — ruptures GPNC/UNIPHARMA, pur, testable
-├── stock_ferme.py           # Module 3 — stock fermé (scan, lots, péremptions)
+├── stock_ferme.py           # Module 3 — stock interne (scan, lots, péremptions)
 ├── base_medicaments.py      # identification d'un CIP via la base publique
 ├── ui_commun.py             # règles pures de l'interface (sans Streamlit)
 ├── ui_stock_ferme.py        # interface du Module 3 (Streamlit)
 ├── .streamlit/config.toml   # thème de l'interface (vert pharmacie)
 ├── config.yaml               # mapping + réglages mémorisés (créé au 1er lancement)
 ├── historique_commandes.csv  # historique des analyses de ruptures (créé à la 1re)
-├── stock_ferme.csv           # inventaire du stock fermé (créé au 1er scan)
+├── stock_ferme.csv           # inventaire du stock interne (créé au 1er scan)
 ├── base_medicaments.csv      # base publique téléchargée (créée à la demande)
-├── stock_ferme_produits.csv  # produits mémorisés du stock fermé (CIP → nom)
+├── stock_ferme_produits.csv  # produits mémorisés du stock interne (CIP → nom)
 ├── requirements.txt          # dépendances Python
 ├── maj_auto.py              # mise à jour automatique (testable, sans Streamlit)
 ├── presence.py              # qui utilise le dossier partagé en ce moment
@@ -1688,7 +1700,7 @@ un navigateur ; il s'ignore tout seul si Playwright n'est pas installé.
 ## Où l'application range vos données
 
 `config.yaml`, `historique_commandes.csv`, l'état du stock min/max et
-l'inventaire du stock fermé sont écrits **à côté du programme**, pas dans le
+l'inventaire du stock interne sont écrits **à côté du programme**, pas dans le
 dossier depuis lequel on le lance : copier le dossier suffit à emporter
 l'installation complète.
 
@@ -1715,7 +1727,7 @@ stock 18 j → écartée), Ozempic 1 mg (stock 5, ~16,5/mois → ~9 j → 🟡 m
 Cmd 12), Aranesp 150 (stock 0, réappro 2 j → 🔴 urgent, Cmd ≥ 1). Cas de
 référence Module Stock : règle des 10 unités testée sous tous ses angles
 (seuil prioritaire sur le stock min, non-régression sur les produits
-arrêtés, paramètres reconfigurables). Cas de référence Module Stock fermé :
+arrêtés, paramètres reconfigurables). Cas de référence Module Stock interne :
 Data Matrix sans séparateur FNC1 (`…10LOT4217271130` → lot `LOT42`, et non
 `LOT4` ; `…101234AB21987654321` → lot `1234AB` **et** série `987654321`),
 deux péremptions du même CIP donnant deux lignes, PDF lisible sans émoji et

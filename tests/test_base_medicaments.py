@@ -149,7 +149,7 @@ class TestUnitesParBoite:
     """Le conditionnement officiel dit combien la boîte contient.
 
     Libellés authentiques de la base : ils sont beaucoup moins réguliers
-    qu'on ne l'imagine, et une quantité fausse sur un stock fermé est pire
+    qu'on ne l'imagine, et une quantité fausse sur un stock interne est pire
     qu'une case vide — elle ne se remarque pas.
     """
 
@@ -437,7 +437,7 @@ class TestAnciennete:
 class TestIsolation:
     def test_ne_connait_aucun_autre_module(self):
         """Ce module ne sait répondre qu'à « quel médicament porte ce
-        code ? » — ni cadencier, ni ruptures, ni stock fermé."""
+        code ? » — ni cadencier, ni ruptures, ni stock interne."""
         source = (pytest.importorskip("pathlib").Path(__file__).parent.parent
                   / "base_medicaments.py").read_text(encoding="utf-8")
         for interdit in ("import commun", "import stock_ferme",
