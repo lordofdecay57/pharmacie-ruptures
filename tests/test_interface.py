@@ -220,8 +220,11 @@ def _ouvrir_les_autres_gestes(page) -> None:
     exception affichée en permanence encombre le geste de tous les jours.
     Replié ne veut pas dire caché : le titre nomme les deux cas.
     """
-    if page.locator(".st-key-sf_auto_nom:visible, "
-                    ".st-key-sf_bouton_sortie_manuelle:visible, "
+    # « sf_auto_nom » ne compte PLUS comme témoin d'ouverture : la liste des
+    # médicaments a quitté le dépliant pour le flux principal, où elle est
+    # visible en permanence. L'y chercher ferait croire le dépliant déjà
+    # ouvert, et plus rien ne serait jamais déplié.
+    if page.locator(".st-key-sf_bouton_sortie_manuelle:visible, "
                     ".st-key-sf_bouton_saisie_manuelle:visible").count():
         return                              # déjà déplié
     page.get_by_text("Le code ne se lit pas").first.click()
@@ -534,7 +537,33 @@ class TestEspaceStockFerme:
         assert style["epaisseur"] >= 2, style
         assert style["fond"] != "rgba(0, 0, 0, 0)", style
         # Un code scanné doit se relire sans se pencher.
-        assert style["taille"] >= 17, style
+        assert style["taille"] >= 22, style
+
+    def test_la_zone_de_scan_repose_sur_un_panneau_colore(self, page):
+        """« Agrandis la zone à doucher et mets un fond qui ressort. »
+
+        Un premier essai s'était contenté de teinter le champ lui-même en
+        `#f0fdfa` — un turquoise si pâle qu'à l'écran de l'officine il
+        passait pour du blanc. La zone porte donc un vrai panneau coloré,
+        et le champ y est BLANC au milieu : c'est le contraste entre les
+        deux qui se voit de loin, pas la teinte du champ seul. On vérifie
+        donc les deux fonds, et qu'ils diffèrent.
+        """
+        fonds = page.evaluate(
+            """() => {
+                const p = document.querySelector('.st-key-sf_scan');
+                const c = document.querySelector('.st-key-sf_scan input');
+                if (!p || !c) return null;
+                return {panneau: getComputedStyle(p).backgroundColor,
+                        champ: getComputedStyle(c).backgroundColor,
+                        hauteur: c.getBoundingClientRect().height};
+            }""")
+        assert fonds, "la zone de scan est introuvable"
+        assert fonds["panneau"] != "rgba(0, 0, 0, 0)", (
+            "le panneau est transparent : il ne ressort de rien")
+        assert fonds["panneau"] != fonds["champ"], fonds
+        # Agrandie : un champ de saisie ordinaire fait ~40 px de haut.
+        assert fonds["hauteur"] >= 60, fonds
 
     def test_les_exceptions_sont_repliees(self, page):
         """Étiquette abîmée, sortie à l'unité : des exceptions. Affichées en
@@ -623,6 +652,52 @@ class TestSaisieAssistee:
     def test_le_menu_est_present(self, page_avec_base):
         _sans_exception(page_avec_base)
         assert page_avec_base.locator(".st-key-sf_auto_nom").count() == 1
+
+    def test_la_liste_vit_dans_le_flux_et_non_dans_le_depliant(
+            self, page_avec_base):
+        """« Ajoute la possibilité, comme avant, d'accéder à la liste de
+        médicaments en tapant les premières lettres. »
+
+        Elle avait été repliée avec les exceptions ; ce n'en est pas une.
+        Un code-barres linéaire ne porte pas le nom du produit : une boîte
+        sur deux entre par cette liste. Repliée, il fallait savoir qu'elle
+        existait — et personne ne déplie « le code ne se lit pas ? » quand
+        le code se lit très bien.
+
+        Vérifié par la POSITION, et non par la visibilité : le dépliant est
+        ouvert dans cette page de test, et « visible » n'y prouverait donc
+        rien. Au-dessus de lui, elle est forcément hors de lui.
+        """
+        positions = page_avec_base.evaluate(
+            """() => {
+                const y = (s) => {
+                    const e = document.querySelector(s);
+                    return e ? e.getBoundingClientRect().top : -1;
+                };
+                // CE dépliant-là, désigné par son titre : la barre latérale
+                // en porte d'autres, plus haut dans le document, et « le
+                // premier trouvé » désignait l'un d'eux.
+                const exceptions = [...document.querySelectorAll(
+                        '[data-testid="stExpander"]')].find(
+                    e => e.innerText.includes('Le code ne se lit pas'));
+                return {liste: y('.st-key-sf_auto_nom'),
+                        sens: y('.st-key-sf_mode'),
+                        depliant: exceptions
+                            ? exceptions.getBoundingClientRect().top : -1};
+            }""")
+        assert positions["depliant"] > 0, positions
+        assert positions["liste"] > 0, positions
+        # Sous les deux boutons de sens — on bipe d'abord — mais AU-DESSUS
+        # du dépliant des exceptions.
+        assert positions["sens"] < positions["liste"], positions
+        assert positions["liste"] < positions["depliant"], positions
+
+    def test_l_invite_parle_des_premieres_lettres(self, page_avec_base):
+        """L'invite est tout ce qui dit que la liste réagit à la frappe :
+        un menu déroulant ordinaire ne le laisse pas deviner."""
+        invite = page_avec_base.locator(
+            ".st-key-sf_auto_nom input").first.get_attribute("placeholder")
+        assert "premières lettres" in invite, invite
 
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_auto_nom input").first

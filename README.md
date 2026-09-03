@@ -344,11 +344,17 @@ entrée ou sortie, rien de plus »*. L'outil doit être utilisable **par
 quelqu'un qui ne connaît rien à l'informatique**.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ 🔦 Douchez la boîte — ou tapez le nom du médicament, puis Entrée     │
-├──────────────────────────────┬──────────────────────────────────────┤
+╔═════════════════════════════════════════════════════════════════════╗
+║ ┌─────────────────────────────────────────────────────────────────┐ ║
+║ │  🔦 Douchez la boîte — ou tapez le nom, puis Entrée              │ ║  ← panneau turquoise
+║ └─────────────────────────────────────────────────────────────────┘ ║
+╚═════════════════════════════════════════════════════════════════════╝
+┌──────────────────────────────┬──────────────────────────────────────┐
 │         ➕ Entrée            │            ➖ Sortie                  │
 └──────────────────────────────┴──────────────────────────────────────┘
+┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
+  🔎 Ou tapez les premières lettres — la liste se réduit à la frappe
+└ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
    ⌨️ Le code ne se lit pas ? Sortir à l'unité ?          ▸ (replié)
 ```
 
@@ -357,11 +363,15 @@ faisait rien de plus que la touche **Entrée**, et deux façons de valider la
 même saisie, c'est déjà une question de trop — *lequel des deux ?* Le champ
 occupe désormais toute la ligne, et son invite dit quoi faire.
 
-**La zone où l'on douche ressort en couleur** : encadrée de turquoise, sur
-fond clair, texte plus grand — un code scanné se relit d'un coup d'œil,
-sans se pencher. Et elle **s'allume quand elle a le curseur** : une
-douchette n'écrit que dans le champ actif, et un bip perdu parce que le
-curseur était ailleurs ne laisse aucune trace à l'écran.
+**La zone où l'on douche repose sur un panneau turquoise**, et le champ y
+est **blanc au milieu** — c'est le contraste entre les deux qui se voit de
+loin. Un premier essai s'était contenté de teinter le champ lui-même d'un
+turquoise très pâle : à l'écran de l'officine, il passait pour du blanc.
+Le champ est aussi **nettement plus haut**, et son texte plus grand : un
+code scanné se relit d'un coup d'œil, sans se pencher. Et il **s'allume
+quand il a le curseur** : une douchette n'écrit que dans le champ actif, et
+un bip perdu parce que le curseur était ailleurs ne laisse aucune trace à
+l'écran.
 
 Le champ est **au-dessus** du sens : on bipe d'abord, on regarde le sens
 ensuite. Il reste choisi d'un scan à l'autre — on le règle une fois le
@@ -371,11 +381,24 @@ Ce que cela remplace : l'écran portait **deux dispositions différentes**
 selon le mode — trois boutons en Entrée, deux encadrés côte à côte en
 Sortie — et il fallait le relire à chaque bascule pour retrouver le champ.
 
-Tout le reste est **replié** dans une ligne dépliable : saisie manuelle,
-recherche par le nom, sortie à l'unité. Ce sont des exceptions — étiquette
-abîmée, boîte sans code-barres, dispensation à l'unité — et une exception
-affichée en permanence encombre le geste de tous les jours. Replié ne veut
-pas dire caché : **le titre nomme les deux cas**.
+**La liste des médicaments est revenue dans le flux**, sous les deux
+boutons de sens, en mode Entrée. Elle avait été repliée avec les
+exceptions ; ce n'en est pas une. Un code-barres **linéaire ne porte pas le
+nom** du produit, et le Data Matrix d'une boîte jamais vue non plus : une
+entrée sur deux passe par là. Repliée, il fallait savoir qu'elle existait —
+et personne ne déplie *« le code ne se lit pas ? »* quand le code se lit
+très bien. On tape les **premières lettres**, la liste se réduit à la
+frappe, et chaque ligne porte le nom, le dosage **et** la taille de la
+boîte : un clic remplit toute la fiche.
+
+> Elle demande la **base publique des médicaments**. Si elle n'est pas
+> installée, la ligne est remplacée par un mot qui le dit et renvoie vers
+> la colonne de gauche — sans quoi elle disparaîtrait sans laisser de
+> trace, et son absence passerait pour une panne.
+
+Ne reste **replié** que ce qui est vraiment exceptionnel : la saisie
+manuelle d'une boîte absente du catalogue national, et la sortie à l'unité.
+Replié ne veut pas dire caché : **le titre nomme les deux cas**.
 
 La **base publique des médicaments** et l'**import du répertoire** ont
 quitté le flux principal pour la **colonne de gauche**, celle qui se replie.
