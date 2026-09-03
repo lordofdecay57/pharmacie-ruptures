@@ -58,7 +58,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.19"
+VERSION_APP = "6.20"
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -150,21 +150,17 @@ st.markdown("""
    pratique la douchette à la main : celui-là doit se repérer sans lire.
    Il porte donc le turquoise de l'application en permanence — allumé
    comme éteint — quand les deux autres restent neutres.
-   La couleur seule ne suffisait pas : trois onglets de même taille se
-   parcourent quand même du regard, un par un. Celui-ci est donc AUSSI
-   plus grand — plus haut, plus large, texte plus gros — pour qu'il se
-   distingue par sa forme avant même sa couleur. C'est le geste de tous
-   les jours ; les deux autres sont des consultations.
+   La COULEUR SEULE, et pas la taille : l'agrandir déséquilibrait la
+   barre, un onglet deux fois plus haut que ses voisins au-dessus d'un
+   écran par ailleurs aligné. Les trois gardent donc la même forme, et
+   c'est le turquoise qui désigne celui-ci — il se voit d'aussi loin,
+   sans rien décaler.
    `:nth-child(2)` : le stock interne est le deuxième des trois onglets,
    dans l'ordre où `app.py` les déclare. */
 .st-key-espace_travail button:nth-child(2) {
   border-color: #0d9488 !important; background: #f0fdfa !important;
-  border-width: 2px !important;
-  padding: 26px 34px !important; border-radius: 14px !important;
-  box-shadow: 0 2px 10px rgba(13,148,136,.20) !important;
 }
-.st-key-espace_travail button:nth-child(2) p { color: #0f766e !important;
-  font-size: 1.45rem !important; font-weight: 800 !important; }
+.st-key-espace_travail button:nth-child(2) p { color: #0f766e !important; }
 .st-key-espace_travail button:nth-child(2)[aria-checked="true"],
 .st-key-espace_travail
   button:nth-child(2)[kind="segmented_controlActive"] {
@@ -353,7 +349,7 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 # ---------------------------------------------------------------------------
 
 ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
-ESPACE_STOCK_FERME = "🔒  Stock interne — inventaire scanné"
+ESPACE_STOCK_FERME = "🔒  Stock interne"
 ESPACE_COMMANDES = "💠  Commandes spéciales"
 
 DOSSIER_APP = Path(__file__).resolve().parent
