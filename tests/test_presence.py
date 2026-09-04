@@ -155,6 +155,101 @@ class TestPeremption:
         assert presence.postes_actifs(tmp_path) == ["COMPTOIR-1"]
 
 
+class TestLeMarqueurNeVieillitPasSousLaSession:
+    """« Ce poste travaille encore », et non « il a démarré à 8 h ».
+
+    Le marqueur n'était posé qu'au LANCEMENT, par `lancer.bat`, et il vaut
+    seize heures. Sa date disait donc quand la session avait commencé, pas
+    qu'elle durait encore. Or **personne ne ferme la fenêtre noire le
+    soir** : un poste ouvert à 08 h et laissé allumé voyait son marqueur
+    périmer dans la nuit, et la mise à jour de 08 h le lendemain pouvait
+    remplacer les fichiers sous sa session — exactement ce que ce module
+    existe pour empêcher.
+
+    L'application le retouche donc elle-même tant qu'elle tourne.
+    """
+
+    def _vieillir(self, tmp_path, poste, heures):
+        import os
+        chemin = presence.marqueur(tmp_path, poste)
+        quand = time.time() - heures * HEURE
+        os.utime(chemin, (quand, quand))
+
+    def test_un_marqueur_qui_date_est_retouche(self, tmp_path):
+        presence.entrer(tmp_path, "COMPTOIR-1")
+        self._vieillir(tmp_path, "COMPTOIR-1", 14)
+        assert presence.rafraichir(tmp_path, "COMPTOIR-1") is True
+        # Il repart à zéro : il ne périmera pas cette nuit.
+        age = time.time() - presence.marqueur(
+            tmp_path, "COMPTOIR-1").stat().st_mtime
+        assert age < 60, age
+
+    def test_une_session_de_nuit_reste_visible_le_lendemain(self, tmp_path):
+        """LE scénario complet. Sans retouche, ce poste aurait disparu des
+        actifs — et la mise à jour du matin serait passée sur son dos."""
+        presence.entrer(tmp_path, "COMPTOIR-1")
+        # Ouvert hier matin, jamais refermé : 20 heures se sont écoulées.
+        # L'application, elle, a tourné sans discontinuer et retouché son
+        # marqueur en chemin.
+        for heures in (10, 20):
+            self._vieillir(tmp_path, "COMPTOIR-1", heures)
+            presence.rafraichir(tmp_path, "COMPTOIR-1")
+        assert presence.postes_actifs(tmp_path) == ["COMPTOIR-1"]
+
+    def test_un_marqueur_frais_n_est_pas_reecrit(self, tmp_path):
+        """Ce fichier vit sur un PARTAGE RÉSEAU : l'écrire à chaque
+        interaction de chaque poste coûterait plus cher que ce qu'il
+        protège. On n'y touche qu'une fois par demi-heure."""
+        presence.entrer(tmp_path, "COMPTOIR-1")
+        avant = presence.marqueur(tmp_path, "COMPTOIR-1").stat().st_mtime_ns
+        assert presence.rafraichir(tmp_path, "COMPTOIR-1") is False
+        assert presence.marqueur(
+            tmp_path, "COMPTOIR-1").stat().st_mtime_ns == avant
+
+    def test_l_intervalle_est_bien_plus_court_que_la_peremption(self):
+        """Sinon la retouche arriverait après la mort du marqueur, et ne
+        servirait à rien. Un ordre de grandeur d'écart, au moins."""
+        assert (presence.INTERVALLE_RAFRAICHISSEMENT_S
+                < presence.DUREE_MAX_H * HEURE / 10)
+
+    def test_un_marqueur_absent_est_recree(self, tmp_path):
+        """Un ménage passé entre-temps, un partage remonté : la session
+        tourne toujours, elle doit se redéclarer."""
+        assert presence.rafraichir(tmp_path, "COMPTOIR-1") is True
+        assert presence.postes_actifs(tmp_path) == ["COMPTOIR-1"]
+
+    def test_il_ne_leve_jamais(self, tmp_path):
+        """Il est appelé à chaque affichage de l'écran. Une exception y
+        ferait tomber l'application entière, pour un fichier de service.
+
+        L'empêchement est un FICHIER portant le nom du dossier des
+        marqueurs — et non des droits en lecture seule : les tests
+        tournent parfois sous un compte administrateur, pour qui la
+        lecture seule n'empêche rien, et le test ne prouverait plus rien.
+        """
+        presence.dossier_marqueurs(tmp_path).write_text("pas un dossier",
+                                                        encoding="utf-8")
+        assert presence.rafraichir(tmp_path, "COMPTOIR-1") is False
+        assert presence.postes_actifs(tmp_path) == []
+
+    def test_l_application_le_retouche(self):
+        """Le câblage : sans cet appel, tout ce qui précède est du code
+        mort et le marqueur vieillit comme avant."""
+        source = (RACINE / "app.py").read_text(encoding="utf-8")
+        assert "import presence" in source
+        assert "presence.rafraichir(" in source
+
+    def test_c_est_le_dossier_du_PROGRAMME_qui_est_marque(self):
+        """Et non celui des données, qui peut être ailleurs : la mise à
+        jour remplace le dossier du programme, et c'est là que
+        `lancer.bat` et `maj_auto.py` vont chercher les marqueurs. Se
+        déclarer dans l'autre dossier ne protégerait rien."""
+        source = (RACINE / "app.py").read_text(encoding="utf-8")
+        appel = source[source.index("presence.rafraichir("):][:80]
+        assert "DOSSIER_APPLICATION" in appel, appel
+        assert "DOSSIER_APPLICATION = Path(__file__).resolve().parent" in source
+
+
 class TestMiseAJourReportee:
     """Le garde-fou, vu depuis maj_auto."""
 

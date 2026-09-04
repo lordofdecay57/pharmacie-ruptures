@@ -96,6 +96,45 @@ def entrer(dossier: Path, poste: Optional[str] = None) -> bool:
         return False
 
 
+#: Un marqueur plus vieux que cela est retouché par l'application
+#: elle-même, tant qu'elle tourne. Trente minutes : assez rare pour ne
+#: pas écrire sans arrêt sur un partage réseau, assez fréquent pour
+#: qu'un marqueur ne vieillisse jamais de plus d'une demi-heure.
+INTERVALLE_RAFRAICHISSEMENT_S = 1800.0
+
+
+def rafraichir(dossier: Path, poste: Optional[str] = None,
+               intervalle_s: float = INTERVALLE_RAFRAICHISSEMENT_S,
+               maintenant: Optional[float] = None) -> bool:
+    """Retouche le marqueur de ce poste s'il commence à dater.
+
+    Le marqueur n'était posé QU'AU LANCEMENT, et il vaut seize heures.
+    Sa date disait donc « quand cette session a commencé », pas « ce
+    poste travaille encore » — et personne ne ferme la fenêtre noire le
+    soir. Un poste ouvert à 08 h et laissé allumé voyait son marqueur
+    périmer dans la nuit ; la mise à jour du lendemain matin pouvait
+    alors remplacer les fichiers sous sa session, ce que tout ce module
+    existe précisément pour empêcher.
+
+    L'application le retouche donc tant qu'elle tourne, et la date
+    redevient ce qu'elle prétend être. Renvoie ``True`` si le marqueur a
+    été réécrit.
+
+    Espacé volontairement : ce fichier vit sur un partage réseau, et une
+    écriture à chaque interaction de chaque poste coûterait plus cher que
+    ce qu'elle protège. Ne lève jamais — comme le reste du module, il
+    tourne là où personne ne lira jamais l'erreur.
+    """
+    cible = marqueur(dossier, poste)
+    instant = time.time() if maintenant is None else maintenant
+    try:
+        if cible.is_file() and instant - cible.stat().st_mtime < intervalle_s:
+            return False
+    except OSError:                               # pragma: no cover
+        return False
+    return entrer(dossier, poste)
+
+
 def sortir(dossier: Path, poste: Optional[str] = None) -> bool:
     """Signale que ce poste a refermé l'application. Ne lève jamais."""
     try:
