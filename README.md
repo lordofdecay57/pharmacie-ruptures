@@ -378,6 +378,34 @@ une valeur inédite**, et cela suffit à couvrir les deux gestes :
 > refusait une valeur inédite, la pharmacie ne pourrait plus scanner du
 > tout.
 
+#### Ce que la liste propose dépend du SENS
+
+| Mode | Ce que la liste contient | Pourquoi |
+|---|---|---|
+| **➕ Entrée** | le **catalogue national** (~19 600 boîtes) | on peut faire entrer n'importe quel médicament, y compris un qu'on n'a jamais eu |
+| **➖ Sortie** | **l'inventaire** — une ligne par lot, avec sa péremption et son numéro | on ne sort que ce qu'on a ; et c'est une **boîte** précise qui sort, pas un médicament en général |
+
+> **Bug corrigé en v6.24**, remonté par l'officine : *« après avoir bipé ou
+> tapé le nom du médicament, rien ne se passe »*. La barre unique
+> consultait le catalogue national **avant** de regarder le sens du
+> mouvement. En Sortie, le nom choisi y était donc reconnu, l'application
+> ouvrait la fiche d'**entrée** — que le mode Sortie n'affiche jamais — et
+> il ne se passait rien à l'écran. Un nom tapé librement, lui, tombait sur
+> « Code non reconnu » pour un médicament pourtant dans l'armoire.
+>
+> Deux corrections, et la seconde est la vraie : **le sens se lit
+> d'abord**, et **la liste de Sortie propose l'inventaire**. Chercher une
+> des trente boîtes qu'on détient parmi les 19 600 du pays, c'était la
+> mauvaise botte de foin.
+>
+> Le scan, lui, fonctionnait — vérifié en reproduisant les deux gestes
+> avant de toucher au code.
+
+Un nom tapé qui ne correspond à **aucune** ligne de l'inventaire le dit,
+et parle d'inventaire — « code non reconnu » n'a aucun sens pour un nom. Un
+nom qui en désigne **plusieurs** les nomme et laisse choisir : sortir « le
+premier » serait sortir une boîte au hasard.
+
 Un bouton **« 🔎 Chercher »** avait accompagné le champ, avant cela. Il a
 été retiré pour la même raison : il ne faisait rien de plus que la touche
 **Entrée**.

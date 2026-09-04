@@ -1138,3 +1138,97 @@ class TestCommandesSpeciales:
         page_commandes.wait_for_timeout(6000)
         _sans_exception(page_commandes)
         assert "facturé le" in page_commandes.content()
+
+
+# ---------------------------------------------------------------------------
+# Sortir une boîte en tapant son nom
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def application_sortie_par_nom(tmp_path_factory):
+    """Base publique ET inventaire : la situation réelle de l'officine.
+
+    Il faut les deux pour reproduire le bug : c'est la présence du
+    catalogue national qui détournait la saisie, et celle de l'inventaire
+    qui rend la sortie légitime.
+    """
+    travail = tmp_path_factory.mktemp("appli_sortie_nom")
+    (travail / "base_medicaments.csv").write_text(
+        "Code CIP;Nom du produit;Présentation\n"
+        "3400930000011;ZOLPIDEM 10 mg, comprimé;plaquette de 30 comprimés\n"
+        "3400935955838;DOLIPRANE 1000 mg, comprimé;plaquette de 8 comprimés\n",
+        encoding="utf-8-sig")
+    (travail / "stock_ferme.csv").write_text(
+        "Code CIP;Nom du produit;Péremption;Lot;Boîtes;Unités par boîte;"
+        "Unités en vrac;Total unités;Enregistré le\n"
+        "3400930000011;ZOLPIDEM 10 mg;2027-06-30;Z1;2;30;0;60;2026-07-01\n",
+        encoding="utf-8-sig")
+    yield from _lancer(travail)
+
+
+@pytest.fixture(scope="module")
+def page_sortie_par_nom(application_sortie_par_nom, pilote):
+    """Stock interne, mode Sortie, avec base publique et inventaire."""
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1400, "height": 1100})
+    onglet.goto(application_sortie_par_nom, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    onglet.wait_for_timeout(6000)
+    _mode(onglet, "Sortie").first.click()
+    onglet.wait_for_timeout(4000)
+    yield onglet
+    navigateur.close()
+
+
+class TestSortirEnTapantLeNom:
+    """« Bug au niveau de la sortie : après avoir bipé ou tapé le nom du
+    médicament, rien ne se passe. »
+
+    Le diagnostic tenait en un ordre de lecture. La barre unique consultait
+    le **catalogue national** avant de regarder le sens du mouvement : en
+    mode Sortie, le nom choisi y était reconnu, on ouvrait la fiche
+    d'ENTRÉE — que le mode Sortie n'affiche jamais — et il ne se passait
+    rien à l'écran. Un nom tapé librement, lui, tombait sur « Code non
+    reconnu » pour un médicament pourtant dans l'armoire.
+
+    Deux corrections, et la seconde est la vraie : le sens se lit
+    d'abord ; et **en Sortie, la liste propose l'inventaire**, pas les
+    19 600 boîtes du pays. On ne sort que ce qu'on a.
+    """
+
+    def test_la_liste_propose_l_inventaire_et_non_le_catalogue(
+            self, page_sortie_par_nom):
+        """DOLIPRANE est au catalogue mais pas à l'inventaire : il n'a rien
+        à faire dans une liste de sortie. ZOLPIDEM, lui, y est — avec sa
+        péremption et son lot, car c'est une BOÎTE qu'on sort, pas un
+        médicament en général."""
+        page = page_sortie_par_nom
+        champ = page.get_by_placeholder("Douchez la boîte").first
+        champ.click()
+        page.wait_for_selector("[role='option']", timeout=15000)
+        options = page.locator("[role='option']").all_inner_texts()
+        assert any("ZOLPIDEM" in o for o in options), options
+        assert not any("DOLIPRANE" in o for o in options), options
+        assert any("lot Z1" in o for o in options), options
+        page.keyboard.press("Escape")
+
+    def test_taper_le_nom_sort_bien_une_boite(self, page_sortie_par_nom):
+        """LE bug remonté : deux boîtes à l'inventaire, on tape le nom, il
+        doit en rester une — et l'écran doit le dire."""
+        page = page_sortie_par_nom
+        _saisir(page, "ZOLPIDEM", attente=6000)
+        _sans_exception(page)
+        contenu = page.content()
+        assert "1 boîte sortie" in contenu, "rien ne s'est passé"
+        assert "reste 1 boîte" in contenu, contenu[:0]
+
+    def test_un_nom_absent_de_l_inventaire_le_dit(self, page_sortie_par_nom):
+        """Ne JAMAIS rester muet : c'est ce qui fait croire à une panne.
+        Et le message doit parler de l'inventaire, pas du code-barres —
+        « code non reconnu » n'a aucun sens pour un nom tapé."""
+        page = page_sortie_par_nom
+        _saisir(page, "AMOXICILLINE", attente=6000)
+        _sans_exception(page)
+        contenu = page.content()
+        assert "n'est pas à l'inventaire" in contenu
+        assert "Code non reconnu" not in contenu
