@@ -33,6 +33,7 @@ import yaml
 import commun
 import mise_a_jour
 import moteur_ruptures as moteur
+import presence
 import raccourci
 import stock_rotation
 import ui_commun
@@ -58,7 +59,13 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.24"
+VERSION_APP = "6.25"
+
+# Dossier du PROGRAMME, et non des données : les marqueurs de présence
+# disent qui travaille sur CE dossier d'application — c'est lui que la
+# mise à jour remplace, et c'est là que `lancer.bat` et `maj_auto.py`
+# vont les chercher. Les données, elles, peuvent être ailleurs.
+DOSSIER_APPLICATION = Path(__file__).resolve().parent
 
 # Dossier des données de la pharmacie : celui du programme par défaut,
 # déplaçable par la variable d'environnement PHARMACIE_DONNEES (cf.
@@ -501,6 +508,18 @@ def _garder_espace() -> None:
             "espace_retenu", ESPACE_STOCK_FERME)
     st.session_state["espace_retenu"] = st.session_state["espace_travail"]
 
+
+# « Ce poste travaille encore. » Le marqueur de présence n'était posé
+# qu'au LANCEMENT, par lancer.bat, et il vaut seize heures : sa date
+# disait donc quand la session avait commencé, pas qu'elle durait
+# encore. Or personne ne ferme la fenêtre noire le soir. Un poste ouvert
+# à 08 h et laissé allumé voyait son marqueur périmer dans la nuit, et
+# la mise à jour du lendemain matin pouvait remplacer les fichiers sous
+# sa session — ce que ce marqueur existe précisément pour empêcher.
+# L'application le retouche donc elle-même, au plus une fois par
+# demi-heure : ce fichier vit sur un partage, et l'écrire à chaque
+# interaction coûterait plus cher que ce qu'il protège.
+presence.rafraichir(DOSSIER_APPLICATION)
 
 # Avant l'aiguillage : la barre latérale des deux espaces est construite
 # plus bas, chacune de son côté, et l'espace « stock interne » s'arrête sur un

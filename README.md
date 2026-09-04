@@ -1591,6 +1591,20 @@ poste éteint brutalement laisse le sien : sans péremption, une seule
 coupure de courant figerait la pharmacie sur sa version pour toujours, et
 personne ne saurait pourquoi.
 
+**Et l'application le retouche tant qu'elle tourne** (v6.25). Le marqueur
+n'était posé qu'au **lancement**, par `lancer.bat` : sa date disait donc
+quand la session avait *commencé*, pas qu'elle durait encore. Or personne
+ne ferme la fenêtre noire le soir. Un poste ouvert à 08 h et laissé allumé
+voyait son marqueur périmer dans la nuit, et la mise à jour du lendemain
+matin pouvait remplacer les fichiers **sous sa session** — exactement ce
+que ce marqueur existe pour empêcher.
+
+> Retouché **au plus une fois par demi-heure**. Ce fichier vit sur un
+> partage réseau : l'écrire à chaque interaction de chaque poste coûterait
+> plus cher que ce qu'il protège. Une demi-heure est trente fois plus
+> court que les seize heures de péremption — la retouche arrive donc
+> toujours largement à temps.
+
 **Les AUTRES postes, pas tous** — corrigé après audit (v6.19). Fermer la
 fenêtre noire par la croix est la façon documentée d'arrêter l'application,
 et elle tue `cmd` avant sa dernière ligne, `presence.py --sortir` : le poste
