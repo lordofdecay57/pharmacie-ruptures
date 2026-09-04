@@ -332,22 +332,35 @@ def _garder_mode() -> None:
     st.session_state["sf_mode_choisi"] = st.session_state["sf_mode"]
 
 
-def _traiter_sortie(code) -> None:
-    """Sortie de stock à la douchette : une boîte de moins, du bon lot.
+def _traiter_sortie(code=None, cip: str = "", nom: str = "",
+                    peremption=None, lot: str = "", designation: str = "") -> None:
+    """Sortie de stock : une boîte de moins, du bon lot.
 
-    Un Data Matrix désigne la boîte précise ; un code-barres linéaire ne
-    donne que le produit, et c'est alors le lot qui périme le plus tôt qui
-    sort (FEFO).
+    Deux façons d'arriver ici, et une seule sortie :
+
+    - la **douchette** passe un ``code`` — un Data Matrix désigne la boîte
+      précise, un code-barres linéaire ne donne que le produit ;
+    - un **nom choisi ou tapé** passe ``cip`` / ``nom``, sans péremption ni
+      lot : c'est alors le lot qui périme le plus tôt qui sort (FEFO).
+
+    Le second chemin manquait. En mode Sortie, taper le nom d'un
+    médicament ne faisait **rien** : la barre proposait le catalogue
+    national, le nom choisi n'était pas un code-barres, et l'écran
+    répondait « Code non reconnu » pour un produit pourtant à l'inventaire.
     """
+    if code is not None:
+        cip, peremption, lot = code.cip, code.peremption, code.lot
+        designation = designation or code.cip or code.brut
+    designation = designation or nom or cip
+
     # Le lot est choisi sur l'inventaire RELU sous verrou, pas sur celui
     # qu'affiche la page : entre l'affichage et le scan, un autre poste a pu
     # sortir la dernière boîte de ce lot.
     cible = {}
 
     def mouvement(courant):
-        trouve = stock_ferme.lot_a_sortir(courant, cip=code.cip,
-                                          peremption=code.peremption,
-                                          lot=code.lot)
+        trouve = stock_ferme.lot_a_sortir(courant, cip=cip, nom=nom,
+                                          peremption=peremption, lot=lot)
         if trouve is None:
             return None
         cible.update(trouve)
@@ -362,27 +375,27 @@ def _traiter_sortie(code) -> None:
         # peut rester les comprimés d'une boîte entamée. Le dire, plutôt
         # que d'envoyer chercher un produit qui est bien là.
         inventaire, _ = _etat()
-        vrac = stock_ferme.vrac_sans_boite(inventaire, cip=code.cip)
+        vrac = stock_ferme.vrac_sans_boite(inventaire, cip=cip, nom=nom)
         if vrac:
             st.session_state["sf_message"] = (
                 "avertissement",
-                f"Plus de boîte entière pour « {code.cip or code.brut} » — "
+                f"Plus de boîte entière pour « {designation} » — "
                 f"il reste {vrac} unité(s) d'une boîte entamée. Passez par "
                 "« ⌨️ Le code ne se lit pas ? Sortir à l'unité ? » pour les "
                 "dispenser.")
             return
         st.session_state["sf_message"] = (
             "avertissement",
-            f"Sortie impossible : « {code.cip or code.brut} » n'est pas à "
+            f"Sortie impossible : « {designation} » n'est pas à "
             "l'inventaire. Vérifiez le code, choisissez la boîte avec "
             "« ⌨️ Sortie manuelle », ou passez en mode Entrée pour "
             "l'enregistrer.")
         return
 
     reste = max(0, cible["boites"] - 1)
-    peremption = (f"{cible['peremption']:%d/%m/%Y}" if cible["peremption"]
-                  else "sans date")
-    detail = (f"lot {cible['lot']}, " if cible["lot"] else "") + peremption
+    date_lot = (f"{cible['peremption']:%d/%m/%Y}" if cible["peremption"]
+                else "sans date")
+    detail = (f"lot {cible['lot']}, " if cible["lot"] else "") + date_lot
     avertissement = ("" if cible["exact"] else
                      " ⚠️ Le lot scanné n'était pas à l'inventaire — c'est la "
                      "boîte périmant le plus tôt qui a été sortie.")
@@ -392,14 +405,90 @@ def _traiter_sortie(code) -> None:
         f"reste {reste} boîte(s) sur ce lot." + avertissement)
 
 
+def _sortir_ce_qui_a_ete_saisi(brut: str, code) -> None:
+    """Ce qu'on vient de saisir en mode Sortie, quoi que ce soit.
+
+    Trois formes arrivent par la même barre, et les trois doivent sortir
+    une boîte :
+
+    1. **une ligne de l'inventaire choisie dans la liste** — elle désigne
+       un lot précis, avec sa péremption et son numéro ; c'est celui-là
+       qui sort, sans FEFO ni approximation ;
+    2. **un code scanné** — Data Matrix ou code-barres linéaire ;
+    3. **un nom tapé au clavier** — on cherche dans l'INVENTAIRE, pas
+       dans le catalogue national : on ne peut sortir que ce qu'on a.
+
+    Le troisième cas manquait entièrement, et c'est le bug remonté par
+    l'officine : taper un nom en mode Sortie répondait « Code non
+    reconnu » pour un médicament pourtant présent dans l'armoire.
+    """
+    # 1. Une ligne de l'inventaire, choisie dans la liste.
+    lot = st.session_state.get("sf_lots_par_libelle", {}).get(brut)
+    if lot:
+        _traiter_sortie(cip=lot["cip"], nom=lot["nom"],
+                        peremption=lot["peremption"], lot=lot["lot"],
+                        designation=lot["nom"])
+        return
+
+    # 2. Un code lisible : la douchette, ou un CIP tapé à la main.
+    if code.reconnu:
+        _traiter_sortie(code)
+        return
+
+    # 3. Un nom tapé. On le cherche dans l'inventaire — accents et casse
+    # ignorés, plusieurs mots dans le désordre acceptés, comme la
+    # recherche de l'inventaire juste en dessous.
+    inventaire, _ = _etat()
+    trouves = stock_ferme.filtrer_inventaire(inventaire, recherche=brut)
+    if trouves is None or trouves.empty:
+        st.session_state["sf_message"] = (
+            "avertissement",
+            f"« {brut} » n'est pas à l'inventaire du stock interne. "
+            "Vérifiez l'orthographe, ou passez en mode Entrée pour "
+            "l'enregistrer.")
+        return
+
+    # Un seul PRODUIT ? On sort, et c'est FEFO qui choisit le lot. Le nom
+    # retenu est celui de l'inventaire et non ce qui a été tapé : « zolpi »
+    # ne retrouverait aucune ligne au moment de décrémenter.
+    def _propre(valeur) -> str:
+        """Cellule → texte. Une case vide relue d'un fichier vaut NaN, qu'il
+        ne faut ni afficher (« nan ») ni compter comme une valeur."""
+        if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
+            return ""
+        return " ".join(str(valeur).split())
+
+    noms = {_propre(n) for n in trouves["Nom du produit"]} - {""}
+    if len(noms) == 1:
+        nom = noms.pop()
+        cips = {_propre(c) for c in trouves["Code CIP"]} - {""}
+        _traiter_sortie(cip=cips.pop() if len(cips) == 1 else "",
+                        nom=nom, designation=nom)
+        return
+
+    # Plusieurs produits différents : sortir « le premier » serait sortir
+    # une boîte au hasard. On les nomme, et on laisse choisir.
+    apercu = " · ".join(sorted(noms)[:4])
+    st.session_state["sf_message"] = (
+        "avertissement",
+        f"« {brut} » correspond à {len(noms)} produits de l'inventaire "
+        f"({apercu}{' …' if len(noms) > 4 else ''}). Précisez le nom, ou "
+        "choisissez la boîte dans la liste ci-dessus.")
+
+
 def _traiter_scan() -> None:
     """Le champ unique : douchette, nom tapé, ou ligne choisie dans la liste.
 
     Les trois arrivaient par deux widgets superposés — un champ de scan et
     une liste déroulante — et il fallait savoir lequel servait à quoi. Un
-    seul les reçoit désormais tous, et c'est ici qu'on les départage :
-    ce qui correspond EXACTEMENT à une ligne du catalogue vient de la
-    liste ; tout le reste est un code scanné ou un nom tapé.
+    seul les reçoit désormais tous, et c'est ici qu'on les départage.
+
+    **Le sens est lu en PREMIER.** Une saisie ne veut pas dire la même
+    chose selon qu'on entre ou qu'on sort une boîte, et l'ordre inverse
+    coûtait exactement ce bug : en mode Sortie, le nom choisi était
+    reconnu comme une ligne du catalogue national, on ouvrait la fiche
+    d'entrée — que le mode Sortie n'affiche jamais — et il ne se passait
+    RIEN à l'écran.
 
     Le champ est vidé immédiatement pour que le scan suivant puisse être
     saisi sans intervention de l'opérateur.
@@ -409,14 +498,6 @@ def _traiter_scan() -> None:
     # vide n'y est pas une valeur valide — Streamlit la refuserait.
     st.session_state["sf_scan"] = None
     if not str(brut).strip():
-        return
-
-    # Une ligne du catalogue a été choisie : nom, dosage et conditionnement
-    # arrivent ensemble, il n'y a rien à analyser.
-    medicament = _catalogue_par_libelle().get(brut)
-    if medicament:
-        st.session_state.pop("sf_en_attente", None)
-        _choisir_medicament(medicament)
         return
 
     code = stock_ferme.parser_code_scanne(brut)
@@ -429,13 +510,15 @@ def _traiter_scan() -> None:
     # doit pas basculer silencieusement en entrée dans ce cas.
     if st.session_state.get("sf_mode_choisi", MODE_ENTREE) == MODE_SORTIE:
         st.session_state.pop("sf_en_attente", None)
-        if not code.reconnu:
-            st.session_state["sf_message"] = (
-                "avertissement",
-                f"Code non reconnu : « {code.brut} ». Utilisez « ⌨️ Sortie "
-                "manuelle » pour choisir la boîte dans la liste.")
-            return
-        _traiter_sortie(code)
+        _sortir_ce_qui_a_ete_saisi(brut, code)
+        return
+
+    # Une ligne du catalogue a été choisie : nom, dosage et conditionnement
+    # arrivent ensemble, il n'y a rien à analyser.
+    medicament = _catalogue_par_libelle().get(brut)
+    if medicament:
+        st.session_state.pop("sf_en_attente", None)
+        _choisir_medicament(medicament)
         return
 
     # Qui est ce produit ? Le répertoire de la pharmacie d'abord — c'est sa
@@ -574,7 +657,7 @@ def _choisir_medicament(medicament: dict) -> None:
               "reste que la date de péremption à saisir.")
 
 
-def _champ_unique() -> None:
+def _champ_unique(inventaire, aujourdhui: date) -> None:
     """LE champ. Douchette, nom tapé, ligne choisie — un seul endroit.
 
     « Il convient de fusionner les deux barres de recherche en une seule et
@@ -586,29 +669,57 @@ def _champ_unique() -> None:
     Une liste déroulante `accept_new_options` fait les deux :
 
     - **on tape des lettres** → la liste se réduit à la frappe, dans le
-      navigateur (le catalogue lui est envoyé une fois) ; chaque ligne porte
-      le nom, le dosage ET la taille de la boîte, et un clic remplit tout ;
+      navigateur (elle lui est envoyée une fois) ; un clic suffit ;
     - **on douche une boîte** → le code ne ressemble à aucune ligne, la
       liste propose de l'accepter tel quel, et la douchette valide déjà
       par sa touche Entrée. Le code arrive alors brut dans `_traiter_scan`,
       exactement comme avant.
 
+    **Ce que la liste propose dépend du SENS**, et c'est ce qui manquait :
+
+    - en **Entrée**, le catalogue national — on peut faire entrer
+      n'importe quel médicament, y compris un qu'on n'a jamais eu ;
+    - en **Sortie**, l'INVENTAIRE — on ne sort que ce qu'on a. Proposer
+      les 19 600 boîtes du pays pour en retirer une des trente qu'on
+      détient, c'était chercher une aiguille dans la mauvaise botte de
+      foin ; chaque ligne porte ici sa péremption et son numéro de lot,
+      donc la choisir sort CETTE boîte-là, sans approximation.
+
     Sans base installée, le catalogue est vide : le champ reste une saisie
     libre, et la douchette continue de fonctionner.
     """
-    catalogue = _catalogue()
-    st.selectbox(
-        "Code scanné ou nom du médicament",
-        [m["libelle"] for m in catalogue], index=None,
-        key="sf_scan", on_change=_traiter_scan, accept_new_options=True,
-        label_visibility="collapsed",
-        placeholder=(
+    sortie = (st.session_state.get("sf_mode_choisi", MODE_ENTREE)
+              == MODE_SORTIE)
+    if sortie:
+        lots = stock_ferme.lots_sortables(
+            inventaire, aujourdhui,
+            st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION))
+        # Retenu pour la validation : le libellé revient tel quel, et c'est
+        # lui qui doit désigner le lot précis à décrémenter.
+        st.session_state["sf_lots_par_libelle"] = {
+            lot["libelle"]: lot for lot in lots}
+        options = [lot["libelle"] for lot in lots]
+        invite = (f"🔦 Douchez la boîte à sortir — ou tapez son nom "
+                  f"({len(lots)} lot(s) à l'inventaire)" if lots else
+                  "🔦 Douchez la boîte à sortir")
+    else:
+        st.session_state.pop("sf_lots_par_libelle", None)
+        catalogue = _catalogue()
+        options = [m["libelle"] for m in catalogue]
+        invite = (
             "🔦 Douchez la boîte — ou tapez les premières lettres du "
             f"médicament ({len(catalogue)} boîtes référencées)"
             if catalogue else
             "🔦 Douchez la boîte — ou tapez le nom du médicament "
-            "et appuyez sur Entrée"))
-    if catalogue:
+            "et appuyez sur Entrée")
+
+    st.selectbox(
+        "Code scanné ou nom du médicament", options, index=None,
+        key="sf_scan", on_change=_traiter_scan, accept_new_options=True,
+        label_visibility="collapsed", placeholder=invite)
+    # L'encadré ci-dessous ne concerne que l'ENTRÉE : la base publique sert
+    # à nommer une boîte qu'on enregistre, pas à en retirer une.
+    if sortie or options:
         return
     # « En tapant doliprane, l'utilitaire ne propose toujours pas de
     # liste. » La cause était juste : la base n'est pas installée. Mais le
@@ -1241,7 +1352,7 @@ def rendre(etape) -> None:
     # scan, et une liste déroulante en dessous pour chercher par le nom.
     # Deux barres superposées posent une question à chaque geste —
     # laquelle ? — et c'est une question de trop devant un comptoir.
-    _champ_unique()
+    _champ_unique(inventaire, aujourdhui)
 
     # LIGNE 2 — le sens. Sous le champ et non au-dessus : on bipe d'abord,
     # on regarde le sens ensuite. Il reste choisi d'un scan à l'autre, donc
