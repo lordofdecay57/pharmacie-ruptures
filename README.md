@@ -401,6 +401,40 @@ une valeur inédite**, et cela suffit à couvrir les deux gestes :
 > Le scan, lui, fonctionnait — vérifié en reproduisant les deux gestes
 > avant de toucher au code.
 
+#### Cliquer un lot ouvre la quantité à sortir
+
+> « Cliquer sur le médicament puis Sortie doit nous afficher directement le
+> tableau avec la quantité qu'on souhaite sortir — ou les boîtes — et
+> valider la sortie. »
+
+Un clic dans la liste **n'est pas un bip**, et les deux ne font plus la
+même chose :
+
+| Geste | Ce qui se passe |
+|---|---|
+| **on bipe une boîte** | elle sort **tout de suite**. La douchette a déjà décidé ; scanner cinquante boîtes en confirmant cinquante fois serait insupportable |
+| **on clique un lot dans la liste** | le **panneau de quantité s'ouvre dessous**, déjà positionné sur ce lot : boîtes ou unités, combien, puis « ➖ Retirer du stock » |
+
+Le panneau s'ouvre sur le bon choix tout seul : un lot **entamé** — plus de
+boîte entière, mais des comprimés en vrac — s'ouvre directement sur
+**« Unités à retirer »**. C'est le cas envoyé en capture par l'officine, et
+il fallait jusqu'ici deviner qu'il se cachait derrière un dépliant.
+
+> **Un bug sérieux trouvé en écrivant ce test.** Une fois qu'une ligne a
+> été choisie **à la souris**, le composant de Streamlit ne surligne plus
+> rien : la touche **Entrée** de la douchette n'a alors aucune ligne à
+> valider, le code reste dans le champ et **rien ne part**. Mesuré dans un
+> navigateur sur les quatre gestes possibles — seul « bipe après avoir
+> cliqué » échouait, et c'est un geste réel : on clique un médicament, on
+> se ravise, on bipe la boîte suivante.
+>
+> Le champ est donc **reconstruit après chaque choix à la souris**, ce qui
+> le fait renaître propre. Uniquement après un clic : il perd le curseur en
+> renaissant, sans importance quand la main est déjà sur la souris, mais
+> cela ruinerait le scan à la chaîne. Le style vit désormais sur le
+> conteneur, qui lui ne bouge pas — accroché au champ, il se serait
+> décroché au premier clic.
+
 Un nom tapé qui ne correspond à **aucune** ligne de l'inventaire le dit,
 et parle d'inventaire — « code non reconnu » n'a aucun sens pour un nom. Un
 nom qui en désigne **plusieurs** les nomme et laisse choisir : sortir « le

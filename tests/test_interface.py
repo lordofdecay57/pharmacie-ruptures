@@ -218,10 +218,37 @@ def _saisir(page, texte: str, attente: int = 5000):
     champ.press("Delete")
     page.wait_for_timeout(300)
     champ.type(texte, delay=8)
-    page.wait_for_timeout(800)
+    # On ATTEND que la liste propose la valeur inédite avant de valider.
+    # Entrée valide l'entrée surlignée : tant que la liste n'a pas suivi
+    # la frappe, c'est l'ANCIENNE valeur qui reste surlignée, Entrée la
+    # revalide, rien ne change — et le test croit à une application qui
+    # ne réagit pas alors que c'est lui qui a parlé trop tôt.
+    page.wait_for_function(
+        """(t) => [...document.querySelectorAll("[role='option']")].some(
+               o => o.textContent.includes(t))""",
+        arg=texte.strip(), timeout=15000)
     champ.press("Enter")
     page.wait_for_timeout(attente)
     return champ
+
+
+def _choisir_dans_la_liste(page, fragment: str, attente: int = 6000):
+    """Ouvre LE champ et clique la ligne qui contient ``fragment``.
+
+    Un CLIC dans la liste, et non une frappe suivie d'Entrée : les deux
+    ne veulent pas dire la même chose depuis que choisir un lot ouvre le
+    panneau de quantité. Entrée valide « ce que j'ai tapé », le clic
+    désigne « cette boîte-là ».
+    """
+    champ = page.get_by_placeholder("Douchez la boîte").first
+    champ.click()
+    page.wait_for_selector("[role='option']", timeout=15000)
+    proposees = page.locator("[role='option']")
+    lignes = [o for o in proposees.all() if fragment in o.inner_text()]
+    assert lignes, (f"« {fragment} » absent de la liste : "
+                    f"{proposees.all_inner_texts()}")
+    lignes[0].click()
+    page.wait_for_timeout(attente)
 
 
 def _onglet(page, libelle: str):
@@ -459,7 +486,7 @@ class TestEspaceStockFerme:
                 const exceptions = [...document.querySelectorAll(
                         '[data-testid="stExpander"]')].find(
                     e => e.innerText.includes('Le code ne se lit pas'));
-                return {champ: y('.st-key-sf_scan'),
+                return {champ: y('.st-key-sf_zone_scan'),
                         bouton: y('.st-key-sf_base_installer'),
                         depliant: exceptions
                             ? exceptions.getBoundingClientRect().top : -1};
@@ -604,7 +631,7 @@ class TestEspaceStockFerme:
         boutons en Entrée, deux encadrés en Sortie — et il fallait le relire
         à chaque bascule pour retrouver le champ.
         """
-        champ = page.locator(".st-key-sf_scan")
+        champ = page.locator(".st-key-sf_zone_scan")
         sens = page.locator(".st-key-sf_mode")
         assert champ.count() == 1 and sens.count() == 1
         # Le champ AU-DESSUS du sens : on bipe d'abord, on regarde le sens
@@ -615,7 +642,7 @@ class TestEspaceStockFerme:
                     const e = document.querySelector(s);
                     return e ? e.getBoundingClientRect().top : -1;
                 };
-                return [y('.st-key-sf_scan'), y('.st-key-sf_mode')];
+                return [y('.st-key-sf_zone_scan'), y('.st-key-sf_mode')];
             }""")
         assert positions[0] < positions[1], positions
 
@@ -631,8 +658,8 @@ class TestEspaceStockFerme:
                 // texte. Les mesurer au même endroit donnerait 16 px —
                 // la taille par défaut du conteneur, que personne ne lit.
                 const cadre = document.querySelector(
-                    '.st-key-sf_scan [role=\"group\"]');
-                const saisie = document.querySelector('.st-key-sf_scan input');
+                    '.st-key-sf_zone_scan [role=\"group\"]');
+                const saisie = document.querySelector('.st-key-sf_zone_scan input');
                 if (!cadre || !saisie) return null;
                 const s = getComputedStyle(cadre);
                 return {bord: s.borderTopColor,
@@ -661,8 +688,8 @@ class TestEspaceStockFerme:
         """
         fonds = page.evaluate(
             """() => {
-                const p = document.querySelector('.st-key-sf_scan');
-                const c = document.querySelector('.st-key-sf_scan [role=\"group\"]');
+                const p = document.querySelector('.st-key-sf_zone_scan');
+                const c = document.querySelector('.st-key-sf_zone_scan [role=\"group\"]');
                 if (!p || !c) return null;
                 return {panneau: getComputedStyle(p).backgroundColor,
                         champ: getComputedStyle(c).backgroundColor,
@@ -761,7 +788,7 @@ class TestSaisieAssistee:
 
     def test_le_menu_est_present(self, page_avec_base):
         _sans_exception(page_avec_base)
-        assert page_avec_base.locator(".st-key-sf_scan").count() == 1
+        assert page_avec_base.locator(".st-key-sf_zone_scan").count() == 1
 
     def test_il_n_y_a_QU_UNE_barre_de_recherche(self, page_avec_base):
         """« Il convient de fusionner les deux barres de recherche en une
@@ -796,7 +823,7 @@ class TestSaisieAssistee:
         une boîte, ou réagit aux premières lettres d'un nom. Un menu
         déroulant ordinaire ne le laisse pas deviner."""
         invite = page_avec_base.locator(
-            ".st-key-sf_scan input").first.get_attribute("placeholder")
+            ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
         assert "Douchez la boîte" in invite, invite
         assert "premières lettres" in invite, invite
 
@@ -824,7 +851,7 @@ class TestSaisieAssistee:
         assert "30/06/2028" in contenu, contenu[:0]
 
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
-        champ = page_avec_base.locator(".st-key-sf_scan input").first
+        champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
         champ.click()
         page_avec_base.wait_for_selector("[role='option']", timeout=15000)
         depart = page_avec_base.locator("[role='option']").all_inner_texts()
@@ -837,7 +864,7 @@ class TestSaisieAssistee:
         assert not any("plaquette" in p for p in depart), depart
 
     def test_les_propositions_arrivent_a_la_frappe(self, page_avec_base):
-        champ = page_avec_base.locator(".st-key-sf_scan input").first
+        champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
         for lettre in "DOLI":
             champ.press(lettre)
         # Le tri de Streamlit est APPROXIMATIF : il fait remonter ce qui
@@ -851,7 +878,7 @@ class TestSaisieAssistee:
 
     def test_le_dosage_affine_dans_la_meme_liste(self, page_avec_base):
         """« puis le dosage pour affiner » : pas de second écran."""
-        champ = page_avec_base.locator(".st-key-sf_scan input").first
+        champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
         champ.type(" 1000")
         page_avec_base.wait_for_function(
             "document.querySelectorAll(\"[role='option']\")[0]"
@@ -1232,3 +1259,143 @@ class TestSortirEnTapantLeNom:
         contenu = page.content()
         assert "n'est pas à l'inventaire" in contenu
         assert "Code non reconnu" not in contenu
+
+
+# ---------------------------------------------------------------------------
+# Choisir un lot dans la liste ouvre la quantité à sortir
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def application_deux_lots(tmp_path_factory):
+    """Un lot ENTIER et un lot ENTAMÉ, comme l'armoire de l'officine.
+
+    Le lot entamé — plus de boîte, mais 50 comprimés en vrac — est le cas
+    envoyé en capture : la seule façon de le dispenser passait par un
+    dépliant qu'il fallait savoir ouvrir.
+    """
+    travail = tmp_path_factory.mktemp("appli_deux_lots")
+    (travail / "stock_ferme.csv").write_text(
+        "Nom du produit;Dosage;Code CIP;Boîtes;Unités par boîte;"
+        "Unités en vrac;Total unités;Péremption;Lot;Enregistré le\n"
+        "ZOLPIDEM 10 mg;;3400930000011;2;30;0;60;2027-06-30;Z1;2026-07-01\n"
+        "ABACAVIR SANDOZ 300 mg;;3400949497294;0;60;50;50;2028-01-31;A9;"
+        "2026-07-01\n",
+        encoding="utf-8-sig")
+    yield from _lancer(travail)
+
+
+@pytest.fixture(scope="module")
+def page_deux_lots(application_deux_lots, pilote):
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1400, "height": 1200})
+    onglet.goto(application_deux_lots, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    onglet.wait_for_timeout(6000)
+    _mode(onglet, "Sortie").first.click()
+    onglet.wait_for_timeout(4000)
+    yield onglet
+    navigateur.close()
+
+
+class TestChoisirUnLotOuvreLaQuantite:
+    """« Cliquer sur le médicament puis Sortie doit nous afficher
+    directement le tableau avec la quantité qu'on souhaite sortir — ou les
+    boîtes — et valider la sortie. »
+
+    Un clic dans la liste n'est pas un bip. La douchette dit « cette
+    boîte-là sort, maintenant » ; choisir un nom à l'écran, c'est le début
+    d'une décision — combien, et en boîtes ou en comprimés. Le panneau de
+    quantité s'ouvre donc directement, déjà positionné sur ce lot.
+    """
+
+    def test_le_panneau_s_ouvre_sur_le_lot_choisi(self, page_deux_lots):
+        """Sur CELUI-LÀ, et pas sur le premier de la liste : ouvrir le
+        panneau sur un autre lot ferait sortir la mauvaise boîte à celui
+        qui valide sans relire."""
+        page = page_deux_lots
+        _choisir_dans_la_liste(page, "ABACAVIR")
+        _sans_exception(page)
+        assert page.locator(".st-key-sf_sortie_choix").count() == 1, (
+            "le panneau de quantité ne s'est pas ouvert")
+        retenu = page.locator(
+            ".st-key-sf_sortie_choix input").first.input_value()
+        assert "ABACAVIR" in retenu, retenu
+
+    def test_un_lot_entame_s_ouvre_sur_les_UNITES(self, page_deux_lots):
+        """Le cas de la capture : plus de boîte entière, 50 comprimés en
+        vrac. Proposer « boîtes à retirer » n'aurait aucun sens — et c'est
+        vers un dépliant qu'on renvoyait jusqu'ici."""
+        page = page_deux_lots
+        etiquettes = page.locator(
+            '[data-testid="stNumberInput"] label').all_inner_texts()
+        assert any("Unités à retirer" in e for e in etiquettes), etiquettes
+        assert page.get_by_role(
+            "button", name="Retirer du stock").count() == 1
+
+    def test_la_quantite_choisie_sort_vraiment(self, page_deux_lots):
+        """Le bout de la chaîne : le bouton doit retirer, et le dire."""
+        page = page_deux_lots
+        page.get_by_role("button", name="Retirer du stock").click()
+        page.wait_for_timeout(6000)
+        _sans_exception(page)
+        contenu = page.content()
+        assert "unité(s) sortie(s)" in contenu, "rien n'est sorti"
+        assert "reste 49" in contenu, contenu[:0]
+
+    def test_un_lot_entier_s_ouvre_sur_les_BOITES(self, page_deux_lots):
+        page = page_deux_lots
+        _choisir_dans_la_liste(page, "ZOLPIDEM")
+        _sans_exception(page)
+        etiquettes = page.locator(
+            '[data-testid="stNumberInput"] label').all_inner_texts()
+        assert any("Boîtes à retirer" in e for e in etiquettes), etiquettes
+
+    def test_la_douchette_repond_encore_APRES_un_clic(self, page_deux_lots):
+        """Le bug que ce test a débusqué, et il coûtait cher.
+
+        Une fois qu'une ligne a été choisie à la SOURIS, le composant ne
+        surligne plus rien : la touche Entrée de la douchette n'a alors
+        aucune ligne à valider, le code reste dans le champ et **rien ne
+        part**. Mesuré dans un navigateur sur les quatre gestes possibles,
+        seul celui-ci échouait — et c'est le geste réel : on clique un
+        médicament, on se ravise, on bipe la boîte suivante.
+
+        Le champ est donc reconstruit après chaque choix à la souris. Ce
+        test arrive APRÈS un clic (le test précédent), et c'est tout son
+        intérêt : le lancer seul ne prouverait rien.
+
+        Il vérifie aussi que la douchette n'est pas RALENTIE : une boîte
+        bipée sort tout de suite, sans panneau à confirmer. Scanner
+        cinquante boîtes en cliquant « Retirer » cinquante fois serait
+        insupportable — c'est le clic, et lui seul, qui ouvre le panneau.
+        """
+        page = page_deux_lots
+        _saisir(page, "01034009300000111727063010Z1\x1d", attente=6000)
+        _sans_exception(page)
+        messages = [a.inner_text().replace("\n", " ")
+                    for a in page.locator('[data-testid="stAlert"]').all()]
+        assert any("1 boîte sortie" in m for m in messages), messages
+
+    def test_le_style_survit_a_la_reconstruction_du_champ(self,
+                                                          page_deux_lots):
+        """Le champ change de clé à chaque clic : une règle accrochée à SA
+        clé se décrocherait au premier, et la zone de scan redeviendrait
+        un champ gris. Le style vit donc sur le conteneur, qui ne bouge
+        pas — et on le mesure ici, après plusieurs clics."""
+        fonds = page_deux_lots.evaluate(
+            """() => {
+                const p = document.querySelector('.st-key-sf_zone_scan');
+                const c = document.querySelector(
+                    '.st-key-sf_zone_scan [role=\"group\"]');
+                if (!p || !c) return null;
+                return {panneau: getComputedStyle(p).backgroundColor,
+                        bord: getComputedStyle(c).borderTopColor};
+            }""")
+        assert fonds, "la zone de scan est introuvable"
+        assert fonds["panneau"] != "rgba(0, 0, 0, 0)", fonds
+        # L'un ou l'autre turquoise : le champ s'assombrit quand il a le
+        # curseur, et il l'a ou non selon qu'on vient de le reconstruire.
+        # Exiger une seule des deux teintes rendrait ce test capricieux —
+        # ce qu'il doit prouver, c'est qu'il n'est pas redevenu GRIS.
+        assert fonds["bord"] in ("rgb(13, 148, 136)", "rgb(15, 118, 110)"), (
+            fonds)
