@@ -380,9 +380,9 @@ def _traiter_sortie(code=None, cip: str = "", nom: str = "",
             st.session_state["sf_message"] = (
                 "avertissement",
                 f"Plus de boîte entière pour « {designation} » — "
-                f"il reste {vrac} unité(s) d'une boîte entamée. Passez par "
-                "« ⌨️ Le code ne se lit pas ? Sortir à l'unité ? » pour les "
-                "dispenser.")
+                f"il reste {vrac} unité(s) d'une boîte entamée. "
+                "**Choisissez ce lot dans la liste ci-dessus** : le panneau "
+                "de quantité s'ouvrira sur les unités.")
             return
         st.session_state["sf_message"] = (
             "avertissement",
@@ -405,16 +405,90 @@ def _traiter_sortie(code=None, cip: str = "", nom: str = "",
         f"reste {reste} boîte(s) sur ce lot." + avertissement)
 
 
+def _ouvrir_la_quantite_a_sortir(libelle: str, lot: dict) -> None:
+    """Une boîte a été CHOISIE dans la liste : on demande combien.
+
+    « Cliquer sur le médicament puis Sortie doit nous afficher directement
+    le tableau avec la quantité qu'on souhaite sortir — ou les boîtes — et
+    valider la sortie. »
+
+    Un clic dans la liste n'est pas un bip. La douchette dit « cette
+    boîte-là sort, maintenant » et une boîte part aussitôt ; choisir un nom
+    à l'écran, c'est le début d'une décision — combien, et en boîtes ou en
+    comprimés. Le panneau de quantité s'ouvre donc directement dessous,
+    déjà positionné sur ce lot, au lieu de retirer une boîte d'office ou
+    d'envoyer déplier « le code ne se lit pas ? ».
+
+    Le panneau se repère à l'INDEX du lot dans la liste. Les deux listes —
+    celle de la barre et celle du panneau — sont construites par le même
+    appel, sur le même inventaire, dans le même ordre : c'est ce qui rend
+    l'index valable de l'une à l'autre.
+    """
+    st.session_state["sf_sortie_manuelle"] = True
+    libelles = list(st.session_state.get("sf_lots_par_libelle", {}))
+    if libelle in libelles:
+        st.session_state["sf_sortie_choix"] = libelles.index(libelle)
+    reste = []
+    if lot["boites"]:
+        reste.append(f"{lot['boites']} boîte(s)")
+    if lot["unites_vrac"]:
+        reste.append(f"{lot['unites_vrac']} unité(s) en vrac")
+    st.session_state["sf_message"] = (
+        "ok", f"{lot['nom']} — {' et '.join(reste) or 'lot vide'} à "
+              "l'inventaire. Choisissez la quantité à sortir ci-dessous, "
+              "puis « ➖ Retirer du stock ».")
+
+
+def _cle_scan() -> str:
+    """Clé du champ de saisie, telle qu'elle est en ce moment.
+
+    Elle porte un numéro de génération : le champ est reconstruit après
+    chaque choix fait à la SOURIS. Voir `_remonter_le_champ` pour la
+    raison — elle est loin d'être décorative.
+    """
+    return f"sf_scan_{st.session_state.get('sf_generation_scan', 0)}"
+
+
+def _remonter_le_champ() -> None:
+    """Reconstruit le champ de saisie au prochain rendu.
+
+    **Sans cela, la douchette cesse de fonctionner après un clic.**
+    Mesuré dans un navigateur, sur les quatre gestes possibles :
+
+    | Geste                                   | La boîte sort ? |
+    |-----------------------------------------|-----------------|
+    | on bipe                                 | oui             |
+    | on bipe APRÈS avoir cliqué dans la liste | **non**         |
+    | flèche bas puis Entrée, après un clic    | oui             |
+    | clic sur la ligne proposée, après un clic| oui             |
+
+    Une fois qu'une ligne a été choisie à la souris, la liste ne surligne
+    plus rien (`aria-activedescendant` vide) : la touche Entrée n'a alors
+    aucune ligne à valider, et le code scanné reste dans le champ sans
+    jamais partir. Le composant garde cet état tant qu'il vit ; changer sa
+    clé le fait renaître propre.
+
+    Uniquement après un choix à la SOURIS : le champ perd le curseur en
+    renaissant, ce qui est sans importance quand la main est déjà sur la
+    souris — mais ruinerait le scan à la chaîne, où le curseur doit rester
+    dans le champ d'un bip à l'autre.
+    """
+    st.session_state["sf_generation_scan"] = (
+        st.session_state.get("sf_generation_scan", 0) + 1)
+
+
 def _sortir_ce_qui_a_ete_saisi(brut: str, code) -> None:
     """Ce qu'on vient de saisir en mode Sortie, quoi que ce soit.
 
-    Trois formes arrivent par la même barre, et les trois doivent sortir
-    une boîte :
+    Trois formes arrivent par la même barre, et elles ne demandent pas la
+    même chose :
 
-    1. **une ligne de l'inventaire choisie dans la liste** — elle désigne
-       un lot précis, avec sa péremption et son numéro ; c'est celui-là
-       qui sort, sans FEFO ni approximation ;
-    2. **un code scanné** — Data Matrix ou code-barres linéaire ;
+    1. **une ligne de l'inventaire choisie dans la liste** — on ouvre le
+       panneau de quantité sur ce lot précis. Choisir un nom à l'écran est
+       le début d'une décision, pas un geste déjà fait ;
+    2. **un code scanné** — la douchette, elle, a déjà décidé : une boîte
+       sort, tout de suite. C'est le geste du comptoir, et le ralentir
+       d'une confirmation le rendrait inutilisable à la chaîne ;
     3. **un nom tapé au clavier** — on cherche dans l'INVENTAIRE, pas
        dans le catalogue national : on ne peut sortir que ce qu'on a.
 
@@ -425,9 +499,7 @@ def _sortir_ce_qui_a_ete_saisi(brut: str, code) -> None:
     # 1. Une ligne de l'inventaire, choisie dans la liste.
     lot = st.session_state.get("sf_lots_par_libelle", {}).get(brut)
     if lot:
-        _traiter_sortie(cip=lot["cip"], nom=lot["nom"],
-                        peremption=lot["peremption"], lot=lot["lot"],
-                        designation=lot["nom"])
+        _ouvrir_la_quantite_a_sortir(brut, lot)
         return
 
     # 2. Un code lisible : la douchette, ou un CIP tapé à la main.
@@ -493,12 +565,22 @@ def _traiter_scan() -> None:
     Le champ est vidé immédiatement pour que le scan suivant puisse être
     saisi sans intervention de l'opérateur.
     """
-    brut = st.session_state.get("sf_scan") or ""
+    cle = _cle_scan()
+    brut = st.session_state.get(cle) or ""
     # `None` et non `""` : le widget est une liste à choix, et une chaîne
     # vide n'y est pas une valeur valide — Streamlit la refuserait.
-    st.session_state["sf_scan"] = None
+    st.session_state[cle] = None
     if not str(brut).strip():
         return
+
+    # Cette saisie vient-elle d'un CLIC dans la liste, ou de la frappe ?
+    # La distinction décide de deux choses : le geste à faire ensuite, et
+    # la reconstruction du champ (voir `_remonter_le_champ` — sans elle,
+    # la douchette cesse de répondre après un clic).
+    lot = st.session_state.get("sf_lots_par_libelle", {}).get(brut)
+    medicament = _catalogue_par_libelle().get(brut)
+    if lot or medicament:
+        _remonter_le_champ()
 
     code = stock_ferme.parser_code_scanne(brut)
     # Seul le répertoire est lu ici : l'inventaire, lui, n'est jamais
@@ -515,7 +597,6 @@ def _traiter_scan() -> None:
 
     # Une ligne du catalogue a été choisie : nom, dosage et conditionnement
     # arrivent ensemble, il n'y a rien à analyser.
-    medicament = _catalogue_par_libelle().get(brut)
     if medicament:
         st.session_state.pop("sf_en_attente", None)
         _choisir_medicament(medicament)
@@ -713,10 +794,16 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
             "🔦 Douchez la boîte — ou tapez le nom du médicament "
             "et appuyez sur Entrée")
 
-    st.selectbox(
-        "Code scanné ou nom du médicament", options, index=None,
-        key="sf_scan", on_change=_traiter_scan, accept_new_options=True,
-        label_visibility="collapsed", placeholder=invite)
+    # Le CONTENEUR porte la clé stable : c'est lui que le style habille.
+    # Le champ, lui, change de clé après chaque choix à la souris — voir
+    # `_remonter_le_champ`. Sans ce conteneur, le panneau turquoise
+    # disparaîtrait au premier clic dans la liste.
+    with st.container(key="sf_zone_scan"):
+        st.selectbox(
+            "Code scanné ou nom du médicament", options, index=None,
+            key=_cle_scan(), on_change=_traiter_scan,
+            accept_new_options=True,
+            label_visibility="collapsed", placeholder=invite)
     # L'encadré ci-dessous ne concerne que l'ENTRÉE : la base publique sert
     # à nommer une boîte qu'on enregistre, pas à en retirer une.
     if sortie or options:

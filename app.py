@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.25"
+VERSION_APP = "6.26"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -190,9 +190,12 @@ st.markdown("""
    La zone porte donc maintenant un vrai PANNEAU coloré, et le champ y est
    blanc AU MILIEU : c'est le contraste entre les deux qui se voit de
    loin, pas la teinte du champ seul.
-   Ciblé par la clé du widget (st-key-sf_scan), qui enveloppe le champ :
-   les autres champs de l'application restent inchangés. */
-.st-key-sf_scan {
+   Ciblé par la clé du CONTENEUR (st-key-sf_zone_scan) et non du champ :
+   celui-ci change de clé après chaque choix à la souris — il faut le
+   faire renaître, sans quoi la douchette cesse de repondre (voir
+   `_remonter_le_champ` dans ui_stock_ferme.py). Une règle accrochée au
+   champ lui-même se décrocherait au premier clic dans la liste. */
+.st-key-sf_zone_scan {
   background: #ccfbf1 !important;
   border: 2px solid #0d9488 !important;
   border-radius: 16px !important;
@@ -213,27 +216,27 @@ st.markdown("""
 /* `min-height` et non `padding` : Streamlit fixe la hauteur de ce cadre,
    et un rembourrage seul le laissait à ses 40 px d'origine — la zone
    « agrandie » ne l'était plus du tout depuis que le champ est une liste. */
-.st-key-sf_scan [role="group"] {
+.st-key-sf_zone_scan [role="group"] {
   border: 2px solid #0d9488 !important; background: #ffffff !important;
   border-radius: 10px !important; padding: 0 10px !important;
   min-height: 68px !important; height: auto !important;
   display: flex !important; align-items: center !important;
   box-shadow: none !important;
 }
-.st-key-sf_scan input {
+.st-key-sf_zone_scan input {
   font-size: 1.5rem !important; font-weight: 700 !important;
   color: #134e4a !important; background: transparent !important;
 }
 /* L'invite reste lisible mais s'efface derrière ce qu'on tape. Elle est
    longue — elle nomme les deux gestes — donc plus petite que la saisie. */
-.st-key-sf_scan input::placeholder {
+.st-key-sf_zone_scan input::placeholder {
   font-weight: 400 !important; color: #5b7f7a !important;
   font-size: 1.02rem !important;
 }
 /* Le champ ACTIF s'allume : la douchette n'écrit que dans le champ qui a
    le curseur, et un bip perdu parce que le curseur était ailleurs ne
    laisse aucune trace à l'écran. */
-.st-key-sf_scan [role="group"]:focus-within {
+.st-key-sf_zone_scan [role="group"]:focus-within {
   border-color: #0f766e !important;
   box-shadow: 0 0 0 4px rgba(15,118,110,.30) !important;
 }
