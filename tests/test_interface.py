@@ -1321,6 +1321,28 @@ class TestChoisirUnLotOuvreLaQuantite:
             ".st-key-sf_sortie_choix input").first.input_value()
         assert "ABACAVIR" in retenu, retenu
 
+    def test_la_fiche_NOMME_le_lot_au_lieu_de_le_redemander(
+            self, page_deux_lots):
+        """« Il faut le même principe que pour l'entrée. »
+
+        L'entrée ouvre une FICHE pré-remplie du produit choisi. La sortie,
+        elle, rouvrait un panneau intitulé « Choisissez la boîte à
+        sortir », avec une liste déroulante — on venait de choisir le
+        médicament, et l'écran redemandait de le choisir. On croyait qu'il
+        ne s'était rien passé.
+
+        La fiche nomme donc le lot désigné. Se tromper de boîte reste
+        rattrapable, mais replié : « Ce n'est pas la bonne boîte ? »
+        """
+        page = page_deux_lots
+        contenu = page.content()
+        assert "Fiche de sortie" in contenu, (
+            "la fiche ne se présente pas comme celle de l'entrée")
+        assert "ABACAVIR" in contenu
+        # La question qui donnait l'impression que rien ne s'était passé.
+        assert "Choisissez la boîte à sortir" not in contenu, contenu[:0]
+        assert "Ce n'est pas la bonne boîte" in contenu
+
     def test_un_lot_entame_s_ouvre_sur_les_UNITES(self, page_deux_lots):
         """Le cas de la capture : plus de boîte entière, 50 comprimés en
         vrac. Proposer « boîtes à retirer » n'aurait aucun sens — et c'est

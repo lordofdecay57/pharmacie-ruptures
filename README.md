@@ -435,6 +435,33 @@ il fallait jusqu'ici deviner qu'il se cachait derrière un dépliant.
 > conteneur, qui lui ne bouge pas — accroché au champ, il se serait
 > décroché au premier clic.
 
+#### La fiche de sortie nomme le produit choisi
+
+> « Il faut le même principe que pour l'entrée d'un médicament. »
+
+L'entrée ouvre une **fiche pré-remplie** du produit choisi. La sortie, elle,
+rouvrait un panneau intitulé *« Choisissez la boîte à sortir »*, avec une
+liste déroulante — on venait de choisir le médicament, et l'écran
+redemandait de le choisir. On croyait qu'il ne s'était rien passé.
+
+La fiche **nomme** désormais le lot désigné, comme celle de l'entrée :
+
+```
+┌ Fiche de sortie — ABACAVIR SANDOZ 300 mg ────────────────┐
+│ 31/01/2028 · lot A9 · 0 boîte(s) + 50 unité(s)           │
+│                                                           │
+│ Unités à retirer : [ 1 ]      [ ➖ Retirer du stock ]      │
+│ ▸ Ce n'est pas la bonne boîte ?                           │
+└───────────────────────────────────────────────────────────┘
+```
+
+Se tromper de boîte reste rattrapable — la liste complète est là — mais
+**repliée** : elle ne doit plus occuper la place de la question qu'on se
+pose vraiment, qui est *combien*.
+
+> Ouverte par le bouton **« ⌨️ Sortie manuelle »**, aucune boîte n'a été
+> désignée : la fiche redemande alors laquelle, comme avant.
+
 Un nom tapé qui ne correspond à **aucune** ligne de l'inventaire le dit,
 et parle d'inventaire — « code non reconnu » n'a aucun sens pour un nom. Un
 nom qui en désigne **plusieurs** les nomme et laisse choisir : sortir « le

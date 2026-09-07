@@ -425,6 +425,8 @@ def _ouvrir_la_quantite_a_sortir(libelle: str, lot: dict) -> None:
     l'index valable de l'une à l'autre.
     """
     st.session_state["sf_sortie_manuelle"] = True
+    # Retenu pour que la fiche NOMME ce lot au lieu de le redemander.
+    st.session_state["sf_lot_choisi"] = libelle
     libelles = list(st.session_state.get("sf_lots_par_libelle", {}))
     if libelle in libelles:
         st.session_state["sf_sortie_choix"] = libelles.index(libelle)
@@ -826,6 +828,9 @@ def _basculer_sortie_manuelle() -> None:
     """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
     st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
         "sf_sortie_manuelle", False)
+    # Aucune boîte n'a été désignée par ce chemin : la fiche doit
+    # redemander laquelle, et non nommer celle d'une sortie precedente.
+    st.session_state.pop("sf_lot_choisi", None)
     st.session_state["sf_message"] = None
 
 
@@ -859,13 +864,40 @@ def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
         st.info("Aucune boîte à sortir : l'inventaire est vide.")
         return
 
+    # Le lot a-t-il DÉJÀ été désigné, en le cliquant dans la barre du
+    # haut ? Alors la fiche le nomme au lieu de le redemander. C'est tout
+    # l'écart qui restait avec l'entrée : celle-ci ouvre une fiche
+    # pré-remplie du produit choisi, quand la sortie rouvrait un panneau
+    # intitulé « Choisissez la boîte à sortir » — on venait de choisir, et
+    # l'écran redemandait de choisir. On croyait qu'il ne s'était rien
+    # passé.
+    deja_choisi = st.session_state.get("sf_lot_choisi")
+    indices = {lot["libelle"]: i for i, lot in enumerate(lots)}
     with st.container(border=True):
-        st.markdown("**Choisissez la boîte à sortir**")
-        choix = st.selectbox(
-            "Boîte à sortir", range(len(lots)),
-            format_func=lambda i: lots[i]["libelle"],
-            key="sf_sortie_choix", label_visibility="collapsed")
-        lot = lots[choix]
+        if deja_choisi in indices:
+            choix = indices[deja_choisi]
+            lot = lots[choix]
+            st.markdown(f"**Fiche de sortie — {lot['nom']}**")
+            st.caption(lot["libelle"].split("—", 1)[-1].strip())
+            # Se tromper de boîte doit rester rattrapable, mais sans
+            # occuper la place : replié, nommé, à un clic.
+            with st.expander("Ce n'est pas la bonne boîte ?"):
+                autre = st.selectbox(
+                    "Boîte à sortir", range(len(lots)),
+                    format_func=lambda i: lots[i]["libelle"],
+                    index=choix, key="sf_sortie_choix",
+                    label_visibility="collapsed")
+                if autre != choix:
+                    choix, lot = autre, lots[autre]
+        else:
+            # Ouverte par le bouton « ⌨️ Sortie manuelle » : aucune boîte
+            # n'a été désignée, il faut bien commencer par là.
+            st.markdown("**Choisissez la boîte à sortir**")
+            choix = st.selectbox(
+                "Boîte à sortir", range(len(lots)),
+                format_func=lambda i: lots[i]["libelle"],
+                key="sf_sortie_choix", label_visibility="collapsed")
+            lot = lots[choix]
 
         # Ce que ce lot permet réellement. Une boîte entamée n'a plus de
         # boîte pleine mais garde des comprimés ; un produit sans
@@ -956,6 +988,7 @@ def _panneau_sortie_manuelle(inventaire: pd.DataFrame, aujourdhui: date,
                           + ("" if sorties == int(combien) else
                              " ⚠️ Moins que demandé : le stock avait changé."))
             st.session_state["sf_sortie_manuelle"] = False
+            st.session_state.pop("sf_lot_choisi", None)
             st.rerun()
 
 
