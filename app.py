@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.27"
+VERSION_APP = "6.28"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -241,44 +241,40 @@ st.markdown("""
   box-shadow: 0 0 0 4px rgba(15,118,110,.30) !important;
 }
 
-/* Entrée / Sortie du stock interne : les DEUX boutons les plus cliqués de
-   toute l'application — chaque boîte scannée passe par l'un ou l'autre.
-   Ils sont donc traités en grand, et chacun garde sa couleur MÊME éteint :
-   savoir dans quel sens on travaille ne doit pas demander à lire. */
-.st-key-sf_mode { margin: 6px 0 12px 0; }
-.st-key-sf_mode [data-testid="stButtonGroup"] { gap: 14px; }
-.st-key-sf_mode button {
-  padding: 18px 46px !important; border-radius: 12px !important;
-  border: 2px solid #0f766e !important; background: #ecfdf5 !important;
+/* LES DEUX BULLES : Entrée et Sortie, proposées APRÈS le scan.
+   Elles ont remplacé deux rectangles posés en permanence au-dessus de
+   l'écran, qui portaient un mode COLLANT — réglé le matin, oublié, et
+   chaque bip suivant partait du mauvais côté.
+   Rondes et pleines, parce qu'elles ne sont plus un réglage mais une
+   question posée à l'instant : on y répond, elles s'en vont. */
+.st-key-sf_bulles { margin: 4px 0 14px 0; border-radius: 18px !important;
+  border: 2px solid #0d9488 !important; background: #f0fdfa !important; }
+.st-key-sf_bulles h3 { margin: 0 0 2px 0 !important;
+  font-size: 1.35rem !important; color: #0f766e !important; }
+.st-key-sf_bulle_entree button,
+.st-key-sf_bulle_sortie button {
+  border-radius: 999px !important; padding: 20px 10px !important;
+  border: 2px solid #0f766e !important; background: #0f766e !important;
+  box-shadow: 0 3px 10px rgba(15,118,110,.30) !important;
 }
-.st-key-sf_mode button p { font-size: 1.25rem !important;
-  font-weight: 700 !important; color: #0f766e !important; }
-/* La SORTIE retire du stock : ambre, pour qu'on ne scanne pas une entrée en
-   croyant faire une sortie, ou l'inverse. */
-.st-key-sf_mode button:last-child { border-color: #b45309 !important;
-  background: #fff7ed !important; }
-.st-key-sf_mode button:last-child p { color: #b45309 !important; }
-/* Le bouton ACTIF est plein : un simple contour se confondrait avec le
-   survol du bouton voisin.
-   DEUX sélecteurs : « aria-checked » est l'attribut standard, stable d'une
-   version de Streamlit à l'autre ; « kind » était l'attribut interne des
-   versions ≤ 1.58, disparu depuis. */
-.st-key-sf_mode button[aria-checked="true"],
-.st-key-sf_mode button[kind="segmented_controlActive"] {
-  background: #0f766e !important;
-  box-shadow: 0 3px 10px rgba(15,118,110,.35) !important;
-}
-.st-key-sf_mode button:last-child[aria-checked="true"],
-.st-key-sf_mode button:last-child[kind="segmented_controlActive"] {
-  background: #b45309 !important;
-  box-shadow: 0 3px 10px rgba(180,83,9,.35) !important;
-}
-.st-key-sf_mode button[aria-checked="true"] p,
-.st-key-sf_mode button[kind="segmented_controlActive"] p,
-.st-key-sf_mode button:last-child[aria-checked="true"] p,
-.st-key-sf_mode button:last-child[kind="segmented_controlActive"] p {
+.st-key-sf_bulle_entree button p,
+.st-key-sf_bulle_sortie button p {
+  font-size: 1.3rem !important; font-weight: 700 !important;
   color: #ffffff !important;
 }
+/* La SORTIE retire du stock : ambre, pour qu'on ne clique pas une entrée
+   en croyant faire une sortie, ou l'inverse. */
+.st-key-sf_bulle_sortie button {
+  border-color: #b45309 !important; background: #b45309 !important;
+  box-shadow: 0 3px 10px rgba(180,83,9,.30) !important;
+}
+/* « Annuler » n'est pas un troisième choix : discret, en dessous. */
+.st-key-sf_bulle_annuler button {
+  border: none !important; background: transparent !important;
+  padding: 2px 0 0 0 !important;
+}
+.st-key-sf_bulle_annuler button p { font-size: .86rem !important;
+  color: #6b7280 !important; text-decoration: underline; }
 
 /* Séparateur d'espace : une barre de couleur propre à chaque module, pour
    qu'on sache d'un coup d'œil dans lequel on travaille. */

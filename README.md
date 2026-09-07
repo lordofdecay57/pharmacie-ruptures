@@ -349,10 +349,18 @@ quelqu'un qui ne connaît rien à l'informatique**.
 ║ │  🔦 Douchez la boîte — ou tapez les premières lettres          ⌄ │ ║  ← panneau turquoise
 ║ └─────────────────────────────────────────────────────────────────┘ ║
 ╚═════════════════════════════════════════════════════════════════════╝
-┌──────────────────────────────┬──────────────────────────────────────┐
-│         ➕ Entrée            │            ➖ Sortie                  │
-└──────────────────────────────┴──────────────────────────────────────┘
    ⌨️ Le code ne se lit pas ? Sortir à l'unité ?          ▸ (replié)
+
+  …puis, UNE FOIS LA BOÎTE BIPÉE :
+┌─────────────────────────────────────────────────────────────────────┐
+│  DOLIPRANE 1000 mg, comprimé                                        │
+│  CIP 3400935955838 · périme le 30/06/2028 · lot L1                  │
+│  Identifié par : base publique des médicaments.                     │
+│                                                                      │
+│  Que faire de cette boîte ?                                          │
+│      (  ➕  Entrée  )            (  ➖  Sortie  )                     │
+│      Annuler                                                         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Une seule barre, qui fait les deux
@@ -378,89 +386,41 @@ une valeur inédite**, et cela suffit à couvrir les deux gestes :
 > refusait une valeur inédite, la pharmacie ne pourrait plus scanner du
 > tout.
 
-#### Ce que la liste propose dépend du SENS
+#### On bipe, on lit ce qui a été reconnu, PUIS on choisit le sens
 
-| Mode | Ce que la liste contient | Pourquoi |
-|---|---|---|
-| **➕ Entrée** | le **catalogue national** (~19 600 boîtes) | on peut faire entrer n'importe quel médicament, y compris un qu'on n'a jamais eu |
-| **➖ Sortie** | **l'inventaire** — une ligne par lot, avec sa péremption et son numéro | on ne sort que ce qu'on a ; et c'est une **boîte** précise qui sort, pas un médicament en général |
+> « Au moment de biper, les informations relatives au CIP et en lien avec
+> la base de données enregistrées. Puis une bulle doit apparaître et
+> proposer Entrée, et une autre bulle Sortie. Il faudra donc supprimer les
+> rectangles Entrée et Sortie existants. »
 
-> **Bug corrigé en v6.24**, remonté par l'officine : *« après avoir bipé ou
-> tapé le nom du médicament, rien ne se passe »*. La barre unique
-> consultait le catalogue national **avant** de regarder le sens du
-> mouvement. En Sortie, le nom choisi y était donc reconnu, l'application
-> ouvrait la fiche d'**entrée** — que le mode Sortie n'affiche jamais — et
-> il ne se passait rien à l'écran. Un nom tapé librement, lui, tombait sur
-> « Code non reconnu » pour un médicament pourtant dans l'armoire.
->
-> Deux corrections, et la seconde est la vraie : **le sens se lit
-> d'abord**, et **la liste de Sortie propose l'inventaire**. Chercher une
-> des trente boîtes qu'on détient parmi les 19 600 du pays, c'était la
-> mauvaise botte de foin.
->
-> Le scan, lui, fonctionnait — vérifié en reproduisant les deux gestes
-> avant de toucher au code.
+**Les deux rectangles ont disparu.** Ils portaient un mode **collant** : on
+le réglait le matin, on l'oubliait, et chaque bip suivant partait du
+mauvais côté. Un médicament bien présent dans l'armoire répondait alors
+*« n'est pas à l'inventaire »* — ce qui se lit exactement comme *« le code
+n'est plus reconnu »*.
 
-#### Cliquer un lot ouvre la quantité à sortir
+Le sens se demande maintenant **une fois par boîte**, après le scan. Il n'y
+a plus d'état à se rappeler, donc plus de geste qui parte du mauvais côté.
 
-> « Cliquer sur le médicament puis Sortie doit nous afficher directement le
-> tableau avec la quantité qu'on souhaite sortir — ou les boîtes — et
-> valider la sortie. »
+L'écran affiche d'abord **ce qu'il a reconnu** — nom, code CIP,
+conditionnement, péremption et n° de lot quand le code les porte — et **d'où
+vient l'identification** : les produits déjà enregistrés ici, ou la base
+publique. Puis les deux bulles.
 
-Un clic dans la liste **n'est pas un bip**, et les deux ne font plus la
-même chose :
-
-| Geste | Ce qui se passe |
+| Bulle | Ce qu'elle fait |
 |---|---|
-| **on bipe une boîte** | elle sort **tout de suite**. La douchette a déjà décidé ; scanner cinquante boîtes en confirmant cinquante fois serait insupportable |
-| **on clique un lot dans la liste** | le **panneau de quantité s'ouvre dessous**, déjà positionné sur ce lot : boîtes ou unités, combien, puis « ➖ Retirer du stock » |
+| **➕ Entrée** | la boîte rejoint l'inventaire. Entièrement identifiée — un nom **et** une péremption — elle entre d'un coup ; sinon la fiche s'ouvre sur ce qui manque, le reste déjà rempli |
+| **➖ Sortie** | la **fiche de sortie** s'ouvre sur le lot qui périme le plus tôt (FEFO) : combien, en boîtes ou en unités, puis « ➖ Retirer du stock » |
 
-Le panneau s'ouvre sur le bon choix tout seul : un lot **entamé** — plus de
-boîte entière, mais des comprimés en vrac — s'ouvre directement sur
-**« Unités à retirer »**. C'est le cas envoyé en capture par l'officine, et
-il fallait jusqu'ici deviner qu'il se cachait derrière un dépliant.
+**Annuler** referme sans rien faire — on s'est trompé de boîte.
 
-> **Un bug sérieux trouvé en écrivant ce test.** Une fois qu'une ligne a
-> été choisie **à la souris**, le composant de Streamlit ne surligne plus
-> rien : la touche **Entrée** de la douchette n'a alors aucune ligne à
-> valider, le code reste dans le champ et **rien ne part**. Mesuré dans un
-> navigateur sur les quatre gestes possibles — seul « bipe après avoir
-> cliqué » échouait, et c'est un geste réel : on clique un médicament, on
-> se ravise, on bipe la boîte suivante.
->
-> Le champ est donc **reconstruit après chaque choix à la souris**, ce qui
-> le fait renaître propre. Uniquement après un clic : il perd le curseur en
-> renaissant, sans importance quand la main est déjà sur la souris, mais
-> cela ruinerait le scan à la chaîne. Le style vit désormais sur le
-> conteneur, qui lui ne bouge pas — accroché au champ, il se serait
-> décroché au premier clic.
+Si le code est lu mais qu'aucun nom n'y est attaché, l'écran le dit
+franchement plutôt que de rester muet : *« le code a bien été lu, mais
+aucun nom n'y est attaché — ni ici, ni dans la base publique »*. Ne jamais
+rester silencieux : c'est ce qui fait croire à une panne.
 
-#### La fiche de sortie nomme le produit choisi
-
-> « Il faut le même principe que pour l'entrée d'un médicament. »
-
-L'entrée ouvre une **fiche pré-remplie** du produit choisi. La sortie, elle,
-rouvrait un panneau intitulé *« Choisissez la boîte à sortir »*, avec une
-liste déroulante — on venait de choisir le médicament, et l'écran
-redemandait de le choisir. On croyait qu'il ne s'était rien passé.
-
-La fiche **nomme** désormais le lot désigné, comme celle de l'entrée :
-
-```
-┌ Fiche de sortie — ABACAVIR SANDOZ 300 mg ────────────────┐
-│ 31/01/2028 · lot A9 · 0 boîte(s) + 50 unité(s)           │
-│                                                           │
-│ Unités à retirer : [ 1 ]      [ ➖ Retirer du stock ]      │
-│ ▸ Ce n'est pas la bonne boîte ?                           │
-└───────────────────────────────────────────────────────────┘
-```
-
-Se tromper de boîte reste rattrapable — la liste complète est là — mais
-**repliée** : elle ne doit plus occuper la place de la question qu'on se
-pose vraiment, qui est *combien*.
-
-> Ouverte par le bouton **« ⌨️ Sortie manuelle »**, aucune boîte n'a été
-> désignée : la fiche redemande alors laquelle, comme avant.
+La barre, elle, propose toujours le **catalogue national** : on identifie
+une boîte avant de savoir ce qu'on va en faire.
 
 Un nom tapé qui ne correspond à **aucune** ligne de l'inventaire le dit,
 et parle d'inventaire — « code non reconnu » n'a aucun sens pour un nom. Un
@@ -526,15 +486,21 @@ ce qu'on regarde tous les jours.
 
 ### Entrée ou sortie de stock
 
-Le sélecteur **Entrée / Sortie**, sous le champ, commande le scan.
+Le sens se choisit **après le scan**, dans l'une des deux bulles (voir
+ci-dessus) :
 
-- **Entrée** : la boîte scannée rejoint l'inventaire (voir ci-dessous) ;
-- **Sortie** : chaque scan retire **une boîte**. Le Data Matrix désigne la
+- **➕ Entrée** : la boîte rejoint l'inventaire ;
+- **➖ Sortie** : la fiche de sortie s'ouvre. Le Data Matrix désigne la
   boîte exacte (CIP + péremption + lot) ; un code-barres linéaire ne donne
-  que le produit, et c'est alors le lot qui **périme le plus tôt** qui sort
-  — règle **FEFO** de l'officine. Si le lot scanné n'est pas à l'inventaire,
-  l'outil sort la boîte la plus proche de la péremption **en le signalant** :
-  sortir un lot pour un autre en silence ruinerait la traçabilité.
+  que le produit, et c'est alors le lot qui **périme le plus tôt** qui est
+  proposé — règle **FEFO** de l'officine. Si le lot scanné n'est plus à
+  l'inventaire, la boîte la plus proche de la péremption est proposée **en
+  le signalant** : sortir un lot pour un autre en silence ruinerait la
+  traçabilité.
+
+Un nom **tapé** est cherché dans l'inventaire : « ZOLPIDEM » retrouve
+« ZOLPIDEM 10 mg ». S'il désigne plusieurs produits, ils sont nommés et
+l'on choisit — sortir « le premier » serait sortir une boîte au hasard.
 
 ### Saisie : douchette ou clavier
 

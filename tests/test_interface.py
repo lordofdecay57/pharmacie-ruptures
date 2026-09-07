@@ -138,8 +138,6 @@ def page_avec_stock(application_avec_stock, pilote):
     onglet.wait_for_selector(".hero", timeout=60000)
     _onglet(onglet, ESPACE_STOCK_FERME).first.click()
     onglet.wait_for_timeout(6000)
-    _mode(onglet, "Sortie").first.click()
-    onglet.wait_for_timeout(4000)
     yield onglet
     navigateur.close()
 
@@ -262,16 +260,24 @@ def _onglet(page, libelle: str):
         has_text=libelle)
 
 
-def _mode(page, libelle: str):
-    """Le bouton Entrée ou Sortie, dans le sélecteur de sens.
+def _bulle(page, sens: str):
+    """La bulle « Entrée » ou « Sortie », proposée APRÈS un scan.
 
-    Ciblé par la clé du widget plutôt que par le texte seul : « Entrée » et
-    « Sortie » se retrouvent partout ailleurs sur cet écran — dans les
-    messages de confirmation, dans les libellés du dépliant, dans le
-    tableau — et « le premier texte trouvé » finissait par désigner l'un
-    d'eux plutôt que le bouton.
+    Elles ont remplacé deux rectangles posés en permanence, qui portaient
+    un mode collant. Ciblées par la clé du bouton plutôt que par le texte :
+    « Entrée » et « Sortie » se retrouvent partout ailleurs sur cet écran —
+    messages de confirmation, libellés du dépliant, tableau — et « le
+    premier texte trouvé » finissait par désigner l'un d'eux.
     """
-    return page.locator(".st-key-sf_mode button").filter(has_text=libelle)
+    cle = "sf_bulle_entree" if sens.startswith("Entr") else "sf_bulle_sortie"
+    return page.locator(f".st-key-{cle} button")
+
+
+def _biper_puis(page, texte: str, sens: str, attente: int = 6000):
+    """Le geste complet : on bipe, puis on dit ce qu'on en fait."""
+    _saisir(page, texte, attente=5000)
+    _bulle(page, sens).first.click()
+    page.wait_for_timeout(attente)
 
 
 def _sans_exception(page) -> None:
@@ -533,7 +539,8 @@ class TestEspaceStockFerme:
         assert "non installée" in page.content()
 
     def test_scan_d_un_produit_inconnu_ouvre_la_fiche(self, page):
-        _saisir(page, "0103400937000013" + "17280331" + "10LOT-TEST")
+        _biper_puis(page, "0103400937000013" + "17280331" + "10LOT-TEST",
+                    "Entrée")
         _sans_exception(page)
         contenu = page.content()
         assert "Fiche du produit à enregistrer" in contenu
@@ -555,7 +562,7 @@ class TestEspaceStockFerme:
         """Sans base publique installée, il n'y a rien à proposer — mais ce
         qui vient d'être tapé doit au moins servir de nom. Le retaper dans
         la fiche juste en dessous n'aurait aucun sens."""
-        _saisir(page, "DOLIPRANE 1000 mg")
+        _biper_puis(page, "DOLIPRANE 1000 mg", "Entrée")
         _sans_exception(page)
         assert page.get_by_role(
             "textbox", name="Nom du médicament").input_value() == \
@@ -567,6 +574,8 @@ class TestEspaceStockFerme:
         saisie, c'est déjà une question de trop : lequel des deux ? Le champ
         occupe désormais toute la ligne, et l'invite dit quoi faire."""
         champ = _saisir(page, "AMOXICILLINE 1 g")
+        _bulle(page, "Entrée").first.click()
+        page.wait_for_timeout(6000)
         _sans_exception(page)
         # Le champ se vide : la saisie a bien été prise en compte.
         assert champ.input_value() == ""
@@ -585,30 +594,27 @@ class TestEspaceStockFerme:
         # ne part qu'une fois validé.
         assert "Entrée" in indication
 
-    def test_recliquer_le_mode_actif_ne_le_deselectionne_pas(self, page):
-        """Même garde-fou pour Entrée / Sortie : un scan a toujours un sens,
-        aucun des deux ne doit pouvoir rester éteint."""
-        assert "Entrée" in _onglet_actif(page, "sf_mode")
-        _mode(page, "Entrée").first.click()
-        page.wait_for_timeout(4000)
-        _sans_exception(page)
-        assert "Entrée" in _onglet_actif(page, "sf_mode")
+    def test_il_n_y_a_PLUS_de_rectangles_entree_sortie(self, page):
+        """« Il faudra donc supprimer les rectangles Entrée et Sortie
+        existants. » Ils portaient un mode COLLANT : réglé le matin,
+        oublié, et chaque bip suivant partait du mauvais côté — un
+        médicament bien présent répondant « n'est pas à l'inventaire »,
+        ce qui se lit comme « le code n'est plus reconnu »."""
+        assert page.locator(".st-key-sf_mode").count() == 0
+        # Et rien ne demande le sens tant qu'on n'a rien bipé : ces bulles
+        # sont la réponse à un geste, pas un réglage posé là. On repart
+        # donc d'un écran propre — un scan a pu rester en attente.
+        if page.locator(".st-key-sf_bulle_annuler button").count():
+            page.locator(".st-key-sf_bulle_annuler button").first.click()
+            page.wait_for_timeout(4000)
+        assert page.locator(".st-key-sf_bulles").count() == 0
 
     def test_sortie_sur_inventaire_vide_est_refusee_proprement(self, page):
-        _mode(page, "Sortie").first.click()
-        page.wait_for_timeout(3000)
-        assert "Sortie" in _onglet_actif(page, "sf_mode")
-        _saisir(page, "3400937000013", attente=4000)
+        """L'inventaire est vide : la bulle Sortie doit le dire, et parler
+        d'inventaire — pas de code non reconnu."""
+        _biper_puis(page, "3400937000013", "Sortie")
         _sans_exception(page)
-        assert "Sortie impossible" in page.content()
-
-    def test_l_impasse_du_mode_sortie_est_signalee(self, page):
-        """Sortir d'un inventaire vide ne peut que rater : chaque scan
-        répondait « pas à l'inventaire » et le second bouton était grisé.
-        L'écran doit dire pourquoi, et offrir la sortie de secours."""
-        contenu = page.content()
-        assert "il n'y a rien à sortir" in contenu
-        assert page.get_by_role("button", name="Passer en Entrée").count() == 1
+        assert "n'est pas à l'inventaire" in page.content()
 
     def test_la_sortie_manuelle_est_disponible(self, page):
         """Une étiquette abîmée, une boîte reconditionnée : la douchette ne
@@ -620,31 +626,34 @@ class TestEspaceStockFerme:
         bouton = page.locator(
             ".st-key-sf_bouton_sortie_manuelle button:visible")
         assert bouton.count() == 1
-        assert bouton.first.is_enabled()
+        # Grisé ici, et c'est juste : cet inventaire est vide, il n'y a
+        # rien à sortir. Le proposer quand même serait promettre une
+        # sortie impossible.
+        assert not bouton.first.is_enabled()
 
-    def test_l_ecran_de_saisie_tient_en_deux_lignes(self, page):
-        """La demande de la pharmacie, mot pour mot : « une ligne où on bipe
-        et où on peut noter le nom du médicament, la ligne d'en dessous on
-        clique sur entrée ou sortie, rien de plus ».
+    def test_l_ecran_de_saisie_tient_en_UNE_ligne(self, page):
+        """La demande de la pharmacie était : « une ligne où on bipe, la
+        ligne d'en dessous on clique sur entrée ou sortie, rien de plus ».
 
-        L'écran portait deux dispositions différentes selon le mode — trois
-        boutons en Entrée, deux encadrés en Sortie — et il fallait le relire
-        à chaque bascule pour retrouver le champ.
+        Il n'en reste qu'UNE. Le sens ne se règle plus d'avance : il se
+        demande une fois la boîte reconnue, en deux bulles qui s'en vont
+        dès qu'on a tranché. Un réglage de moins à se rappeler.
         """
-        champ = page.locator(".st-key-sf_zone_scan")
-        sens = page.locator(".st-key-sf_mode")
-        assert champ.count() == 1 and sens.count() == 1
-        # Le champ AU-DESSUS du sens : on bipe d'abord, on regarde le sens
-        # ensuite. Il reste choisi d'un scan à l'autre.
+        assert page.locator(".st-key-sf_zone_scan").count() == 1
+        assert page.locator(".st-key-sf_mode").count() == 0
+        # Le champ est au-dessus du dépliant des exceptions : c'est par lui
+        # qu'on commence, toujours.
         positions = page.evaluate(
             """() => {
-                const y = (s) => {
-                    const e = document.querySelector(s);
-                    return e ? e.getBoundingClientRect().top : -1;
-                };
-                return [y('.st-key-sf_zone_scan'), y('.st-key-sf_mode')];
+                const champ = document.querySelector('.st-key-sf_zone_scan');
+                const exceptions = [...document.querySelectorAll(
+                        '[data-testid="stExpander"]')].find(
+                    e => e.innerText.includes('Le code ne se lit pas'));
+                return [champ ? champ.getBoundingClientRect().top : -1,
+                        exceptions
+                            ? exceptions.getBoundingClientRect().top : -1];
             }""")
-        assert positions[0] < positions[1], positions
+        assert 0 < positions[0] < positions[1], positions
 
     def test_la_zone_de_scan_ressort_en_couleur(self, page):
         """C'est le point de départ de tout l'écran, et c'était un champ
@@ -710,17 +719,15 @@ class TestEspaceStockFerme:
         # Replié ne veut pas dire caché : le titre nomme les deux cas.
         assert "Sortir à l'unité" in contenu
 
-    def test_le_bouton_ramene_en_entree(self, page):
-        """Le seul geste qui débloque l'écran doit tenir en un clic."""
-        page.get_by_role("button", name="Passer en Entrée").click()
-        page.wait_for_timeout(4000)
-        _sans_exception(page)
-        assert "Entrée" in _onglet_actif(page, "sf_mode")
-        # La saisie manuelle vit désormais dans le dépliant : c'est une
-        # exception (code illisible), pas le geste de tous les jours.
+    def test_la_saisie_manuelle_reste_accessible(self, page):
+        """Elle vit dans le dépliant : c'est une exception (code illisible),
+        pas le geste de tous les jours. Les DEUX gestes y figurent
+        désormais — il n'y a plus de mode pour décider lequel montrer."""
         _ouvrir_les_autres_gestes(page)
         assert page.locator(
             ".st-key-sf_bouton_saisie_manuelle button:visible").is_enabled()
+        assert page.locator(
+            ".st-key-sf_bouton_sortie_manuelle button:visible").count() == 1
 
 
 class TestSortieALUnite:
@@ -838,17 +845,26 @@ class TestSaisieAssistee:
         avec un vrai code, tapé à la vitesse d'une douchette, séparateur
         FNC1 compris.
 
-        Le code désigne une boîte de la base : elle doit entrer au stock
-        **sans fiche à compléter**, puisque le nom vient de la base et la
+        Le code désigne une boîte de la base : l'écran doit la NOMMER,
+        puis demander le sens. Un clic sur « Entrée » suffit alors — sans
+        fiche à compléter, puisque le nom vient de la base et la
         péremption du code.
         """
         _saisir(page_avec_base,
                 "01034009359558381728063010LOT7\x1d", attente=6000)
         _sans_exception(page_avec_base)
-        contenu = page_avec_base.content()
-        assert "1 boîte" in contenu, "la boîte scannée n'est pas entrée"
-        assert "DOLIPRANE" in contenu
-        assert "30/06/2028" in contenu, contenu[:0]
+        # Ce que l'application a reconnu, AVANT qu'on dise quoi en faire.
+        carte = page_avec_base.locator(".st-key-sf_bulles")
+        assert carte.count() == 1, "la boîte scannée n'a pas été présentée"
+        reconnu = carte.inner_text()
+        assert "DOLIPRANE" in reconnu, reconnu
+        assert "3400935955838" in reconnu, reconnu
+        assert "30/06/2028" in reconnu, reconnu
+        _bulle(page_avec_base, "Entrée").first.click()
+        page_avec_base.wait_for_timeout(6000)
+        _sans_exception(page_avec_base)
+        assert "1 boîte" in page_avec_base.content(), (
+            "la boîte n'est pas entrée après le clic sur la bulle")
 
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
@@ -890,6 +906,11 @@ class TestSaisieAssistee:
         panneau « Médicaments trouvés » ni un bouton de confirmation."""
         page_avec_base.locator("[role='option']").first.click()
         page_avec_base.wait_for_timeout(5000)
+        # Choisir un médicament l'identifie ; c'est la bulle qui décide de
+        # ce qu'on en fait. Sans péremption connue, « Entrée » ouvre la
+        # fiche pour la demander.
+        _bulle(page_avec_base, "Entrée").first.click()
+        page_avec_base.wait_for_timeout(6000)
         _sans_exception(page_avec_base)
         assert "Médicaments trouvés" not in page_avec_base.content()
         assert page_avec_base.get_by_role(
@@ -983,8 +1004,12 @@ def deux_postes(serveur_partage, pilote):
 
 
 def _scanner_et_enregistrer(page, code: str, nom: str) -> None:
-    """Un scan de code inconnu, complété à la main : le geste du comptoir."""
-    _saisir(page, code, attente=4000)
+    """Un scan de code inconnu, complété à la main : le geste du comptoir.
+
+    Trois temps depuis que le sens se demande APRÈS le scan : on bipe, on
+    dit « Entrée », puis on complète ce que le code ne portait pas.
+    """
+    _biper_puis(page, code, "Entrée", attente=5000)
     page.get_by_role("textbox", name="Nom du médicament").fill(nom)
     page.get_by_role("textbox", name="Date de péremption").fill("062028")
     page.get_by_role("button", name="Ajouter au stock").click()
@@ -1031,9 +1056,13 @@ class TestPostesSimultanes:
         assert "PRODUIT DU POSTE B" not in poste_a.content(), (
             "l'écran du poste A ne peut pas déjà être à jour : ce test "
             "vérifie la relecture, il lui faut un écran périmé au départ")
-        # Un geste anodin, qui ne touche pas au stock : recliquer le mode
-        # déjà actif. Il provoque un réaffichage, sans rien enregistrer.
-        poste_a.locator(".st-key-sf_mode button").first.click()
+        # Un geste anodin, qui ne touche pas au stock : changer l'ordre
+        # d'affichage. Il provoque un réaffichage complet côté serveur,
+        # sans rien enregistrer — un dépliant, lui, ne se replie que dans
+        # le navigateur et ne relirait donc rien.
+        poste_a.locator(".st-key-sf_tri input").first.click()
+        poste_a.wait_for_timeout(1200)
+        poste_a.get_by_role("option").last.click()
         poste_a.wait_for_timeout(4000)
         _sans_exception(poste_a)
         assert "PRODUIT DU POSTE B" in poste_a.content()
@@ -1201,60 +1230,42 @@ def page_sortie_par_nom(application_sortie_par_nom, pilote):
     onglet.goto(application_sortie_par_nom, wait_until="domcontentloaded")
     onglet.wait_for_selector(".hero", timeout=60000)
     onglet.wait_for_timeout(6000)
-    _mode(onglet, "Sortie").first.click()
-    onglet.wait_for_timeout(4000)
     yield onglet
     navigateur.close()
 
 
 class TestSortirEnTapantLeNom:
-    """« Bug au niveau de la sortie : après avoir bipé ou tapé le nom du
-    médicament, rien ne se passe. »
+    """Sortir une boîte en la nommant, sans code-barres.
 
-    Le diagnostic tenait en un ordre de lecture. La barre unique consultait
-    le **catalogue national** avant de regarder le sens du mouvement : en
-    mode Sortie, le nom choisi y était reconnu, on ouvrait la fiche
-    d'ENTRÉE — que le mode Sortie n'affiche jamais — et il ne se passait
-    rien à l'écran. Un nom tapé librement, lui, tombait sur « Code non
-    reconnu » pour un médicament pourtant dans l'armoire.
-
-    Deux corrections, et la seconde est la vraie : le sens se lit
-    d'abord ; et **en Sortie, la liste propose l'inventaire**, pas les
-    19 600 boîtes du pays. On ne sort que ce qu'on a.
+    Le sens ne se règle plus d'avance : on bipe ou on tape le nom, l'écran
+    dit ce qu'il a reconnu, et on clique **Sortie**. C'est ce qui a fait
+    disparaître toute une famille de pannes — un mode collant réglé le
+    matin envoyait chaque bip suivant du mauvais côté, et un médicament
+    bien présent répondait « n'est pas à l'inventaire ».
     """
 
-    def test_la_liste_propose_l_inventaire_et_non_le_catalogue(
+    def test_taper_le_nom_puis_Sortie_sort_bien_une_boite(
             self, page_sortie_par_nom):
-        """DOLIPRANE est au catalogue mais pas à l'inventaire : il n'a rien
-        à faire dans une liste de sortie. ZOLPIDEM, lui, y est — avec sa
-        péremption et son lot, car c'est une BOÎTE qu'on sort, pas un
-        médicament en général."""
+        """Deux boîtes à l'inventaire : après la sortie, il doit en rester
+        une — et la fiche doit s'ouvrir pour demander combien."""
         page = page_sortie_par_nom
-        champ = page.get_by_placeholder("Douchez la boîte").first
-        champ.click()
-        page.wait_for_selector("[role='option']", timeout=15000)
-        options = page.locator("[role='option']").all_inner_texts()
-        assert any("ZOLPIDEM" in o for o in options), options
-        assert not any("DOLIPRANE" in o for o in options), options
-        assert any("lot Z1" in o for o in options), options
-        page.keyboard.press("Escape")
-
-    def test_taper_le_nom_sort_bien_une_boite(self, page_sortie_par_nom):
-        """LE bug remonté : deux boîtes à l'inventaire, on tape le nom, il
-        doit en rester une — et l'écran doit le dire."""
-        page = page_sortie_par_nom
-        _saisir(page, "ZOLPIDEM", attente=6000)
+        _biper_puis(page, "ZOLPIDEM", "Sortie")
+        _sans_exception(page)
+        assert "Fiche de sortie" in page.content(), (
+            "la fiche de quantité ne s'est pas ouverte")
+        page.get_by_role("button", name="Retirer du stock").click()
+        page.wait_for_timeout(6000)
         _sans_exception(page)
         contenu = page.content()
-        assert "1 boîte sortie" in contenu, "rien ne s'est passé"
-        assert "reste 1 boîte" in contenu, contenu[:0]
+        assert "sortie(s)" in contenu, "rien n'est sorti"
+        assert "reste 1" in contenu, contenu[:0]
 
     def test_un_nom_absent_de_l_inventaire_le_dit(self, page_sortie_par_nom):
         """Ne JAMAIS rester muet : c'est ce qui fait croire à une panne.
-        Et le message doit parler de l'inventaire, pas du code-barres —
-        « code non reconnu » n'a aucun sens pour un nom tapé."""
+        Et le message parle d'inventaire, pas de code-barres — « code non
+        reconnu » n'a aucun sens pour un nom tapé."""
         page = page_sortie_par_nom
-        _saisir(page, "AMOXICILLINE", attente=6000)
+        _biper_puis(page, "AMOXICILLINE", "Sortie")
         _sans_exception(page)
         contenu = page.content()
         assert "n'est pas à l'inventaire" in contenu
@@ -1291,55 +1302,43 @@ def page_deux_lots(application_deux_lots, pilote):
     onglet.goto(application_deux_lots, wait_until="domcontentloaded")
     onglet.wait_for_selector(".hero", timeout=60000)
     onglet.wait_for_timeout(6000)
-    _mode(onglet, "Sortie").first.click()
-    onglet.wait_for_timeout(4000)
     yield onglet
     navigateur.close()
 
 
 class TestChoisirUnLotOuvreLaQuantite:
-    """« Cliquer sur le médicament puis Sortie doit nous afficher
-    directement le tableau avec la quantité qu'on souhaite sortir — ou les
-    boîtes — et valider la sortie. »
+    """« Un onglet qui s'ouvre en bas pour définir le nombre, les
+    paramètres de sortie », et « le même principe que pour l'entrée ».
 
-    Un clic dans la liste n'est pas un bip. La douchette dit « cette
-    boîte-là sort, maintenant » ; choisir un nom à l'écran, c'est le début
-    d'une décision — combien, et en boîtes ou en comprimés. Le panneau de
-    quantité s'ouvre donc directement, déjà positionné sur ce lot.
+    Sortir demande **combien**, et en boîtes ou en comprimés. La bulle
+    Sortie ouvre donc une fiche — pas un retrait immédiat — et cette
+    fiche NOMME le produit au lieu de le redemander, comme celle de
+    l'entrée nomme le sien.
     """
 
-    def test_le_panneau_s_ouvre_sur_le_lot_choisi(self, page_deux_lots):
-        """Sur CELUI-LÀ, et pas sur le premier de la liste : ouvrir le
-        panneau sur un autre lot ferait sortir la mauvaise boîte à celui
-        qui valide sans relire."""
+    def test_la_bulle_Sortie_ouvre_la_fiche_sur_le_bon_lot(
+            self, page_deux_lots):
+        """Sur CELUI-LÀ, et pas sur le premier de l'inventaire : ouvrir la
+        fiche sur un autre lot ferait sortir la mauvaise boîte à celui qui
+        valide sans relire."""
         page = page_deux_lots
-        _choisir_dans_la_liste(page, "ABACAVIR")
+        _biper_puis(page, "ABACAVIR", "Sortie")
         _sans_exception(page)
         assert page.locator(".st-key-sf_sortie_choix").count() == 1, (
-            "le panneau de quantité ne s'est pas ouvert")
+            "la fiche de quantité ne s'est pas ouverte")
         retenu = page.locator(
             ".st-key-sf_sortie_choix input").first.input_value()
         assert "ABACAVIR" in retenu, retenu
 
     def test_la_fiche_NOMME_le_lot_au_lieu_de_le_redemander(
             self, page_deux_lots):
-        """« Il faut le même principe que pour l'entrée. »
-
-        L'entrée ouvre une FICHE pré-remplie du produit choisi. La sortie,
-        elle, rouvrait un panneau intitulé « Choisissez la boîte à
-        sortir », avec une liste déroulante — on venait de choisir le
-        médicament, et l'écran redemandait de le choisir. On croyait qu'il
-        ne s'était rien passé.
-
-        La fiche nomme donc le lot désigné. Se tromper de boîte reste
-        rattrapable, mais replié : « Ce n'est pas la bonne boîte ? »
-        """
-        page = page_deux_lots
-        contenu = page.content()
-        assert "Fiche de sortie" in contenu, (
-            "la fiche ne se présente pas comme celle de l'entrée")
+        """L'entrée ouvre une fiche pré-remplie du produit choisi. La
+        sortie rouvrait un panneau « Choisissez la boîte à sortir », avec
+        une liste — on venait de choisir, et l'écran redemandait de
+        choisir. On croyait qu'il ne s'était rien passé."""
+        contenu = page_deux_lots.content()
+        assert "Fiche de sortie" in contenu
         assert "ABACAVIR" in contenu
-        # La question qui donnait l'impression que rien ne s'était passé.
         assert "Choisissez la boîte à sortir" not in contenu, contenu[:0]
         assert "Ce n'est pas la bonne boîte" in contenu
 
@@ -1347,11 +1346,10 @@ class TestChoisirUnLotOuvreLaQuantite:
         """Le cas de la capture : plus de boîte entière, 50 comprimés en
         vrac. Proposer « boîtes à retirer » n'aurait aucun sens — et c'est
         vers un dépliant qu'on renvoyait jusqu'ici."""
-        page = page_deux_lots
-        etiquettes = page.locator(
+        etiquettes = page_deux_lots.locator(
             '[data-testid="stNumberInput"] label').all_inner_texts()
         assert any("Unités à retirer" in e for e in etiquettes), etiquettes
-        assert page.get_by_role(
+        assert page_deux_lots.get_by_role(
             "button", name="Retirer du stock").count() == 1
 
     def test_la_quantite_choisie_sort_vraiment(self, page_deux_lots):
@@ -1366,7 +1364,7 @@ class TestChoisirUnLotOuvreLaQuantite:
 
     def test_un_lot_entier_s_ouvre_sur_les_BOITES(self, page_deux_lots):
         page = page_deux_lots
-        _choisir_dans_la_liste(page, "ZOLPIDEM")
+        _biper_puis(page, "ZOLPIDEM", "Sortie")
         _sans_exception(page)
         etiquettes = page.locator(
             '[data-testid="stNumberInput"] label').all_inner_texts()
@@ -1379,24 +1377,23 @@ class TestChoisirUnLotOuvreLaQuantite:
         surligne plus rien : la touche Entrée de la douchette n'a alors
         aucune ligne à valider, le code reste dans le champ et **rien ne
         part**. Mesuré dans un navigateur sur les quatre gestes possibles,
-        seul celui-ci échouait — et c'est le geste réel : on clique un
+        seul celui-ci échouait — et c'est le geste réel : on choisit un
         médicament, on se ravise, on bipe la boîte suivante.
 
-        Le champ est donc reconstruit après chaque choix à la souris. Ce
-        test arrive APRÈS un clic (le test précédent), et c'est tout son
+        Ce test arrive APRÈS des clics dans la liste, et c'est tout son
         intérêt : le lancer seul ne prouverait rien.
-
-        Il vérifie aussi que la douchette n'est pas RALENTIE : une boîte
-        bipée sort tout de suite, sans panneau à confirmer. Scanner
-        cinquante boîtes en cliquant « Retirer » cinquante fois serait
-        insupportable — c'est le clic, et lui seul, qui ouvre le panneau.
         """
         page = page_deux_lots
         _saisir(page, "01034009300000111727063010Z1\x1d", attente=6000)
         _sans_exception(page)
-        messages = [a.inner_text().replace("\n", " ")
-                    for a in page.locator('[data-testid="stAlert"]').all()]
-        assert any("1 boîte sortie" in m for m in messages), messages
+        carte = page.locator(".st-key-sf_bulles")
+        assert carte.count() == 1, (
+            "le code bipé n'a rien déclenché : la douchette est muette "
+            "après un clic dans la liste")
+        # Cette application de test n'a pas de base publique : le nom ne
+        # peut pas être trouvé, et c'est normal. Ce qui compte, c'est que
+        # le code ait bien ÉTÉ LU — il est là, dans la carte.
+        assert "3400930000011" in carte.inner_text(), carte.inner_text()
 
     def test_le_style_survit_a_la_reconstruction_du_champ(self,
                                                           page_deux_lots):
@@ -1417,7 +1414,5 @@ class TestChoisirUnLotOuvreLaQuantite:
         assert fonds["panneau"] != "rgba(0, 0, 0, 0)", fonds
         # L'un ou l'autre turquoise : le champ s'assombrit quand il a le
         # curseur, et il l'a ou non selon qu'on vient de le reconstruire.
-        # Exiger une seule des deux teintes rendrait ce test capricieux —
-        # ce qu'il doit prouver, c'est qu'il n'est pas redevenu GRIS.
         assert fonds["bord"] in ("rgb(13, 148, 136)", "rgb(15, 118, 110)"), (
             fonds)
