@@ -456,6 +456,26 @@ Trois choses ont été mesurées avant d'être corrigées :
    exports et la barre latérale. Les bulles, elles, écrivent — elles
    redemandent alors un rendu entier.
 
+> **« Peut-on garder la base et comparer sans y perdre du temps ? »** —
+> C'est déjà le cas, et la mesure le montre : identifier un CIP bipé dans
+> la base **entière** coûte **0,001 ms**, chercher un nom tapé **7 ms**.
+> La comparaison n'a jamais rien coûté. Ce qui coûtait, c'était d'envoyer
+> les 19 600 lignes au navigateur.
+>
+> Et la liste ne peut pas tout porter. Mesuré, le coût explose :
+>
+> | Lignes dans le champ | Valider un scan |
+> |---|---|
+> | 1 000 | 0,41 s |
+> | 3 000 | 0,54 s |
+> | 6 000 | 0,64 s |
+> | 12 000 | 1,03 s |
+> | 19 600 | 2,51 s |
+>
+> Le seuil est vers **6 000 lignes**. La base réelle compte 19 622 boîtes
+> pour **14 360 noms distincts** : même une ligne par nom resterait
+> au-dessus, autour de 1,2 s. D'où le choix des produits connus.
+
 > **Rien n'est perdu de la recherche.** Taper le nom d'un produit jamais vu
 > et valider cherche toujours dans la **base publique entière** : elle
 > remplit la fiche si une seule boîte porte ce nom, et nomme les candidats

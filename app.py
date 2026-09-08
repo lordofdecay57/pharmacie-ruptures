@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.30"
+VERSION_APP = "6.31"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -268,13 +268,23 @@ st.markdown("""
   border-color: #b45309 !important; background: #b45309 !important;
   box-shadow: 0 3px 10px rgba(180,83,9,.30) !important;
 }
-/* « Annuler » n'est pas un troisième choix : discret, en dessous. */
+/* « ANNULER ». Il avait été traité en lien discret, pour ne pas passer
+   pour un troisième choix à côté d'Entrée et de Sortie. C'était trop
+   discret : on bipe la mauvaise boîte, et le geste qui rattrape doit se
+   voir. Il est donc rond et cadré comme les deux autres — mais gris, et
+   sans aplat : on lit d'abord les deux bulles de couleur, on trouve
+   celle-ci quand on la cherche. */
 .st-key-sf_bulle_annuler button {
-  border: none !important; background: transparent !important;
-  padding: 2px 0 0 0 !important;
+  border: 2px solid #9ca3af !important; background: #ffffff !important;
+  border-radius: 999px !important; padding: 14px 10px !important;
+  margin-top: 8px !important;
 }
-.st-key-sf_bulle_annuler button p { font-size: .86rem !important;
-  color: #6b7280 !important; text-decoration: underline; }
+.st-key-sf_bulle_annuler button p { font-size: 1.05rem !important;
+  font-weight: 600 !important; color: #4b5563 !important; }
+.st-key-sf_bulle_annuler button:hover {
+  border-color: #b45309 !important; background: #fff7ed !important;
+}
+.st-key-sf_bulle_annuler button:hover p { color: #b45309 !important; }
 
 /* Séparateur d'espace : une barre de couleur propre à chaque module, pour
    qu'on sache d'un coup d'œil dans lequel on travaille. */
