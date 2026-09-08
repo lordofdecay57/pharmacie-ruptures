@@ -156,6 +156,12 @@ def _base_chargee() -> tuple:
             table)
         st.session_state["sf_base_noms"] = index_noms
         st.session_state["sf_base_catalogue"] = catalogue
+        # Les libellés SEULS, figés eux aussi : c'est cette liste-là qui
+        # part dans le navigateur à chaque interaction. La reconstruire à
+        # chaque fois la rendait « nouvelle » aux yeux de Streamlit, qui
+        # renvoyait alors les 19 600 lignes au lieu d'une référence — trois
+        # secondes sur chaque bip, mesurées au chronomètre.
+        st.session_state["sf_base_libelles"] = [m["libelle"] for m in catalogue]
         st.session_state["sf_base_par_libelle"] = {
             m["libelle"]: m for m in catalogue}
         st.session_state["sf_base_empreinte"] = empreinte
@@ -178,6 +184,12 @@ def _index_noms() -> list:
 def _catalogue() -> list:
     _base_chargee()
     return st.session_state["sf_base_catalogue"]
+
+
+def _libelles_du_catalogue() -> list:
+    """Les libellés, dans un objet STABLE d'une interaction à l'autre."""
+    _base_chargee()
+    return st.session_state["sf_base_libelles"]
 
 
 def _catalogue_par_libelle() -> dict:
@@ -848,7 +860,7 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
     libre, et la douchette continue de fonctionner.
     """
     catalogue = _catalogue()
-    options = [m["libelle"] for m in catalogue]
+    options = _libelles_du_catalogue()
     invite = (
         "🔦 Douchez la boîte — ou tapez les premières lettres du "
         f"médicament ({len(catalogue)} boîtes référencées)"

@@ -866,6 +866,25 @@ class TestSaisieAssistee:
         assert "1 boîte" in page_avec_base.content(), (
             "la boîte n'est pas entrée après le clic sur la bulle")
 
+    def test_la_liste_envoyee_au_navigateur_est_FIGEE(self, page_avec_base):
+        """« Comment améliorer la fluidité, c'est un peu lent ? »
+
+        Cette liste part dans le navigateur à chaque interaction. La
+        reconstruire à chaque fois la rend NOUVELLE aux yeux de Streamlit,
+        qui renvoie alors les 19 600 lignes au lieu d'une référence :
+        chronométré sur une base réelle, le premier affichage passait de
+        5,5 s à 17,1 s.
+
+        Le test porte sur l'objet Python, pas sur le rendu : c'est son
+        identité — le fait que ce soit deux fois LE MÊME objet — qui
+        décide, et cela ne se voit pas à l'écran.
+        """
+        import ui_stock_ferme
+        source = Path(ui_stock_ferme.__file__).read_text(encoding="utf-8")
+        assert "options = _libelles_du_catalogue()" in source, (
+            "les libellés sont reconstruits à chaque interaction")
+        assert 'st.session_state["sf_base_libelles"]' in source
+
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
         champ.click()
