@@ -902,6 +902,40 @@ class TestSaisieAssistee:
         # perdu le reste du répertoire national.
         assert "base publique" in invite, invite
 
+    def test_le_repertoire_national_est_disponible_au_choix(
+            self, page_avec_base):
+        """« Il faut rétablir la base de données tout en limitant la
+        latence. »
+
+        Les deux ne tiennent pas ensemble, et c'est mesuré : valider un
+        scan prend 0,2 s avec les seuls produits connus, 1,5 s avec les
+        13 644 noms du répertoire national. Ce n'est pas leur poids qui
+        coûte — les raccourcir de 710 à 317 Ko accélère la frappe et ne
+        change rien à la validation — c'est leur NOMBRE.
+
+        Alors on ne tranche pas à la place de l'officine : une case
+        l'ouvre, avec son prix écrit à côté. Et **hors du dépliant** : à
+        l'intérieur elle serait invisible tant qu'on ne déplie pas, or
+        personne ne déplie « base publique » pour régler la vitesse de son
+        écran.
+        """
+        page = page_avec_base
+        case = page.locator(".st-key-sf_liste_complete")
+        assert case.count() == 1, "le réglage est introuvable"
+        assert case.first.is_visible(), (
+            "le réglage est là mais caché : il ne sert à rien")
+        try:
+            case.locator("label").first.click()
+            page.wait_for_timeout(6000)
+            _sans_exception(page)
+            invite = page.locator(
+                ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
+            assert "répertoire national" in invite, invite
+        finally:
+            # Décochée pour les tests suivants : ce réglage est global.
+            case.locator("label").first.click()
+            page.wait_for_timeout(6000)
+
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
         champ.click()

@@ -166,6 +166,10 @@ def _base_chargee() -> tuple:
         st.session_state["sf_base_par_libelle"] = {
             m["libelle"]: m for m in catalogue}
         st.session_state["sf_base_empreinte"] = empreinte
+        # La liste des noms est dérivée du catalogue : elle doit mourir
+        # avec lui, sinon une base retéléchargée n'apporterait aucun des
+        # médicaments qu'elle ajoute.
+        st.session_state.pop("sf_noms_du_repertoire", None)
         _journal.info("Base des médicaments : %d code(s), %d présentation(s), "
                       "%d boîte(s) au catalogue",
                       len(st.session_state["sf_base_index"]),
@@ -934,6 +938,41 @@ def _entier(valeur) -> int:
         return 0
 
 
+def _tous_les_noms() -> list:
+    """Le répertoire national ENTIER, un nom par ligne.
+
+    « Il faut rétablir la base de données tout en limitant la latence. »
+
+    Les deux ne tiennent pas ensemble, et c'est mesuré : sur la base
+    réelle, valider un scan prend **0,2 s** avec les seuls produits
+    connus, **1,5 s** avec les 13 644 noms du répertoire. Ce n'est pas
+    leur poids qui coûte — les raccourcir de 710 à 317 Ko accélère la
+    frappe mais ne change RIEN à la validation — c'est leur **nombre**.
+    Le seuil est vers 6 000 lignes, et le répertoire en compte le double.
+
+    Alors on ne tranche pas à la place de l'officine : la case de la
+    barre latérale ouvre ce mode, avec son prix écrit à côté.
+
+    Une ligne par NOM et non par boîte : les 19 622 présentations se
+    ramènent à 13 644 noms, la frappe passe de 0,78 s à 0,38 s, et la
+    forme galénique — « comprimé pelliculé sécable » — n'apprend rien
+    qu'on ne lise déjà sur la boîte qu'on tient.
+    """
+    figes = st.session_state.get("sf_noms_du_repertoire")
+    if figes is not None:
+        return figes
+    vus = {}
+    for medicament in _catalogue():
+        court = medicament["nom"].split(",")[0].strip()
+        if court:
+            vus.setdefault(court, dict(medicament, libelle=court))
+    # Figé comme le reste : reconstruire cette liste à chaque interaction
+    # la rendrait neuve aux yeux de Streamlit, qui la renverrait entière.
+    figes = sorted(vus.values(), key=lambda m: m["libelle"])
+    st.session_state["sf_noms_du_repertoire"] = figes
+    return figes
+
+
 def _champ_unique(inventaire, aujourdhui: date) -> None:
     """LE champ. Douchette, nom tapé, ligne choisie — un seul endroit.
 
@@ -963,15 +1002,20 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
     """
     catalogue = _catalogue()
     _, repertoire = _etat()
-    familiers = _medicaments_familiers(inventaire, repertoire)
+    if st.session_state.get("sf_liste_complete") and catalogue:
+        familiers = _tous_les_noms()
+    else:
+        familiers = _medicaments_familiers(inventaire, repertoire)
     # Retenu pour la validation : un libellé choisi doit se retrouver.
     st.session_state["sf_options_par_libelle"] = {
         m["libelle"]: m for m in familiers}
     options = [m["libelle"] for m in familiers]
     invite = (
-        f"🔦 Douchez la boîte — ou tapez son nom ({len(options)} produits "
-        "déjà connus ici ; un nom inconnu est cherché dans la base "
-        "publique à la validation)"
+        f"🔦 Douchez la boîte — ou tapez son nom ({len(options)} "
+        + ("médicaments du répertoire national)"
+           if st.session_state.get("sf_liste_complete") else
+           "produits déjà connus ici ; un nom inconnu est cherché dans "
+           "la base publique à la validation)")
         if options else
         "🔦 Douchez la boîte — ou tapez le nom du médicament "
         "et appuyez sur Entrée")
@@ -1363,6 +1407,34 @@ def _base_publique() -> None:
         _telecharger_la_base()
 
 
+def _reglage_de_la_liste() -> None:
+    """Le choix entre vitesse et exhaustivité, avec son prix affiché.
+
+    Chronométré sur la base réelle : valider un scan prend **0,2 s** avec
+    les seuls produits connus, **1,5 s** avec les 13 644 noms du
+    répertoire national. Ce n'est pas leur poids qui coûte — les
+    raccourcir de 710 à 317 Ko accélère la frappe et ne change rien à la
+    validation — c'est leur **nombre**.
+
+    Personne ne peut trancher ce compromis à la place de l'officine : on
+    le lui pose, chiffres en main. Et **hors du dépliant** : à l'intérieur,
+    la case était invisible tant qu'on ne dépliait pas — or personne ne
+    déplie « base publique des médicaments » pour régler la vitesse de son
+    écran. C'est la même erreur que le bouton d'installation, corrigée une
+    fois de plus.
+    """
+    st.checkbox(
+        "🔎 Proposer TOUS les médicaments pendant la frappe",
+        key="sf_liste_complete",
+        help="Décochée, la liste ne propose que les produits déjà connus "
+             "ici : la validation d'un scan est instantanée (~0,2 s). "
+             "Cochée, elle propose les 13 644 noms du répertoire national, "
+             "et chaque scan prend ~1,5 s. Dans les DEUX cas, taper un nom "
+             "inconnu et valider cherche dans toute la base.")
+    st.caption("Décochée : scan instantané. Cochée : toutes les "
+               "propositions, ~1,3 s de plus par scan.")
+
+
 def _telecharger_la_base() -> None:
     """Télécharge et installe la base publique. Ne lève pas.
 
@@ -1586,6 +1658,7 @@ def _barre_laterale(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
         # la place de ce qu'on regarde tous les jours — et il fallait les
         # dépasser du regard à chaque boîte scannée.
         _base_publique()
+        _reglage_de_la_liste()
         _import_repertoire()
 
         st.divider()
