@@ -14,6 +14,7 @@ complément pré-rempli.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 
 import pandas as pd
@@ -542,7 +543,8 @@ def _traiter_scan() -> None:
     # Cette saisie vient-elle d'un CLIC dans la liste, ou de la frappe ?
     # Après un clic, le champ doit renaître, sans quoi la douchette cesse
     # de répondre (voir `_remonter_le_champ`).
-    medicament = _catalogue_par_libelle().get(brut)
+    medicament = (st.session_state.get("sf_options_par_libelle", {}).get(brut)
+                  or _catalogue_par_libelle().get(brut))
     if medicament:
         _remonter_le_champ()
 
@@ -646,6 +648,7 @@ def _valider_entree() -> None:
     valu confirmation. Sinon la fiche s'ouvre sur ce qui manque, le reste
     déjà rempli.
     """
+    _hors_du_fragment()
     boite = st.session_state.pop("sf_a_orienter", None)
     if not boite:
         return
@@ -681,6 +684,7 @@ def _valider_sortie() -> None:
     boîtes ou en comprimés. La fiche s'ouvre donc sur le lot qui périme le
     plus tôt (FEFO), avec la quantité à régler et le bouton qui valide.
     """
+    _hors_du_fragment()
     boite = st.session_state.pop("sf_a_orienter", None)
     if not boite:
         return
@@ -805,6 +809,44 @@ def _bulles_de_sens() -> None:
                   on_click=_oublier_l_orientation)
 
 
+@st.fragment
+def _zone_de_saisie(inventaire, aujourdhui: date) -> None:
+    """Le champ de scan et les deux bulles, réexécutés SEULS.
+
+    « Il faut une latence inférieure à 1 s. »
+
+    Streamlit réexécute tout l'écran à chaque geste : le bandeau, les
+    onglets, la barre latérale, l'inventaire, les exports. Le calcul
+    Python n'y est pour rien — chronométré, il tient en quelques dizaines
+    de millisecondes — mais renvoyer toute la page au navigateur coûtait
+    à lui seul près de deux secondes.
+
+    Un fragment borne la réexécution à ce qu'il contient. Or biper ne
+    change RIEN : le scan identifie la boîte et l'affiche, sans toucher à
+    l'inventaire. Il n'y a donc aucune raison de redessiner le reste.
+
+    Les bulles, elles, écrivent — et ce qu'elles écrivent doit se voir
+    dans l'inventaire, dans les exports, dans la fiche. Elles lèvent donc
+    ``sf_rerendu_complet``, et l'on redemande alors un rendu entier :
+    le geste rare paie le prix fort, le geste fréquent ne le paie pas.
+    """
+    _champ_unique(inventaire, aujourdhui)
+    _bulles_de_sens()
+    if st.session_state.pop("sf_rerendu_complet", False):
+        st.rerun(scope="app")
+
+
+def _hors_du_fragment() -> None:
+    """Marque qu'un rendu ENTIER est nécessaire après cette action.
+
+    Appelée par tout ce qui modifie l'inventaire ou ouvre une fiche
+    rendue hors du fragment. L'oublier laisserait l'écran afficher un
+    inventaire périmé — et une boîte sortie encore présente à la ligne
+    d'en dessous se lit comme une sortie qui n'a pas marché.
+    """
+    st.session_state["sf_rerendu_complet"] = True
+
+
 def _saisie_manuelle_vierge() -> None:
     st.session_state["sf_en_attente"] = {
         "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
@@ -830,6 +872,62 @@ def _choisir_medicament(medicament: dict) -> None:
     st.session_state["sf_message"] = (
         "ok", f"{medicament.get('libelle') or medicament['nom']} — il ne "
               "reste que la date de péremption à saisir.")
+
+
+def _medicaments_familiers(inventaire, repertoire) -> list:
+    """Les médicaments que CETTE pharmacie manipule, pour la liste du champ.
+
+    « Il faut une latence inférieure à 1 s. »
+
+    Le champ portait le répertoire national — 19 600 boîtes. Chronométré :
+    valider un scan prenait **2,15 s** avec cette liste, **0,14 s** sans.
+    Au moment où l'on valide, la liste change (le code scanné s'y ajoute)
+    et les 19 600 lignes repartent dans le navigateur. Deux secondes, sur
+    le geste le plus répété de la journée.
+
+    La liste ne contient donc plus que ce que la pharmacie a déjà vu : les
+    produits mémorisés au fil des saisies, et ceux présents à l'inventaire.
+    Quelques dizaines de lignes — en dessous de quelques centaines, la
+    liste ne coûte rien.
+
+    **Rien n'est perdu de la recherche.** Taper le nom d'un produit jamais
+    vu et valider cherche toujours dans la base publique entière : c'est
+    `preselectionner` qui répond, et il remplit la fiche si une seule
+    boîte porte ce nom. Seule l'auto-complétion pendant la frappe se
+    limite à ce qu'on connaît — et ce qu'on connaît grandit à chaque
+    boîte enregistrée.
+    """
+    vus = {}
+
+    def _ajouter(cip, nom, dosage, unites):
+        nom = " ".join(str(nom or "").split())
+        if not nom:
+            return
+        libelle = nom + (f" — boîte de {unites}" if unites else "")
+        vus.setdefault(libelle, {
+            "cip": re.sub(r"\D", "", str(cip or "")), "nom": nom,
+            "dosage": " ".join(str(dosage or "").split()),
+            "unites_par_boite": int(unites or 0), "libelle": libelle})
+
+    if repertoire is not None and not repertoire.empty:
+        for _, ligne in repertoire.iterrows():
+            _ajouter(ligne.get("Code CIP"), ligne.get("Nom du produit"),
+                     ligne.get("Dosage"), _entier(ligne.get("Unités par boîte")))
+    if inventaire is not None and not inventaire.empty:
+        for _, ligne in inventaire.iterrows():
+            _ajouter(ligne.get("Code CIP"), ligne.get("Nom du produit"), "",
+                     _entier(ligne.get("Unités par boîte")))
+    return sorted(vus.values(), key=lambda m: m["libelle"])
+
+
+def _entier(valeur) -> int:
+    """Cellule → entier. Une case vide relue d'un fichier vaut NaN."""
+    try:
+        if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
+            return 0
+        return int(float(valeur))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _champ_unique(inventaire, aujourdhui: date) -> None:
@@ -860,11 +958,17 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
     libre, et la douchette continue de fonctionner.
     """
     catalogue = _catalogue()
-    options = _libelles_du_catalogue()
+    _, repertoire = _etat()
+    familiers = _medicaments_familiers(inventaire, repertoire)
+    # Retenu pour la validation : un libellé choisi doit se retrouver.
+    st.session_state["sf_options_par_libelle"] = {
+        m["libelle"]: m for m in familiers}
+    options = [m["libelle"] for m in familiers]
     invite = (
-        "🔦 Douchez la boîte — ou tapez les premières lettres du "
-        f"médicament ({len(catalogue)} boîtes référencées)"
-        if catalogue else
+        f"🔦 Douchez la boîte — ou tapez son nom ({len(options)} produits "
+        "déjà connus ici ; un nom inconnu est cherché dans la base "
+        "publique à la validation)"
+        if options else
         "🔦 Douchez la boîte — ou tapez le nom du médicament "
         "et appuyez sur Entrée")
 
@@ -1527,17 +1631,10 @@ def rendre(etape) -> None:
     etape("1", "Scannez le produit",
           "Douchette ou clavier, puis le sens du mouvement.")
 
-    # LIGNE 1 — LE champ, un seul. Il a longtemps été deux : un champ de
-    # scan, et une liste déroulante en dessous pour chercher par le nom.
-    # Deux barres superposées posent une question à chaque geste —
-    # laquelle ? — et c'est une question de trop devant un comptoir.
-    _champ_unique(inventaire, aujourdhui)
-
-    # LES DEUX BULLES. Elles n'apparaissent qu'une fois une boîte
-    # identifiée, et disparaissent dès qu'on a tranché. Le sens était
-    # auparavant un réglage COLLANT, en haut de l'écran : réglé le matin,
-    # oublié, et chaque bip suivant partait du mauvais côté.
-    _bulles_de_sens()
+    # LE champ et LES BULLES, dans un fragment : biper ne réexécute plus
+    # que cette zone-là. Voir `_zone_de_saisie` — c'est ce qui fait passer
+    # un bip de 4,4 s à moins d'une seconde.
+    _zone_de_saisie(inventaire, aujourdhui)
 
     # Tout le reste est replié. Ce sont des exceptions — étiquette abîmée,
     # boîte sans code-barres, dispensation à l'unité — et une exception
