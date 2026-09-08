@@ -805,7 +805,11 @@ def _bulles_de_sens() -> None:
                       on_click=_valider_sortie, use_container_width=True,
                       help="La boîte quitte l'inventaire : la fiche "
                            "demandera combien, en boîtes ou en unités.")
-        st.button("Annuler", key="sf_bulle_annuler",
+        # Pleine largeur, sous les deux bulles : on bipe la mauvaise
+        # boîte plus souvent qu'on ne croit, et le geste qui rattrape doit
+        # se voir sans être cherché.
+        st.button("✕  Annuler — ce n'est pas la bonne boîte",
+                  key="sf_bulle_annuler", use_container_width=True,
                   on_click=_oublier_l_orientation)
 
 

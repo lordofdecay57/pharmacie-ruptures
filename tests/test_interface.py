@@ -1406,6 +1406,45 @@ class TestChoisirUnLotOuvreLaQuantite:
             '[data-testid="stNumberInput"] label').all_inner_texts()
         assert any("Boîtes à retirer" in e for e in etiquettes), etiquettes
 
+    def test_annuler_se_voit(self, page_deux_lots):
+        """« Agrandir et mettre en évidence le bouton Annuler. »
+
+        Il avait été traité en lien discret, pour ne pas passer pour un
+        troisième choix à côté d'Entrée et de Sortie. C'était trop
+        discret : on bipe la mauvaise boîte plus souvent qu'on ne croit,
+        et le geste qui rattrape doit se voir.
+
+        Mesuré sur le rendu, pas sur la règle CSS : un bouton peut être
+        déclaré grand et rester écrasé par une règle plus forte.
+        """
+        page = page_deux_lots
+        _saisir(page, "3400930000011", attente=5000)
+        bouton = page.locator(".st-key-sf_bulle_annuler button")
+        assert bouton.count() == 1, "le bouton Annuler a disparu"
+        assert "Annuler" in bouton.first.inner_text()
+        taille = page.evaluate(
+            """() => {
+                const b = document.querySelector(
+                    '.st-key-sf_bulle_annuler button');
+                const e = document.querySelector(
+                    '.st-key-sf_bulle_entree button');
+                if (!b || !e) return null;
+                const rb = b.getBoundingClientRect();
+                return {hauteur: rb.height, largeur: rb.width,
+                        police: parseFloat(getComputedStyle(
+                            b.querySelector('p') || b).fontSize),
+                        bord: getComputedStyle(b).borderTopWidth,
+                        largeur_bulle: e.getBoundingClientRect().width};
+            }""")
+        assert taille, "boutons introuvables"
+        # Un lien discret fait ~20 px de haut et n'a pas de bordure.
+        assert taille["hauteur"] >= 40, taille
+        assert taille["police"] >= 15, taille
+        assert float(taille["bord"].rstrip("px")) >= 2, taille
+        # Aussi large que les deux bulles réunies : il est dessous, pleine
+        # largeur — impossible à manquer, sans leur voler la vedette.
+        assert taille["largeur"] > taille["largeur_bulle"], taille
+
     def test_la_douchette_repond_encore_APRES_un_clic(self, page_deux_lots):
         """Le bug que ce test a débusqué, et il coûtait cher.
 
