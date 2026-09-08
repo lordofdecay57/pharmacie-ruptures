@@ -422,6 +422,34 @@ rester silencieux : c'est ce qui fait croire à une panne.
 La barre, elle, propose toujours le **catalogue national** : on identifie
 une boîte avant de savoir ce qu'on va en faire.
 
+#### Combien de temps cela prend, mesuré
+
+Chronométré dans un navigateur, sur une base de **19 600 boîtes** et un
+inventaire de 40 lots :
+
+| Geste | v6.28 | **v6.29** |
+|---|---|---|
+| Premier affichage de l'écran | 17,1 s | **5,5 s** |
+| Biper une boîte → les bulles | 4,4 s | 4,4 s |
+| Cliquer une bulle | 0,9 s | 0,9 s |
+| Changer le classement | 0,9 s | 0,9 s |
+
+La liste des libellés part dans le navigateur à chaque interaction. Elle
+était **reconstruite** à chaque fois : Streamlit la voyait donc comme
+nouvelle et renvoyait les 19 600 lignes au lieu d'une référence. Elle est
+désormais figée avec le reste du catalogue, une fois par chargement de la
+base.
+
+> **Ce qui reste** : biper coûte encore ~4,4 s, contre **1,9 s** si le champ
+> ne portait pas le catalogue entier (mesuré à 200 lignes comme à zéro —
+> en dessous de quelques centaines d'entrées, la liste ne coûte rien). Ces
+> 2,5 s sont le prix de la recherche instantanée sur tout le répertoire
+> national : au moment où l'on valide, la liste change — le code scanné s'y
+> ajoute — et les 19 600 lignes repartent.
+>
+> Le plancher de **1,9 s** est celui de Streamlit lui-même, qui réexécute
+> tout l'écran à chaque interaction.
+
 Un nom tapé qui ne correspond à **aucune** ligne de l'inventaire le dit,
 et parle d'inventaire — « code non reconnu » n'a aucun sens pour un nom. Un
 nom qui en désigne **plusieurs** les nomme et laisse choisir : sortir « le
