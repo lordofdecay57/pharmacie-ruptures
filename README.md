@@ -424,31 +424,46 @@ une boîte avant de savoir ce qu'on va en faire.
 
 #### Combien de temps cela prend, mesuré
 
+> « Il faut une latence inférieure à 1 s. »
+
 Chronométré dans un navigateur, sur une base de **19 600 boîtes** et un
-inventaire de 40 lots :
+inventaire de 40 lots — la taille réelle de l'officine. La mesure va de la
+**validation** à l'affichage : taper le code n'est pas de la latence
+applicative (une douchette tape en 30 ms).
 
-| Geste | v6.28 | **v6.29** |
+| Geste | v6.28 | **v6.30** |
 |---|---|---|
-| Premier affichage de l'écran | 17,1 s | **5,5 s** |
-| Biper une boîte → les bulles | 4,4 s | 4,4 s |
-| Cliquer une bulle | 0,9 s | 0,9 s |
-| Changer le classement | 0,9 s | 0,9 s |
+| **Valider un scan → les bulles** | 2,15 s | **0,37 s** |
+| Cliquer une bulle | 0,92 s | **0,59 s** |
+| Changer le classement | 0,90 s | 0,91 s |
+| Premier affichage de l'écran | 17,1 s | **5,0 s** |
 
-La liste des libellés part dans le navigateur à chaque interaction. Elle
-était **reconstruite** à chaque fois : Streamlit la voyait donc comme
-nouvelle et renvoyait les 19 600 lignes au lieu d'une référence. Elle est
-désormais figée avec le reste du catalogue, une fois par chargement de la
-base.
+Trois choses ont été mesurées avant d'être corrigées :
 
-> **Ce qui reste** : biper coûte encore ~4,4 s, contre **1,9 s** si le champ
-> ne portait pas le catalogue entier (mesuré à 200 lignes comme à zéro —
-> en dessous de quelques centaines d'entrées, la liste ne coûte rien). Ces
-> 2,5 s sont le prix de la recherche instantanée sur tout le répertoire
-> national : au moment où l'on valide, la liste change — le code scanné s'y
-> ajoute — et les 19 600 lignes repartent.
+1. **Les libellés étaient reconstruits à chaque interaction.** Streamlit
+   les voyait donc comme neufs et renvoyait la liste entière au lieu d'une
+   référence — 12 secondes sur le premier affichage.
+2. **Le champ portait le répertoire national.** Au moment où l'on valide,
+   la liste change — le code scanné s'y ajoute — et les 19 600 lignes
+   repartent dans le navigateur. Deux secondes, sur le geste le plus
+   répété de la journée. Le champ ne propose donc plus que les **produits
+   déjà connus ici** : ceux mémorisés au fil des saisies, et ceux présents
+   à l'inventaire. En dessous de quelques centaines d'entrées, la liste ne
+   coûte rien.
+3. **Le reste de l'écran était réexécuté à chaque bip.** Le champ et les
+   bulles vivent maintenant dans un `st.fragment` : biper ne change rien à
+   l'inventaire, il n'y a donc aucune raison de redessiner le tableau, les
+   exports et la barre latérale. Les bulles, elles, écrivent — elles
+   redemandent alors un rendu entier.
+
+> **Rien n'est perdu de la recherche.** Taper le nom d'un produit jamais vu
+> et valider cherche toujours dans la **base publique entière** : elle
+> remplit la fiche si une seule boîte porte ce nom, et nomme les candidats
+> sinon. Seule l'auto-complétion *pendant la frappe* se limite à ce qu'on
+> connaît — et ce qu'on connaît grandit à chaque boîte enregistrée.
 >
-> Le plancher de **1,9 s** est celui de Streamlit lui-même, qui réexécute
-> tout l'écran à chaque interaction.
+> Le calcul Python n'a jamais été en cause : chronométré sur 40 lots, le
+> PDF prend 32 ms et tout le reste moins de 10 ms.
 
 Un nom tapé qui ne correspond à **aucune** ligne de l'inventaire le dit,
 et parle d'inventaire — « code non reconnu » n'a aucun sens pour un nom. Un

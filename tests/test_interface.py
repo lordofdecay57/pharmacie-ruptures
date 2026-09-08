@@ -109,6 +109,16 @@ def application_avec_base(tmp_path_factory):
         "3400949497294;ANASTROZOLE ACCORD 1 mg, comprimé pelliculé;"
         "plaquette de 30 comprimés\n",
         encoding="utf-8-sig")
+    # Le répertoire de la pharmacie : c'est LUI qui alimente la liste du
+    # champ depuis que le catalogue national en a été retiré (deux
+    # secondes sur chaque validation). La base publique, elle, continue
+    # de nommer un CIP scanné et de répondre à un nom inconnu.
+    (travail / "stock_ferme_produits.csv").write_text(
+        "Code CIP;Nom du produit;Dosage;Unités par boîte\n"
+        "3400935955838;DOLIPRANE 1000 mg, comprimé;;8\n"
+        "3400956369553;DOLIPRANE 1000 mg, comprimé;;100\n"
+        "3400949497294;ANASTROZOLE ACCORD 1 mg, comprimé pelliculé;;30\n",
+        encoding="utf-8-sig")
     yield from _lancer(travail)
 
 
@@ -832,7 +842,10 @@ class TestSaisieAssistee:
         invite = page_avec_base.locator(
             ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
         assert "Douchez la boîte" in invite, invite
-        assert "premières lettres" in invite, invite
+        # L'autre geste : taper un nom. L'invite dit aussi jusqu'où va la
+        # liste, et que le reste se cherche à la validation — sans quoi on
+        # croirait avoir perdu le répertoire national.
+        assert "tapez son nom" in invite, invite
 
     def test_la_douchette_ecrit_toujours_dans_ce_champ(self, page_avec_base):
         """LE risque de la fusion, et il porte sur le geste principal.
@@ -866,24 +879,28 @@ class TestSaisieAssistee:
         assert "1 boîte" in page_avec_base.content(), (
             "la boîte n'est pas entrée après le clic sur la bulle")
 
-    def test_la_liste_envoyee_au_navigateur_est_FIGEE(self, page_avec_base):
-        """« Comment améliorer la fluidité, c'est un peu lent ? »
+    def test_la_liste_ne_porte_QUE_les_produits_connus(self, page_avec_base):
+        """« Il faut une latence inférieure à 1 s. »
 
-        Cette liste part dans le navigateur à chaque interaction. La
-        reconstruire à chaque fois la rend NOUVELLE aux yeux de Streamlit,
-        qui renvoie alors les 19 600 lignes au lieu d'une référence :
-        chronométré sur une base réelle, le premier affichage passait de
-        5,5 s à 17,1 s.
+        Le champ portait le répertoire national — 19 600 boîtes.
+        Chronométré : valider un scan prenait **2,15 s** avec cette liste,
+        **0,14 s** sans. Au moment où l'on valide, la liste change (le
+        code scanné s'y ajoute) et les 19 600 lignes repartent dans le
+        navigateur — deux secondes, sur le geste le plus répété du jour.
 
-        Le test porte sur l'objet Python, pas sur le rendu : c'est son
-        identité — le fait que ce soit deux fois LE MÊME objet — qui
-        décide, et cela ne se voit pas à l'écran.
+        Elle ne contient donc plus que ce que la pharmacie a déjà vu. Le
+        test le vérifie par le NOMBRE : trois produits connus ici, et une
+        base publique qui en compte autant — si la liste repassait au
+        catalogue, elle ne changerait pas de taille sur cette petite
+        base, mais l'invite, elle, ne parlerait plus de « produits déjà
+        connus ici ».
         """
-        import ui_stock_ferme
-        source = Path(ui_stock_ferme.__file__).read_text(encoding="utf-8")
-        assert "options = _libelles_du_catalogue()" in source, (
-            "les libellés sont reconstruits à chaque interaction")
-        assert 'st.session_state["sf_base_libelles"]' in source
+        invite = page_avec_base.locator(
+            ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
+        assert "produits déjà connus ici" in invite, invite
+        # Et la recherche complète reste promise, sinon on croirait avoir
+        # perdu le reste du répertoire national.
+        assert "base publique" in invite, invite
 
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
