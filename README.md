@@ -456,6 +456,38 @@ Trois choses ont été mesurées avant d'être corrigées :
    exports et la barre latérale. Les bulles, elles, écrivent — elles
    redemandent alors un rendu entier.
 
+#### Le répertoire national dans la liste : au choix, prix affiché
+
+> « Il faut rétablir la base de données tout en limitant la latence. »
+
+Les deux ne tiennent pas ensemble. Mesuré sur la **vraie base ANSM** :
+
+| Liste dans le champ | Frappe | **Valider un scan** |
+|---|---|---|
+| Produits déjà connus ici *(par défaut)* | 0,18 s | **0,22 s** |
+| Tous les noms, raccourcis (13 644) | 0,38 s | **1,47 s** |
+| Tous les noms, complets (14 360) | 0,78 s | 1,49 s |
+| Toutes les boîtes (19 622) | 1,85 s | 1,97 s |
+
+Ce n'est **pas le poids** qui coûte : raccourcir les libellés de 710 à
+317 Ko accélère la frappe et ne change **rien** à la validation. C'est le
+**nombre** de lignes, et le seuil est vers 6 000 — le répertoire en compte
+le double.
+
+Personne ne peut trancher ce compromis à la place de l'officine. Une case
+de la colonne de gauche l'ouvre : **« 🔎 Proposer TOUS les médicaments
+pendant la frappe »**, avec son prix écrit dessous.
+
+> Elle est **hors du dépliant** « base publique ». À l'intérieur, elle
+> serait invisible tant qu'on ne déplie pas — et personne ne déplie
+> « base publique des médicaments » pour régler la vitesse de son écran.
+> C'est la même erreur que le bouton d'installation, corrigée une fois de
+> plus.
+
+Une ligne par **nom** et non par boîte : les 19 622 présentations se
+ramènent à 13 644 noms, et la forme galénique — « comprimé pelliculé
+sécable » — n'apprend rien qu'on ne lise sur la boîte qu'on tient.
+
 > **« Peut-on garder la base et comparer sans y perdre du temps ? »** —
 > C'est déjà le cas, et la mesure le montre : identifier un CIP bipé dans
 > la base **entière** coûte **0,001 ms**, chercher un nom tapé **7 ms**.
