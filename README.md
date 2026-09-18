@@ -1,7 +1,7 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
 Application **locale** (elle tourne sur votre PC, hors-ligne) organisée en
-**trois modules fonctionnels indépendants** :
+**modules fonctionnels indépendants** :
 
 - **📦 Gestion des stocks en rotation** (`stock_rotation.py`) — calcule un
   **stock min** et un **stock max** par produit à partir du seul cadencier,
@@ -981,6 +981,86 @@ Mais sur un serveur en réseau local **sans mot de passe**, quiconque atteint
 le réseau atteint l'application : c'est acceptable sur un réseau d'officine
 fermé, ce ne l'est pas sur un réseau ouvert. Ne l'exposez pas sur Internet.
 
+## 🛏️ Module 5 — Location & achat (ententes préalables CAFAT)
+
+**Ce que ce module empêche, en une phrase :** qu'une échéance d'entente
+préalable se découvre le jour où la caisse refuse de payer.
+
+Fournir un lit médicalisé, un fauteuil roulant, une VNI ou un
+concentrateur d'oxygène suppose l'accord préalable de la caisse. Cet
+accord **expire** — et passée l'échéance, le matériel reste chez le
+patient sans que personne ne paie plus rien.
+
+📄 **[Cahier des charges complet](CAHIER-DES-CHARGES-LOCATION.md)** —
+règles de calcul, périmètre, et ce que le module ne fait volontairement
+pas.
+
+### Louer ou acheter
+
+Un **dossier** = un patient × un matériel × un mode. Le même patient peut
+louer un lit ET acheter un déambulateur ; il peut même louer un fauteuil
+puis l'acheter — deux dossiers, deux ententes, deux facturations.
+
+|                      | 🛏️ Location                  | 🛒 Achat              |
+| -------------------- | ---------------------------- | --------------------- |
+| Entente préalable    | oui, **renouvelable**        | oui, **une fois**     |
+| Facturation          | **tous les mois**            | **une seule fois**    |
+| Une fois facturé     | redevient dû le mois suivant | **terminé**, plus rien |
+
+Les deux vivent dans le même fichier, avec le même vocabulaire de statuts
+et les mêmes gestes : deux fichiers séparés auraient coupé chaque patient
+en deux.
+
+### Quatre sous-onglets, dans l'ordre des questions
+
+1. **✅ Ententes préalables** — laquelle est accordée, depuis quand,
+   jusqu'à quand, et le geste « l'accord est arrivé ». La date saisie est
+   celle de l'**accord**, pas celle de la demande : c'est d'elle que court
+   la validité.
+2. **💰 Facturations** — ce qui est dû, et **depuis combien de mois**.
+3. **🔁 À renouveler** — ce qui expire sous 30 jours, les expirées en tête.
+4. **🛒 Achats** — leur propre liste : ni « prochaine facturation » ni
+   « mois dus », qui n'ont pas de sens pour un achat.
+
+### Les règles
+
+- **La durée de validité est saisie par dossier**, jamais déduite : la
+  caisse accorde au cas par cas selon le matériel. Une valeur par défaut
+  (6 mois) est proposée, modifiable ligne à ligne.
+- **L'échéance reste dans le calendrier** : le 31 janvier plus un mois est
+  le 28 février, pas le 3 mars. Ajouter 30 jours ferait expirer une
+  entente de six mois cinq jours trop tôt — cinq jours sans prise en
+  charge.
+- **Les mois dus sont comptés**, pas seulement signalés : une location
+  facturée en janvier et oubliée jusqu'en avril, ce sont **trois** mois
+  dus. Afficher « à facturer » sans le nombre ferait encaisser un mois et
+  croire le dossier à jour.
+- **L'alerte tombe 30 jours avant** l'échéance — le temps de revoir le
+  médecin et d'attendre la réponse de la caisse. Réglable dans la barre
+  latérale.
+- **Un achat réglé sort des deux listes** : facturé, il ne revient plus
+  (on facturerait deux fois le même fauteuil), et son entente peut expirer
+  sans conséquence (l'y laisser noierait les vraies échéances).
+
+### Harmonisé par patient
+
+La colonne **Mode** figure dans toutes les listes, et une **vue par
+patient** ouvre le tableau de référence : une ligne par personne,
+locations et achats confondus, le pire statut de ses dossiers en tête.
+
+> Le patient au téléphone ne demande pas « où en est ma location de
+> lit » : il demande **où il en est**.
+
+« Mme DUPONT », « mme dupont » et « Mme Dupont » sont la même personne —
+sans quoi le même patient reviendrait en trois lignes, chacune avec sa
+moitié d'historique.
+
+### Données nominatives
+
+Comme les commandes spéciales, `location.csv` porte des noms de patients :
+il n'est pas versionné, et une mise à jour ne l'écrase jamais. Les mêmes
+réserves de réseau s'appliquent.
+
 ## Architecture
 
 Une seule règle : **la logique métier est strictement séparée de
@@ -1013,9 +1093,10 @@ base_medicaments.py   Identification d'un CIP via la base publique des
 stockage_partage.py   Écriture d'un fichier PARTAGÉ entre plusieurs postes :
   (aucun autre module)  verrou, écriture atomique, empreinte relevée sous le
                         verrou. Ne connaît aucun métier. Partagé par les
-                        modules 3 et 4 — cette mécanique délicate n'existe
-                        qu'à un seul endroit, la dupliquer serait la voir
-                        diverger, et une divergence ici perd des données.
+                        modules 3, 4 et 5 — cette mécanique délicate
+                        n'existe qu'à un seul endroit, la dupliquer serait
+                        la voir diverger, et une divergence ici perd des
+                        données.
 
 stock_ferme.py        MODULE 3 — logique métier pure du stock interne.
   (stockage_partage   Lecture des codes scannés (Data Matrix GS1, CIP13,
@@ -1036,14 +1117,25 @@ commandes_speciales.py MODULE 4 — logique métier pure des commandes
 ui_commandes_speciales.py Interface Streamlit du MODULE 4.
   (+ base_medicaments)
 
+location.py            MODULE 5 — logique métier pure de la location et de
+  (stockage_partage     l'achat de matériel. Ententes préalables CAFAT :
+   seulement)           échéances au calendrier, alerte de renouvellement,
+                        facturation mensuelle ou unique selon le mode,
+                        récapitulatif par patient. Ne connaît que ses
+                        propres dossiers.
+
+ui_location.py         Interface Streamlit du MODULE 5 : quatre
+  (import location)     sous-onglets (ententes, facturations, à renouveler,
+                        achats) et la vue par patient.
+
 app.py                 Interface Streamlit UNIQUEMENT — importe les modules
-  (import les 6)        ci-dessus, propose le sélecteur d'espace de travail
+  (import les autres)   ci-dessus, propose le sélecteur d'espace de travail
                         puis les 2 onglets du parcours « cadencier ».
 ```
 
 `stock_rotation.py` et `moteur_ruptures.py` n'importent **jamais** l'un de
 l'autre : la mutualisation passe exclusivement par `commun.py`.
-`stock_ferme.py` et `commandes_speciales.py` n'importent que
+`stock_ferme.py`, `commandes_speciales.py` et `location.py` n'importent que
 `stockage_partage.py`, et jamais l'un l'autre — un test le vérifie. Le
 rapprochement du module 4 avec les boîtes du stock interne se fait donc en
 LISANT son fichier, sans dépendre de son code. C'est ce qui
@@ -1933,12 +2025,19 @@ pharmacie-ruptures/
 ├── base_medicaments.py      # identification d'un CIP via la base publique
 ├── ui_commun.py             # règles pures de l'interface (sans Streamlit)
 ├── ui_stock_ferme.py        # interface du Module 3 (Streamlit)
+├── commandes_speciales.py   # Module 4 — commandes spéciales (dossiers patients)
+├── ui_commandes_speciales.py # interface du Module 4 (Streamlit)
+├── location.py              # Module 5 — location & achat, ententes CAFAT
+├── ui_location.py           # interface du Module 5 (Streamlit)
+├── stockage_partage.py      # verrou et écriture atomique, partagés 3/4/5
 ├── .streamlit/config.toml   # thème de l'interface (vert pharmacie)
 ├── config.yaml               # mapping + réglages mémorisés (créé au 1er lancement)
 ├── historique_commandes.csv  # historique des analyses de ruptures (créé à la 1re)
 ├── stock_ferme.csv           # inventaire du stock interne (créé au 1er scan)
 ├── base_medicaments.csv      # base publique téléchargée (créée à la demande)
 ├── stock_ferme_produits.csv  # produits mémorisés du stock interne (CIP → nom)
+├── commandes_speciales.csv   # dossiers patients du Module 4 (non versionné)
+├── location.csv              # dossiers de location/achat du Module 5 (non versionné)
 ├── requirements.txt          # dépendances Python
 ├── maj_auto.py              # mise à jour automatique (testable, sans Streamlit)
 ├── presence.py              # qui utilise le dossier partagé en ce moment
@@ -1955,6 +2054,7 @@ pharmacie-ruptures/
 ├── raccourci.py             # la même pose, appelable depuis l'application
 ├── pharmacie.ico            # icône du raccourci (16 → 256 px)
 ├── outils/creer_icone.py    # régénère l'icône (outil de développement)
+├── CAHIER-DES-CHARGES-LOCATION.md  # spécification du Module 5
 ├── README.md
 └── tests/
     ├── test_commun.py        # fonctions partagées (parsing, fichiers, statistiques)
@@ -1962,6 +2062,8 @@ pharmacie-ruptures/
     ├── test_moteur.py         # Module 2 : ruptures, anticipation, priorisation
     ├── test_stock_ferme.py    # Module 3 : Data Matrix, lots, péremptions, exports
     ├── test_base_medicaments.py # identification par CIP (base publique)
+    ├── test_commandes_speciales.py # Module 4 : les deux horloges, la décision
+    ├── test_location.py       # Module 5 : échéances, modes, récapitulatif patient
     ├── test_maj_auto.py       # mise à jour auto : données préservées, app ouverte
     ├── test_ui_commun.py      # règles d'affichage : filtres, exports, historique
     ├── test_invariants.py     # propriétés vraies quelles que soient les données
@@ -1970,7 +2072,7 @@ pharmacie-ruptures/
     └── test_interface.py      # fumée : l'application démarre et répond
 ```
 
-Le test de fumée lance un vrai Streamlit et parcourt les deux espaces dans
+Le test de fumée lance un vrai Streamlit et parcourt les quatre espaces dans
 un navigateur ; il s'ignore tout seul si Playwright n'est pas installé.
 
 ## Où l'application range vos données

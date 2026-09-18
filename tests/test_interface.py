@@ -1554,19 +1554,27 @@ def page_location(tmp_path_factory, pilote):
 
     travail = tmp_path_factory.mktemp("appli_location")
     (travail / "location.csv").write_text(
-        "Patient;Matériel loué;Début de location;Entente préalable;"
+        "Patient;Matériel;Mode;Début de location;Entente préalable;"
         "Validité (mois);Dernière facturation;Notes\n"
         # Entente d'il y a un mois, valable six : largement valide.
-        f"Mme ANNE VALIDE;Lit médicalisé;{il_y_a(40)};{il_y_a(30)};6;"
-        f"{il_y_a(5)};\n"
+        f"Mme ANNE VALIDE;Lit médicalisé;🛏️ Location;{il_y_a(40)};"
+        f"{il_y_a(30)};6;{il_y_a(5)};\n"
         # Entente d'il y a presque six mois : elle entre dans les 30 jours.
-        f"M. PIERRE BIENTOT;Concentrateur O2;{il_y_a(200)};{il_y_a(170)};6;"
-        f"{il_y_a(3)};\n"
+        f"M. PIERRE BIENTOT;Concentrateur O2;🛏️ Location;{il_y_a(200)};"
+        f"{il_y_a(170)};6;{il_y_a(3)};\n"
         # Entente de plus de six mois : expirée, plus prise en charge.
-        f"Mme SOPHIE EXPIREE;VNI;{il_y_a(400)};{il_y_a(300)};6;"
+        f"Mme SOPHIE EXPIREE;VNI;🛏️ Location;{il_y_a(400)};{il_y_a(300)};6;"
         f"{il_y_a(90)};à relancer\n"
         # Aucune entente, jamais facturé : le dossier qu'on vient d'ouvrir.
-        f"M. LUC SANSRIEN;Fauteuil roulant;{il_y_a(10)};;6;;\n",
+        f"M. LUC SANSRIEN;Fauteuil roulant;🛏️ Location;{il_y_a(10)};;6;;\n"
+        # ACHAT RÉGLÉ, entente expirée depuis longtemps : il ne doit
+        # apparaître ni dans « à renouveler » ni dans « à facturer ».
+        f"Mme CLAIRE ACHAT;Déambulateur;🛒 Achat;{il_y_a(300)};{il_y_a(290)};"
+        f"6;{il_y_a(280)};\n"
+        # ACHAT LIVRÉ, JAMAIS RÉGLÉ : le cas qu'aucune date ne rappelle.
+        # Même patiente : c'est elle qui prouve l'harmonisation par patient.
+        f"Mme CLAIRE ACHAT;Lève-personne;🛒 Achat;{il_y_a(20)};{il_y_a(15)};"
+        f"6;;\n",
         encoding="utf-8-sig")
     lanceur = _lancer(travail)
     url = next(lanceur)
@@ -1624,17 +1632,19 @@ class TestEspaceLocation:
         _sans_exception(page_location)
         assert "ententes préalables CAFAT" in page_location.content()
 
-    def test_les_trois_sous_onglets_demandes_sont_la(self, page_location):
+    def test_les_sous_onglets_demandes_sont_la(self, page_location):
         """« Un sous-onglet donnant entente préalable faite la date, puis un
         sous-onglet pour les facturations, et un sous-onglet qui nous
-        donnerait les dossiers à renouveler. » Les trois, dans cet ordre."""
+        donnerait les dossiers à renouveler », puis « un sous-onglet avec
+        achat ». Les quatre, dans cet ordre."""
         libelles = page_location.evaluate(
             """() => [...document.querySelectorAll('[role="tab"]')].map(
                 t => t.innerText.replace(/\\s+/g, ' ').trim())""")
-        assert len(libelles) == 3, libelles
+        assert len(libelles) == 4, libelles
         assert "Ententes préalables" in libelles[0], libelles
         assert "Facturations" in libelles[1], libelles
         assert "À renouveler" in libelles[2], libelles
+        assert "Achats" in libelles[3], libelles
 
     def test_les_dossiers_en_place_sont_affiches(self, page_location):
         contenu = page_location.content()
@@ -1685,7 +1695,8 @@ class TestEspaceLocation:
         _sous_onglet(page_location, "Ententes préalables").first.click()
         page_location.wait_for_timeout(4000)
         page_location.get_by_role(
-            "button", name="Entente préalable faite").first.click()
+            "button", name="✅ Entente préalable faite", exact=True
+        ).first.click()
         page_location.wait_for_timeout(6000)
         _sans_exception(page_location)
         assert "entente accordée le" in page_location.content()
@@ -1708,3 +1719,88 @@ class TestEspaceLocation:
         données nominatives sur GitHub."""
         ignores = (RACINE / ".gitignore").read_text(encoding="utf-8")
         assert "location.csv" in ignores
+
+
+class TestLouerOuAcheter:
+    """« On peut soit acheter soit louer, mais harmonisé par patient. »
+
+    Le fond du sujet : un achat ne se lit pas comme une location. Il se
+    facture une fois, et une fois réglé il ne revient plus — ni dans les
+    facturations, ni dans les renouvellements. Le confondre avec une
+    location ferait facturer deux fois le même fauteuil, et remonter tous
+    les mois un dossier clos.
+    """
+
+    def test_le_sous_onglet_achats_existe_et_les_liste(self, page_location):
+        _sous_onglet(page_location, "Achats").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Déambulateur" in liste, liste
+        assert "Lève-personne" in liste, liste
+
+    def test_un_achat_livre_et_jamais_regle_est_signale(self, page_location):
+        """Aucune date ne viendra le rappeler : c'est l'écran ou rien."""
+        _sous_onglet(page_location, "Achats").first.click()
+        page_location.wait_for_timeout(4000)
+        assert "achat(s) à facturer" in _panneau_du_sous_onglet(page_location)
+
+    def test_un_achat_regle_ne_revient_pas_dans_les_facturations(
+            self, page_location):
+        """Le fauteuil est payé. L'y laisser ferait le facturer deux fois."""
+        _sous_onglet(page_location, "Facturations").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        # Le lève-personne, jamais réglé, est dû ; le déambulateur, non.
+        assert "Lève-personne" in liste, liste
+        assert "Déambulateur" not in liste.split("Toutes les locations")[0], (
+            liste)
+
+    def test_un_achat_regle_ne_remonte_pas_dans_les_renouvellements(
+            self, page_location):
+        """Son entente a expiré il y a des mois, et c'est sans conséquence :
+        l'y laisser noierait les vraies échéances sous des dossiers clos.
+
+        La preuve se fait sur PIERRE BIENTOT, que rien n'a touché : un test
+        antérieur de ce module a renouvelé la première ligne de la liste,
+        et s'appuyer sur elle ferait dépendre celui-ci de cet ordre."""
+        _sous_onglet(page_location, "À renouveler").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "PIERRE BIENTOT" in liste, "la liste est vide"
+        assert "Déambulateur" not in liste, "l'achat réglé y figure encore"
+
+    def test_le_mode_se_lit_dans_les_listes(self, page_location):
+        """Sans lui, il faut retourner au tableau complet pour chaque
+        patient — et c'est ce va-et-vient que ces vues évitent."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Location" in liste, liste
+        assert "Achat" in liste, liste
+
+    def test_la_vue_par_patient_reunit_ses_deux_modes(self, page_location):
+        """Le patient au téléphone ne demande pas « où en est ma location
+        de lit » : il demande où il en est. Mme CLAIRE ACHAT a deux
+        dossiers — ils doivent tenir sur UNE ligne."""
+        _sans_exception(page_location)
+        contenu = page_location.content()
+        assert "Vue par patient" in contenu
+        # 5 patients pour 6 dossiers : les deux achats de Mme CLAIRE ACHAT
+        # sont réunis. Le nombre est dans le titre du dépliant.
+        assert "5 personne(s) suivie(s)" in contenu, [
+            l for l in contenu.split("<") if "personne(s)" in l]
+
+    def test_le_bandeau_distingue_loue_et_achete(self, page_location):
+        assert "loué(s)" in page_location.content()
+        assert "acheté(s)" in page_location.content()
+
+    def test_le_mode_est_une_liste_fermee_dans_le_tableau(self):
+        """« loc. », « LOCATION » ou « louée » tapés à la main sortiraient
+        le dossier de son sous-onglet sans que rien ne le signale.
+
+        Contrôle sur la source : c'est une décision d'ergonomie, et le
+        tableau de référence n'est pas toujours à l'écran."""
+        source = (RACINE / "ui_location.py").read_text(encoding="utf-8")
+        assert "SelectboxColumn" in source
+        assert "options=list(loc.MODES)" in source

@@ -1,13 +1,29 @@
 # -*- coding: utf-8 -*-
-"""Module 5 — Location de matériel médical, et ententes préalables CAFAT.
+"""Module 5 — Location ET achat de matériel, ententes préalables CAFAT.
 
-Louer un lit médicalisé, un fauteuil roulant ou un concentrateur
+Fournir un lit médicalisé, un fauteuil roulant ou un concentrateur
 d'oxygène à un patient suppose l'accord préalable de la caisse. Cet
 accord — l'**entente préalable** — a une date et une durée, et il
-**expire**. Passée l'échéance, la location n'est plus prise en charge :
+**expire**. Passée l'échéance, la fourniture n'est plus prise en charge :
 le matériel reste chez le patient et plus personne ne la paie.
 
-Trois questions se posent donc en permanence, et ce sont les trois vues
+Le matériel se **loue** ou s'**achète**, et le même patient peut faire les
+deux. Les deux passent par une entente préalable ; ce qui les sépare vient
+après :
+
+======================  ========================  =======================
+                        🛏️ Location                🛒 Achat
+======================  ========================  =======================
+Entente préalable       oui, et renouvelable      oui, une fois
+Facturation             tous les mois             une seule fois
+Une fois réglé          recommence le mois suivant   terminé, plus rien
+======================  ========================  =======================
+
+Les deux vivent dans le MÊME dossier, avec le même vocabulaire de
+statuts : deux fichiers séparés auraient coupé chaque patient en deux, et
+il aurait fallu le chercher deux fois pour répondre à « où en suis-je ? ».
+
+Quatre questions se posent donc en permanence, et ce sont les quatre vues
 du module :
 
 1. **où en sont les ententes ?** — laquelle est accordée, depuis quand,
@@ -16,7 +32,9 @@ du module :
    et une facturation oubliée ne se rattrape pas toute seule ;
 3. **que faut-il renouveler ?** — monter un dossier prend du temps :
    ordonnance, accord du médecin, envoi à la caisse. Une échéance vue le
-   jour où elle tombe est une échéance manquée.
+   jour où elle tombe est une échéance manquée ;
+4. **où en sont les achats ?** — ni mensuels ni renouvelables, ils se
+   perdraient dans des listes faites pour des échéances qui reviennent.
 
 **La durée de validité est saisie par dossier**, et non déduite d'une
 règle : la caisse l'accorde au cas par cas selon le matériel, et inventer
@@ -53,9 +71,20 @@ _journal = logging.getLogger("pharmacie.location")
 #: se déduit, et n'a donc pas sa place dans le fichier : une valeur
 #: enregistrée qui se déduit finit par contredire ce dont elle est déduite.
 COLONNES_DOSSIER = [
-    "Patient", "Matériel loué", "Début de location",
+    "Patient", "Matériel", "Mode", "Début de location",
     "Entente préalable", "Validité (mois)", "Dernière facturation", "Notes",
 ]
+
+#: LOUER OU ACHETER. Le même patient peut faire les deux, et la caisse
+#: demande une entente préalable dans les deux cas — c'est ce qui permet de
+#: les tenir dans UN SEUL dossier, avec le même vocabulaire de statuts.
+#: Ce qui change est la suite : une location se facture tous les mois et
+#: son entente se renouvelle ; un achat se facture UNE FOIS et, une fois
+#: réglé, il n'expire plus. Les séparer en deux fichiers aurait coupé
+#: chaque patient en deux, et c'est justement ce qu'il ne faut pas.
+MODE_LOCATION = "🛏️ Location"
+MODE_ACHAT = "🛒 Achat"
+MODES = (MODE_LOCATION, MODE_ACHAT)
 
 #: Durée proposée quand on crée un dossier, en mois. Modifiable ligne à
 #: ligne : la caisse accorde au cas par cas, et ce nombre n'est qu'un
@@ -81,6 +110,13 @@ STATUTS_A_TRAITER = (STATUT_A_RENOUVELER, STATUT_EXPIREE)
 STATUT_A_FACTURER = "🟢 À facturer"
 STATUT_FACTURATION_A_JOUR = "🟡 À jour"
 STATUT_JAMAIS_FACTUREE = "⚪ Jamais facturée"
+
+#: L'achat réglé : rien ne reviendra, ni facturation ni renouvellement.
+#: Un « 🟡 À jour » laisserait croire qu'une échéance approche.
+STATUT_ACHAT_REGLE = "✅ Réglé"
+
+#: Les deux statuts qui appellent une facturation, quel que soit le mode.
+STATUTS_A_FACTURER = (STATUT_A_FACTURER, STATUT_JAMAIS_FACTUREE)
 
 TRI_ECHEANCE = "Échéance (au plus proche)"
 TRI_PATIENT = "Patient (A → Z)"
@@ -157,6 +193,19 @@ def parser_mois(valeur, defaut: int = VALIDITE_DEFAUT_MOIS) -> int:
     nombre = pd.to_numeric(pd.Series([valeur]), errors="coerce").fillna(0)
     mois = int(nombre.iloc[0])
     return defaut if mois <= 0 else mois
+
+
+def parser_mode(valeur) -> str:
+    """Loué ou acheté. Tout ce qui n'est pas un achat est une location.
+
+    Le défaut penche du côté de la location parce que c'est le cas le plus
+    fréquent, et surtout parce qu'il est le plus SURVEILLÉ : une location
+    prise pour un achat cesserait d'être facturée tous les mois et
+    disparaîtrait des renouvellements, sans que rien ne le signale.
+    L'inverse ne fait qu'ajouter un dossier dans une liste.
+    """
+    texte = cle_patient(valeur)
+    return MODE_ACHAT if "ACHAT" in texte or "ACHET" in texte else MODE_LOCATION
 
 
 def _mois_texte(valeur, defaut: int = VALIDITE_DEFAUT_MOIS) -> str:
@@ -239,37 +288,52 @@ def statut_entente(entente, validite_mois, aujourdhui: Optional[date] = None,
 # ---------------------------------------------------------------------------
 
 def prochaine_facturation(derniere_facturation,
-                          periode_mois: int = PERIODE_FACTURATION_MOIS):
+                          periode_mois: int = PERIODE_FACTURATION_MOIS,
+                          mode: str = MODE_LOCATION):
     """Date à laquelle la prochaine facturation est due.
 
     ``None`` si le dossier n'a jamais été facturé : elle est due
     **maintenant**, et il n'y a pas de date à attendre.
+
+    ``None`` aussi pour un ACHAT déjà réglé : il ne reviendra pas. Lui
+    calculer une date le ferait remonter tous les mois dans « à facturer »,
+    et on finirait par facturer deux fois le même fauteuil.
     """
     precedente = parser_date(derniere_facturation)
-    if precedente is None:
+    if precedente is None or mode == MODE_ACHAT:
         return None
     return ajouter_mois(precedente, max(1, int(periode_mois)))
 
 
 def jours_avant_facturation(derniere_facturation,
                             aujourdhui: Optional[date] = None,
-                            periode_mois: int = PERIODE_FACTURATION_MOIS) -> int:
+                            periode_mois: int = PERIODE_FACTURATION_MOIS,
+                            mode: str = MODE_LOCATION) -> int:
     """Jours restants avant la prochaine facturation. 0 si elle est due.
 
     Jamais négatif : « facturable depuis 40 jours » et « facturable » ne
     demandent pas deux gestes différents, et un nombre négatif dans une
     colonne se lit mal.
     """
-    prochaine = prochaine_facturation(derniere_facturation, periode_mois)
+    prochaine = prochaine_facturation(derniere_facturation, periode_mois, mode)
     if prochaine is None:
         return 0
     return max(0, (prochaine - (aujourdhui or date.today())).days)
 
 
 def statut_facturation(derniere_facturation, aujourdhui: Optional[date] = None,
-                       periode_mois: int = PERIODE_FACTURATION_MOIS) -> str:
+                       periode_mois: int = PERIODE_FACTURATION_MOIS,
+                       mode: str = MODE_LOCATION) -> str:
+    """Où en est la facturation — et elle ne se lit pas pareil selon le mode.
+
+    Une LOCATION revient tous les mois. Un ACHAT se facture une fois : une
+    fois réglé il est « ✅ Réglé », pas « à jour » — « à jour » laisserait
+    croire qu'une échéance approche.
+    """
     if parser_date(derniere_facturation) is None:
         return STATUT_JAMAIS_FACTUREE
+    if mode == MODE_ACHAT:
+        return STATUT_ACHAT_REGLE
     if jours_avant_facturation(derniere_facturation, aujourdhui,
                                periode_mois) == 0:
         return STATUT_A_FACTURER
@@ -277,7 +341,8 @@ def statut_facturation(derniere_facturation, aujourdhui: Optional[date] = None,
 
 
 def mois_de_retard(derniere_facturation, aujourdhui: Optional[date] = None,
-                   periode_mois: int = PERIODE_FACTURATION_MOIS) -> int:
+                   periode_mois: int = PERIODE_FACTURATION_MOIS,
+                   mode: str = MODE_LOCATION) -> int:
     """Combien de facturations mensuelles ont été sautées.
 
     Une location facturée en janvier et oubliée jusqu'en avril, ce sont
@@ -285,7 +350,7 @@ def mois_de_retard(derniere_facturation, aujourdhui: Optional[date] = None,
     ferait encaisser un mois et croire le dossier à jour.
     """
     precedente = parser_date(derniere_facturation)
-    if precedente is None:
+    if precedente is None or mode == MODE_ACHAT:
         return 0
     aujourdhui = aujourdhui or date.today()
     periode = max(1, int(periode_mois))
@@ -301,7 +366,7 @@ def mois_de_retard(derniere_facturation, aujourdhui: Optional[date] = None,
 # ---------------------------------------------------------------------------
 
 COLONNES_VUE = [
-    "Entente", "Patient", "Matériel loué", "Entente préalable",
+    "Entente", "Patient", "Matériel", "Mode", "Entente préalable",
     "Validité (mois)", "Échéance", "Jours avant échéance",
     "Facturation", "Dernière facturation", "Prochaine facturation",
     "Mois dus", "Début de location", "Notes",
@@ -309,13 +374,27 @@ COLONNES_VUE = [
 
 #: Ce qu'on LIT dans chaque sous-onglet. Le détail reste disponible — il
 #: change simplement de vue.
-COLONNES_ENTENTES = ["Entente", "Patient", "Matériel loué",
+#:
+#: « Mode » figure dans TOUTES : une liste où l'on ne voit pas si la ligne
+#: est louée ou achetée oblige à retourner au tableau complet pour chaque
+#: patient — et c'est exactement le va-et-vient que ces vues évitent.
+COLONNES_ENTENTES = ["Entente", "Patient", "Matériel", "Mode",
                      "Entente préalable", "Échéance"]
-COLONNES_FACTURATION = ["Facturation", "Patient", "Matériel loué",
+COLONNES_FACTURATION = ["Facturation", "Patient", "Matériel", "Mode",
                         "Dernière facturation", "Prochaine facturation",
                         "Mois dus"]
-COLONNES_RENOUVELLEMENT = ["Entente", "Patient", "Matériel loué",
+COLONNES_RENOUVELLEMENT = ["Entente", "Patient", "Matériel", "Mode",
                            "Échéance", "Jours avant échéance"]
+
+#: L'achat : ni « prochaine facturation » ni « mois dus » — il n'y en a
+#: pas. Montrer deux colonnes vides ferait douter d'une panne.
+COLONNES_ACHATS = ["Entente", "Patient", "Matériel", "Entente préalable",
+                   "Échéance", "Facturation", "Dernière facturation"]
+
+#: Le récapitulatif par patient : une ligne par personne, tous modes
+#: confondus. C'est la vue qu'on ouvre quand le patient est au téléphone.
+COLONNES_PATIENT = ["Patient", "Locations", "Achats", "Entente",
+                    "À renouveler", "À facturer", "Mois dus"]
 
 #: Ce qu'on CORRIGE : uniquement ce qui a été saisi à la main. Les statuts
 #: et les échéances se déduisent — les afficher dans un tableau modifiable
@@ -340,22 +419,25 @@ def vue_affichable(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
         validite = parser_mois(ligne.get("Validité (mois)"), validite_defaut)
         fin = echeance(entente, validite, validite_defaut)
         derniere = parser_date(ligne.get("Dernière facturation"))
+        mode = parser_mode(ligne.get("Mode"))
         lignes.append({
             "Entente": statut_entente(entente, validite, aujourdhui, alerte_j,
                                       validite_defaut),
             "Patient": _texte(ligne.get("Patient")),
-            "Matériel loué": _texte(ligne.get("Matériel loué")),
+            "Matériel": _texte(ligne.get("Matériel")),
+            "Mode": mode,
             "Entente préalable": entente,
             "Validité (mois)": validite,
             "Échéance": fin,
             "Jours avant échéance": jours_avant_echeance(
                 entente, validite, aujourdhui, validite_defaut),
             "Facturation": statut_facturation(derniere, aujourdhui,
-                                              periode_mois),
+                                              periode_mois, mode),
             "Dernière facturation": derniere,
             "Prochaine facturation": prochaine_facturation(derniere,
-                                                           periode_mois),
-            "Mois dus": mois_de_retard(derniere, aujourdhui, periode_mois),
+                                                           periode_mois, mode),
+            "Mois dus": mois_de_retard(derniere, aujourdhui, periode_mois,
+                                       mode),
             "Début de location": parser_date(ligne.get("Début de location")),
             "Notes": _texte(ligne.get("Notes")),
         })
@@ -407,8 +489,21 @@ def pour_affichage(vue: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Les trois questions, chacune sa liste
+# Les questions, chacune sa liste
 # ---------------------------------------------------------------------------
+
+def du_mode(vue: pd.DataFrame, mode: str) -> pd.DataFrame:
+    """Les lignes d'un seul mode, dans une vue DÉJÀ calculée.
+
+    Filtrer la vue plutôt que le dossier : le classement, les statuts et
+    les comptes à rebours sont alors calculés une seule fois, et les deux
+    modes restent rigoureusement d'accord entre eux — c'est ce qui permet
+    de les lire côte à côte sans se demander lequel dit vrai.
+    """
+    if vue is None or vue.empty:
+        return pd.DataFrame(columns=COLONNES_VUE)
+    return vue[vue["Mode"] == mode].reset_index(drop=True)
+
 
 def a_renouveler(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                  alerte_j: int = ALERTE_RENOUVELLEMENT_J,
@@ -422,24 +517,33 @@ def a_renouveler(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                          validite_defaut)
     if vue.empty:
         return vue
-    return vue[vue["Entente"].isin(STATUTS_A_TRAITER)].reset_index(drop=True)
+    a_traiter = vue["Entente"].isin(STATUTS_A_TRAITER)
+    # Un achat RÉGLÉ ne se renouvelle pas : le fauteuil est payé, il est au
+    # patient. Son entente a servi, elle peut expirer sans que personne
+    # n'ait rien à faire — l'y laisser noierait les vraies échéances sous
+    # des dossiers clos.
+    a_traiter &= ~((vue["Mode"] == MODE_ACHAT)
+                   & (vue["Facturation"] == STATUT_ACHAT_REGLE))
+    return vue[a_traiter].reset_index(drop=True)
 
 
 def a_facturer(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                periode_mois: int = PERIODE_FACTURATION_MOIS,
                alerte_j: int = ALERTE_RENOUVELLEMENT_J,
                validite_defaut: int = VALIDITE_DEFAUT_MOIS) -> pd.DataFrame:
-    """Les locations dont la facturation du mois est due.
+    """Ce qui est dû : le mois des locations, et les achats jamais réglés.
 
-    Jamais facturées comprises : c'est le cas le plus facile à oublier,
-    puisqu'aucune date ne vient le rappeler.
+    Jamais facturés compris : c'est le cas le plus facile à oublier,
+    puisqu'aucune date ne vient le rappeler. Un achat livré et jamais
+    facturé y reste jusqu'à ce qu'il soit réglé — puis il en sort pour de
+    bon, contrairement à une location qui y revient chaque mois.
     """
     vue = vue_affichable(dossier, aujourdhui, TRI_ECHEANCE, alerte_j,
                          validite_defaut, periode_mois)
     if vue.empty:
         return vue
-    dues = vue["Facturation"].isin((STATUT_A_FACTURER, STATUT_JAMAIS_FACTUREE))
-    return vue[dues].reset_index(drop=True)
+    return vue[vue["Facturation"].isin(STATUTS_A_FACTURER)].reset_index(
+        drop=True)
 
 
 def resume(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
@@ -450,35 +554,111 @@ def resume(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
     vue = vue_affichable(dossier, aujourdhui, TRI_ECHEANCE, alerte_j,
                          validite_defaut, periode_mois)
     if vue.empty:
-        return {"dossiers": 0, "a_renouveler": 0, "expirees": 0,
-                "a_facturer": 0, "mois_dus": 0}
+        return {"dossiers": 0, "patients": 0, "locations": 0, "achats": 0,
+                "a_renouveler": 0, "expirees": 0, "a_facturer": 0,
+                "mois_dus": 0}
+    # « À renouveler » compte ce que la LISTE affiche, achats réglés exclus :
+    # deux nombres qui prétendent dire la même chose et n'y arrivent pas
+    # font douter des deux.
+    renouvellements = a_renouveler(dossier, aujourdhui, alerte_j,
+                                   validite_defaut)
     return {
         "dossiers": len(vue),
-        "a_renouveler": int((vue["Entente"] == STATUT_A_RENOUVELER).sum()),
-        "expirees": int((vue["Entente"] == STATUT_EXPIREE).sum()),
-        "a_facturer": int(vue["Facturation"].isin(
-            (STATUT_A_FACTURER, STATUT_JAMAIS_FACTUREE)).sum()),
+        "patients": len({cle_patient(p) for p in vue["Patient"]}),
+        "locations": int((vue["Mode"] == MODE_LOCATION).sum()),
+        "achats": int((vue["Mode"] == MODE_ACHAT).sum()),
+        "a_renouveler": int((renouvellements["Entente"]
+                             == STATUT_A_RENOUVELER).sum())
+        if not renouvellements.empty else 0,
+        "expirees": int((renouvellements["Entente"] == STATUT_EXPIREE).sum())
+        if not renouvellements.empty else 0,
+        "a_facturer": int(vue["Facturation"].isin(STATUTS_A_FACTURER).sum()),
         "mois_dus": int(pd.to_numeric(vue["Mois dus"],
                                       errors="coerce").fillna(0).sum()),
     }
+
+
+#: L'ordre de gravité des statuts d'entente. Le récapitulatif par patient
+#: retient le PIRE de ses dossiers : si l'un de ses appareils n'est plus
+#: pris en charge, c'est ce qu'il faut voir en ouvrant sa ligne — une
+#: moyenne, ou le premier venu, cacherait exactement ce qui presse.
+_GRAVITE = {STATUT_EXPIREE: 3, STATUT_A_RENOUVELER: 2,
+            STATUT_SANS_ENTENTE: 1, STATUT_ENTENTE_VALIDE: 0}
+
+
+def par_patient(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
+                alerte_j: int = ALERTE_RENOUVELLEMENT_J,
+                validite_defaut: int = VALIDITE_DEFAUT_MOIS,
+                periode_mois: int = PERIODE_FACTURATION_MOIS) -> pd.DataFrame:
+    """Une ligne par patient, locations ET achats confondus.
+
+    C'est la vue qu'on ouvre quand le patient est au téléphone : il ne
+    demande pas « où en est ma location de lit », il demande où il en est.
+    Éclaté en deux listes, il fallait le chercher deux fois et recoller les
+    réponses de tête — et c'est là qu'on oublie le second appareil.
+
+    Le classement met en tête ceux dont une entente est tombée : à quinze
+    patients la liste tient sur un écran, à soixante non.
+    """
+    vue = vue_affichable(dossier, aujourdhui, TRI_PATIENT, alerte_j,
+                         validite_defaut, periode_mois)
+    if vue.empty:
+        return pd.DataFrame(columns=COLONNES_PATIENT)
+    renouvellements = a_renouveler(dossier, aujourdhui, alerte_j,
+                                   validite_defaut)
+    a_renouveler_par_patient = (
+        {} if renouvellements.empty
+        else renouvellements.groupby(
+            [cle_patient(p) for p in renouvellements["Patient"]]).size().to_dict())
+
+    lignes = []
+    for cle in dict.fromkeys(cle_patient(p) for p in vue["Patient"]):
+        siens = vue[[cle_patient(p) == cle for p in vue["Patient"]]]
+        pire = max(siens["Entente"], key=lambda st: _GRAVITE.get(st, 0))
+        lignes.append({
+            "Patient": siens.iloc[0]["Patient"],
+            "Locations": int((siens["Mode"] == MODE_LOCATION).sum()),
+            "Achats": int((siens["Mode"] == MODE_ACHAT).sum()),
+            "Entente": pire,
+            "À renouveler": int(a_renouveler_par_patient.get(cle, 0)),
+            "À facturer": int(siens["Facturation"].isin(
+                STATUTS_A_FACTURER).sum()),
+            "Mois dus": int(pd.to_numeric(siens["Mois dus"],
+                                          errors="coerce").fillna(0).sum()),
+        })
+    recap = pd.DataFrame(lignes, columns=COLONNES_PATIENT)
+    recap["_gravite"] = [-_GRAVITE.get(st, 0) for st in recap["Entente"]]
+    recap["_nom"] = [cle_patient(p) for p in recap["Patient"]]
+    return recap.sort_values(["_gravite", "_nom"], kind="stable").drop(
+        columns=["_gravite", "_nom"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
 # Mouvements sur les dossiers
 # ---------------------------------------------------------------------------
 
-def _index_dossier(dossier: pd.DataFrame, patient: str, materiel: str):
+def _index_dossier(dossier: pd.DataFrame, patient: str, materiel: str,
+                   mode: Optional[str] = None):
     """Ligne de ce patient pour ce matériel, ou ``None``.
 
     Un patient peut louer deux appareils différents : c'est le COUPLE qui
     identifie le dossier, pas le seul nom.
+
+    Le MODE en fait partie dès qu'il est précisé : on loue un fauteuil
+    quelques mois, puis on l'achète. Ce sont deux dossiers — deux ententes,
+    deux facturations — et les confondre écraserait l'historique de la
+    location le jour de l'achat. Sans mode précisé, la première ligne du
+    couple gagne : c'est ce qui permet aux gestes du comptoir de viser un
+    dossier sans avoir à répéter son mode.
     """
     if dossier is None or dossier.empty:
         return None
     cible = (cle_patient(patient), cle_patient(materiel))
     for i, ligne in dossier.iterrows():
         if (cle_patient(ligne.get("Patient")),
-                cle_patient(ligne.get("Matériel loué"))) == cible:
+                cle_patient(ligne.get("Matériel"))) != cible:
+            continue
+        if mode is None or parser_mode(ligne.get("Mode")) == mode:
             return i
     return None
 
@@ -486,23 +666,28 @@ def _index_dossier(dossier: pd.DataFrame, patient: str, materiel: str):
 def ajouter_dossier(dossier: pd.DataFrame, patient: str, materiel: str,
                     debut=None, entente=None,
                     validite_mois: int = VALIDITE_DEFAUT_MOIS,
-                    derniere_facturation=None, notes: str = "") -> pd.DataFrame:
+                    derniere_facturation=None, notes: str = "",
+                    mode: str = MODE_LOCATION) -> pd.DataFrame:
     """Ouvre un dossier, ou complète celui qui existe déjà.
 
     Rouvrir un dossier existant plutôt que d'en créer un second : deux
     lignes pour le même patient et le même appareil, c'est un historique
     coupé en deux et une échéance suivie sur la mauvaise.
+
+    « Le même » s'entend À MODE ÉGAL : un fauteuil loué puis acheté fait
+    deux dossiers, et le second ne doit pas effacer le premier.
     """
     if dossier is None or dossier.empty:
         dossier = dossier_vide()
     dossier = dossier.reindex(columns=COLONNES_DOSSIER).copy()
     patient, materiel = _texte(patient), _texte(materiel)
+    mode = parser_mode(mode)
     if not patient or not materiel:
         return dossier
 
-    existant = _index_dossier(dossier, patient, materiel)
+    existant = _index_dossier(dossier, patient, materiel, mode)
     valeurs = {
-        "Patient": patient, "Matériel loué": materiel,
+        "Patient": patient, "Matériel": materiel, "Mode": mode,
         "Début de location": _iso(debut),
         "Entente préalable": _iso(entente),
         "Validité (mois)": _mois_texte(validite_mois),
@@ -526,40 +711,50 @@ def _iso(valeur) -> str:
 
 
 def _modifier(dossier: pd.DataFrame, patient: str, materiel: str,
-              colonne: str, valeur) -> pd.DataFrame:
+              colonne: str, valeur, mode: Optional[str] = None) -> pd.DataFrame:
     if dossier is None or dossier.empty:
         return dossier_vide()
     dossier = dossier.reindex(columns=COLONNES_DOSSIER).copy()
-    indice = _index_dossier(dossier, patient, materiel)
+    indice = _index_dossier(dossier, patient, materiel, mode)
     if indice is not None:
         dossier.at[indice, colonne] = valeur
     return dossier
 
 
 def enregistrer_entente(dossier: pd.DataFrame, patient: str, materiel: str,
-                        accordee_le, validite_mois: int = VALIDITE_DEFAUT_MOIS
-                        ) -> pd.DataFrame:
-    """L'accord de la caisse est arrivé : sa date, et sa durée."""
+                        accordee_le, validite_mois: int = VALIDITE_DEFAUT_MOIS,
+                        mode: Optional[str] = None) -> pd.DataFrame:
+    """L'accord de la caisse est arrivé : sa date, et sa durée.
+
+    Vaut pour un achat comme pour une location : la caisse donne son accord
+    AVANT, dans les deux cas. Ce qui change est ce qui suit l'accord.
+    """
     dossier = _modifier(dossier, patient, materiel, "Entente préalable",
-                        _iso(accordee_le))
+                        _iso(accordee_le), mode)
     return _modifier(dossier, patient, materiel, "Validité (mois)",
-                     _mois_texte(validite_mois))
+                     _mois_texte(validite_mois), mode)
 
 
 def enregistrer_facturation(dossier: pd.DataFrame, patient: str,
-                            materiel: str, le=None) -> pd.DataFrame:
-    """Le mois vient d'être facturé : l'horloge repart de cette date."""
+                            materiel: str, le=None,
+                            mode: Optional[str] = None) -> pd.DataFrame:
+    """Le mois vient d'être facturé : l'horloge repart de cette date.
+
+    Pour un achat, cette date ne relance rien — elle CLÔT la facturation.
+    C'est la même saisie, et c'est voulu : un seul geste au comptoir, la
+    différence se lit dans le statut qui en résulte.
+    """
     return _modifier(dossier, patient, materiel, "Dernière facturation",
-                     _iso(le or date.today()))
+                     _iso(le or date.today()), mode)
 
 
-def supprimer_dossier(dossier: pd.DataFrame, patient: str,
-                      materiel: str) -> pd.DataFrame:
+def supprimer_dossier(dossier: pd.DataFrame, patient: str, materiel: str,
+                      mode: Optional[str] = None) -> pd.DataFrame:
     """La location est terminée, le matériel est revenu."""
     if dossier is None or dossier.empty:
         return dossier_vide()
     dossier = dossier.reindex(columns=COLONNES_DOSSIER).copy()
-    indice = _index_dossier(dossier, patient, materiel)
+    indice = _index_dossier(dossier, patient, materiel, mode)
     if indice is None:
         return dossier
     return dossier.drop(index=indice).reset_index(drop=True)
@@ -575,14 +770,18 @@ def normaliser_tableau_edite(tableau: pd.DataFrame) -> pd.DataFrame:
     if tableau is None or tableau.empty:
         return dossier_vide()
     propre = tableau.reindex(columns=COLONNES_DOSSIER).copy()
-    for colonne in ("Patient", "Matériel loué", "Notes"):
+    for colonne in ("Patient", "Matériel", "Notes"):
         propre[colonne] = [_texte(v) for v in propre[colonne]]
+    # Une case « Mode » vide — celle d'une ligne ajoutée avec le « + » —
+    # devient une location : c'est le mode surveillé, et donc le défaut
+    # sans danger.
+    propre["Mode"] = [parser_mode(v) for v in propre["Mode"]]
     for colonne in ("Début de location", "Entente préalable",
                     "Dernière facturation"):
         propre[colonne] = [_iso(v) for v in propre[colonne]]
     propre["Validité (mois)"] = [_mois_texte(v)
                                  for v in propre["Validité (mois)"]]
-    garder = (propre["Patient"] != "") & (propre["Matériel loué"] != "")
+    garder = (propre["Patient"] != "") & (propre["Matériel"] != "")
     return propre[garder].reset_index(drop=True)
 
 
@@ -601,6 +800,11 @@ def sauver(dossier: pd.DataFrame, chemin: Path) -> None:
     for colonne in ("Début de location", "Entente préalable",
                     "Dernière facturation"):
         tableau[colonne] = [_iso(v) for v in tableau[colonne]]
+    # Le mode est normalisé À L'ÉCRITURE : un fichier relu ne doit jamais
+    # contenir de troisième valeur, sans quoi ces lignes disparaîtraient
+    # du sous-onglet des achats comme de celui des locations.
+    if not tableau.empty:
+        tableau["Mode"] = [parser_mode(v) for v in tableau["Mode"]]
     stockage_partage.ecrire_atomiquement(tableau, chemin)
 
 
@@ -621,7 +825,7 @@ def charger(chemin: Path) -> pd.DataFrame:
         _journal.warning("Dossiers de location illisibles : %s", chemin)
         return dossier_vide()
     tableau = tableau.reindex(columns=COLONNES_DOSSIER).fillna("")
-    for colonne in ("Patient", "Matériel loué", "Notes"):
+    for colonne in ("Patient", "Matériel", "Notes"):
         tableau[colonne] = tableau[colonne].astype(str)
     return tableau
 

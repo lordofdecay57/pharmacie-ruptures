@@ -30,7 +30,7 @@ AUJOURDHUI = date(2026, 9, 18)
 
 
 def _dossier(**kw):
-    base = {"Patient": "Mme DUPONT", "Matériel loué": "Lit médicalisé",
+    base = {"Patient": "Mme DUPONT", "Matériel": "Lit médicalisé",
             "Début de location": "2026-01-15", "Entente préalable": "2026-03-01",
             "Validité (mois)": 6, "Dernière facturation": "2026-09-01",
             "Notes": ""}
@@ -211,17 +211,17 @@ class TestLesTroisVues:
     def _trois_dossiers(self):
         lignes = [
             # Valide, facturée ce mois-ci : rien à faire.
-            {"Patient": "M. TRANQUILLE", "Matériel loué": "Fauteuil roulant",
+            {"Patient": "M. TRANQUILLE", "Matériel": "Fauteuil roulant",
              "Début de location": "2026-01-01", "Entente préalable": "2026-08-01",
              "Validité (mois)": 12, "Dernière facturation": "2026-09-10",
              "Notes": ""},
             # Échéance dans 30 jours : à renouveler.
-            {"Patient": "Mme URGENTE", "Matériel loué": "Lit médicalisé",
+            {"Patient": "Mme URGENTE", "Matériel": "Lit médicalisé",
              "Début de location": "2026-02-01", "Entente préalable": "2026-04-18",
              "Validité (mois)": 6, "Dernière facturation": "2026-09-05",
              "Notes": ""},
             # Expirée, et trois mois de facturation oubliés.
-            {"Patient": "M. OUBLIE", "Matériel loué": "Concentrateur O2",
+            {"Patient": "M. OUBLIE", "Matériel": "Concentrateur O2",
              "Début de location": "2025-11-01", "Entente préalable": "2026-01-01",
              "Validité (mois)": 6, "Dernière facturation": "2026-06-01",
              "Notes": ""},
@@ -252,7 +252,8 @@ class TestLesTroisVues:
 
     def test_le_resume_compte_juste(self):
         compte = loc.resume(self._trois_dossiers(), AUJOURDHUI)
-        assert compte == {"dossiers": 3, "a_renouveler": 1, "expirees": 1,
+        assert compte == {"dossiers": 3, "patients": 3, "locations": 3,
+                          "achats": 0, "a_renouveler": 1, "expirees": 1,
                           "a_facturer": 1, "mois_dus": 3}
 
     def test_un_dossier_vide_ne_plante_rien(self):
@@ -266,10 +267,10 @@ class TestClassement:
     def test_par_echeance_au_plus_proche(self):
         """Ce qui expire en premier doit sauter aux yeux."""
         lignes = [
-            {"Patient": "B", "Matériel loué": "X", "Début de location": "",
+            {"Patient": "B", "Matériel": "X", "Début de location": "",
              "Entente préalable": "2026-08-01", "Validité (mois)": 12,
              "Dernière facturation": "", "Notes": ""},
-            {"Patient": "A", "Matériel loué": "Y", "Début de location": "",
+            {"Patient": "A", "Matériel": "Y", "Début de location": "",
              "Entente préalable": "2026-01-01", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
         ]
@@ -281,10 +282,10 @@ class TestClassement:
     def test_les_dossiers_sans_entente_passent_en_queue(self):
         """Rien ne presse à leur sujet tant qu'aucun accord n'a été demandé."""
         lignes = [
-            {"Patient": "SANS", "Matériel loué": "X", "Début de location": "",
+            {"Patient": "SANS", "Matériel": "X", "Début de location": "",
              "Entente préalable": "", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
-            {"Patient": "AVEC", "Matériel loué": "Y", "Début de location": "",
+            {"Patient": "AVEC", "Matériel": "Y", "Début de location": "",
              "Entente préalable": "2026-10-01", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
         ]
@@ -295,10 +296,10 @@ class TestClassement:
 
     def test_par_patient(self):
         lignes = [
-            {"Patient": "Zoé", "Matériel loué": "X", "Début de location": "",
+            {"Patient": "Zoé", "Matériel": "X", "Début de location": "",
              "Entente préalable": "2026-01-01", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
-            {"Patient": "Éric", "Matériel loué": "Y", "Début de location": "",
+            {"Patient": "Éric", "Matériel": "Y", "Début de location": "",
              "Entente préalable": "2026-12-01", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
         ]
@@ -394,10 +395,10 @@ class TestMouvements:
 class TestTableauEdite:
     def test_une_ligne_sans_patient_est_abandonnee(self):
         tableau = pd.DataFrame([
-            {"Patient": "", "Matériel loué": "Lit", "Début de location": "",
+            {"Patient": "", "Matériel": "Lit", "Début de location": "",
              "Entente préalable": "", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
-            {"Patient": "Mme MARTIN", "Matériel loué": "", "Début de location": "",
+            {"Patient": "Mme MARTIN", "Matériel": "", "Début de location": "",
              "Entente préalable": "", "Validité (mois)": 6,
              "Dernière facturation": "", "Notes": ""},
         ], columns=loc.COLONNES_DOSSIER)
@@ -477,3 +478,246 @@ class TestIsolation:
         source = (pathlib.Path(__file__).resolve().parent.parent
                   / "location.py").read_text(encoding="utf-8")
         assert "import streamlit" not in source
+
+
+# ---------------------------------------------------------------------------
+# Louer OU acheter : le même dossier, deux suites différentes
+# ---------------------------------------------------------------------------
+
+class TestModes:
+    """« On peut soit acheter soit louer, mais harmonisé par patient. »
+
+    Les deux passent par une entente préalable — c'est ce qui permet de les
+    tenir dans un seul dossier. Ce qui les sépare vient après : la location
+    se facture tous les mois et se renouvelle, l'achat se facture une fois
+    et se termine.
+    """
+
+    def test_ce_qui_n_est_pas_un_achat_est_une_location(self):
+        """Le défaut penche du côté SURVEILLÉ : une location prise pour un
+        achat cesserait d'être facturée tous les mois et sortirait des
+        renouvellements, sans que rien ne le signale."""
+        assert loc.parser_mode("") == loc.MODE_LOCATION
+        assert loc.parser_mode(None) == loc.MODE_LOCATION
+        assert loc.parser_mode("n'importe quoi") == loc.MODE_LOCATION
+        assert loc.parser_mode(loc.MODE_LOCATION) == loc.MODE_LOCATION
+
+    @pytest.mark.parametrize("saisi", ["Achat", "achat", "ACHAT", "acheté",
+                                       "achete", "🛒 Achat"])
+    def test_un_achat_se_reconnait_comme_il_s_ecrit(self, saisi):
+        """Ces cases sont corrigées à la main dans le tableau : « achat »
+        sans majuscule ni accent doit valoir « 🛒 Achat »."""
+        assert loc.parser_mode(saisi) == loc.MODE_ACHAT
+
+    def _achat(self, **kw):
+        base = {"Patient": "Mme ACHETEUSE", "Matériel": "Fauteuil roulant",
+                "Mode": loc.MODE_ACHAT, "Début de location": "2026-01-10",
+                "Entente préalable": "2026-01-05", "Validité (mois)": 6,
+                "Dernière facturation": "2026-01-20", "Notes": ""}
+        base.update(kw)
+        return pd.DataFrame([base], columns=loc.COLONNES_DOSSIER)
+
+    def test_un_achat_regle_ne_revient_pas_tous_les_mois(self):
+        """Une location facturée en janvier redevient due en février. Un
+        fauteuil payé en janvier est payé — lui calculer une échéance ferait
+        facturer deux fois le même fauteuil."""
+        assert loc.statut_facturation("2026-01-20", AUJOURDHUI,
+                                      mode=loc.MODE_ACHAT) == loc.STATUT_ACHAT_REGLE
+        assert loc.prochaine_facturation("2026-01-20",
+                                         mode=loc.MODE_ACHAT) is None
+        assert loc.mois_de_retard("2026-01-20", AUJOURDHUI,
+                                  mode=loc.MODE_ACHAT) == 0
+
+    def test_la_meme_date_en_location_compte_sept_mois_dus(self):
+        """Le contraste, sur la MÊME date : c'est tout l'objet du mode.
+
+        Sept et non huit : facturé le 20 janvier, le dossier redevient dû
+        les 20 février, mars, avril, mai, juin, juillet et août. Celle du
+        20 septembre n'est pas encore échue le 18."""
+        assert loc.mois_de_retard("2026-01-20", AUJOURDHUI,
+                                  mode=loc.MODE_LOCATION) == 7
+
+    def test_un_achat_jamais_facture_reste_du(self):
+        """Livré et jamais facturé : le cas qu'aucune date ne rappelle."""
+        dossier = self._achat(**{"Dernière facturation": ""})
+        assert loc.statut_facturation("", AUJOURDHUI,
+                                      mode=loc.MODE_ACHAT) == loc.STATUT_JAMAIS_FACTUREE
+        assert list(loc.a_facturer(dossier, AUJOURDHUI)["Patient"]) == [
+            "Mme ACHETEUSE"]
+
+    def test_un_achat_regle_sort_de_la_facturation(self):
+        """Et il en sort POUR DE BON, contrairement à une location."""
+        assert loc.a_facturer(self._achat(), AUJOURDHUI).empty
+
+    def test_un_achat_regle_ne_se_renouvelle_pas(self):
+        """Le fauteuil est payé, il est au patient : son entente a servi et
+        peut expirer sans que personne n'ait rien à faire. L'y laisser
+        noierait les vraies échéances sous des dossiers clos."""
+        # Entente du 05/01, six mois → expirée depuis longtemps.
+        assert loc.a_renouveler(self._achat(), AUJOURDHUI).empty
+        assert loc.resume(self._achat(), AUJOURDHUI)["expirees"] == 0
+
+    def test_un_achat_NON_regle_se_renouvelle_encore(self):
+        """Tant qu'il n'est pas facturé, il n'est pas acquis : l'entente
+        doit être valide le jour où la caisse paiera."""
+        pas_regle = self._achat(**{"Dernière facturation": ""})
+        assert list(loc.a_renouveler(pas_regle, AUJOURDHUI)["Patient"]) == [
+            "Mme ACHETEUSE"]
+
+    def test_louer_puis_acheter_fait_deux_dossiers(self):
+        """On loue un fauteuil quelques mois, puis on l'achète. Deux
+        ententes, deux facturations : les confondre écraserait l'historique
+        de la location le jour de l'achat."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. DOUBLE", "Fauteuil",
+                                entente="2026-01-01",
+                                mode=loc.MODE_LOCATION)
+        d = loc.ajouter_dossier(d, "M. DOUBLE", "Fauteuil",
+                                entente="2026-07-01", mode=loc.MODE_ACHAT)
+        assert len(d) == 2
+        assert set(d["Mode"]) == {loc.MODE_LOCATION, loc.MODE_ACHAT}
+
+    def test_rouvrir_le_meme_mode_complete_au_lieu_de_dupliquer(self):
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. DOUBLE", "Fauteuil",
+                                mode=loc.MODE_ACHAT)
+        d = loc.ajouter_dossier(d, "M. DOUBLE", "Fauteuil",
+                                entente="2026-07-01", mode=loc.MODE_ACHAT)
+        assert len(d) == 1
+        assert d.iloc[0]["Entente préalable"] == "2026-07-01"
+
+    def test_un_geste_peut_viser_un_mode_precis(self):
+        """Facturer l'achat ne doit pas relancer l'horloge de la location
+        du même appareil."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. DOUBLE", "Fauteuil",
+                                derniere_facturation="2026-09-01",
+                                mode=loc.MODE_LOCATION)
+        d = loc.ajouter_dossier(d, "M. DOUBLE", "Fauteuil",
+                                mode=loc.MODE_ACHAT)
+        d = loc.enregistrer_facturation(d, "M. DOUBLE", "Fauteuil",
+                                        AUJOURDHUI, mode=loc.MODE_ACHAT)
+        location = d[d["Mode"] == loc.MODE_LOCATION].iloc[0]
+        achat = d[d["Mode"] == loc.MODE_ACHAT].iloc[0]
+        assert location["Dernière facturation"] == "2026-09-01"
+        assert achat["Dernière facturation"] == AUJOURDHUI.isoformat()
+
+    def test_le_mode_se_lit_dans_toutes_les_listes(self):
+        """Une liste où l'on ne voit pas si la ligne est louée ou achetée
+        oblige à retourner au tableau complet pour chaque patient."""
+        for colonnes in (loc.COLONNES_ENTENTES, loc.COLONNES_FACTURATION,
+                         loc.COLONNES_RENOUVELLEMENT):
+            assert "Mode" in colonnes, colonnes
+
+    def test_la_vue_des_achats_tait_ce_qui_n_existe_pas(self):
+        """Ni « prochaine facturation » ni « mois dus » : montrer deux
+        colonnes vides ferait douter d'une panne."""
+        assert "Prochaine facturation" not in loc.COLONNES_ACHATS
+        assert "Mois dus" not in loc.COLONNES_ACHATS
+
+    def test_du_mode_separe_sans_recalculer(self):
+        dossier = pd.concat([self._achat(), _dossier()], ignore_index=True)
+        vue = loc.vue_affichable(dossier, AUJOURDHUI)
+        assert list(loc.du_mode(vue, loc.MODE_ACHAT)["Patient"]) == [
+            "Mme ACHETEUSE"]
+        assert list(loc.du_mode(vue, loc.MODE_LOCATION)["Patient"]) == [
+            "Mme DUPONT"]
+
+    def test_un_mode_inconnu_est_corrige_a_l_ecriture(self, tmp_path):
+        """Un fichier relu ne doit jamais porter de troisième valeur : ces
+        lignes disparaîtraient des DEUX sous-onglets."""
+        dossier = self._achat(Mode="n'importe quoi")
+        chemin = tmp_path / "location.csv"
+        loc.sauver(dossier, chemin)
+        assert loc.charger(chemin).iloc[0]["Mode"] == loc.MODE_LOCATION
+
+    def test_une_ligne_ajoutee_a_la_main_devient_une_location(self):
+        """Le « + » du tableau laisse la case vide : le mode surveillé est
+        le défaut sans danger."""
+        edite = pd.DataFrame(
+            [{"Patient": "M. NEUF", "Matériel": "Déambulateur", "Mode": "",
+              "Début de location": "", "Entente préalable": "",
+              "Validité (mois)": "", "Dernière facturation": "", "Notes": ""}],
+            columns=loc.COLONNES_DOSSIER)
+        assert loc.normaliser_tableau_edite(edite).iloc[0]["Mode"] == (
+            loc.MODE_LOCATION)
+
+
+class TestRecapitulatifParPatient:
+    """« Il faut que ça soit harmonisé par patient. »
+
+    Le patient au téléphone ne demande pas « où en est ma location de
+    lit » : il demande où il en est. Éclaté en deux listes, il fallait le
+    chercher deux fois et recoller les réponses de tête — et c'est là qu'on
+    oublie le second appareil.
+    """
+
+    def _deux_patients(self):
+        lignes = [
+            {"Patient": "Mme MIXTE", "Matériel": "Lit médicalisé",
+             "Mode": loc.MODE_LOCATION, "Début de location": "2026-01-01",
+             "Entente préalable": "2026-08-01", "Validité (mois)": 12,
+             "Dernière facturation": "2026-09-15", "Notes": ""},
+            {"Patient": "mme mixte", "Matériel": "Déambulateur",
+             "Mode": loc.MODE_ACHAT, "Début de location": "2026-02-01",
+             "Entente préalable": "2026-02-01", "Validité (mois)": 6,
+             "Dernière facturation": "2026-02-10", "Notes": ""},
+            # Expirée : c'est elle qui doit remonter en tête.
+            {"Patient": "M. TOMBE", "Matériel": "Concentrateur O2",
+             "Mode": loc.MODE_LOCATION, "Début de location": "2025-11-01",
+             "Entente préalable": "2026-01-01", "Validité (mois)": 6,
+             "Dernière facturation": "2026-09-10", "Notes": ""},
+        ]
+        return pd.DataFrame(lignes, columns=loc.COLONNES_DOSSIER)
+
+    def test_une_ligne_par_patient_tous_modes_confondus(self):
+        recap = loc.par_patient(self._deux_patients(), AUJOURDHUI)
+        assert len(recap) == 2
+        mixte = recap[recap["Patient"].str.upper() == "MME MIXTE"].iloc[0]
+        assert mixte["Locations"] == 1
+        assert mixte["Achats"] == 1
+
+    def test_la_casse_du_nom_ne_coupe_pas_le_patient_en_deux(self):
+        """« Mme MIXTE » et « mme mixte » sont la même personne : deux
+        lignes, c'est un appareil qu'on oublie."""
+        recap = loc.par_patient(self._deux_patients(), AUJOURDHUI)
+        assert list(recap["Patient"].str.upper()).count("MME MIXTE") == 1
+
+    def test_le_pire_statut_du_patient_remonte(self):
+        """Si l'un de ses appareils n'est plus pris en charge, c'est ce
+        qu'il faut voir en ouvrant sa ligne — pas une moyenne."""
+        recap = loc.par_patient(self._deux_patients(), AUJOURDHUI)
+        assert recap.iloc[0]["Patient"] == "M. TOMBE"
+        assert recap.iloc[0]["Entente"] == loc.STATUT_EXPIREE
+
+    def test_le_pire_gagne_meme_quand_il_vient_en_second(self):
+        """Le cas qui distingue « le pire » de « le premier venu » : les
+        dossiers sont classés par échéance, et celui qui n'a PAS d'entente
+        n'en a pas — il passe donc en queue. Prendre le premier dirait
+        « valide » d'un patient dont un appareil n'est couvert par rien."""
+        lignes = [
+            {"Patient": "M. DEUX", "Matériel": "Lit médicalisé",
+             "Mode": loc.MODE_LOCATION, "Début de location": "2026-01-01",
+             "Entente préalable": "2026-09-01", "Validité (mois)": 12,
+             "Dernière facturation": "2026-09-15", "Notes": ""},
+            {"Patient": "M. DEUX", "Matériel": "Déambulateur",
+             "Mode": loc.MODE_LOCATION, "Début de location": "2026-09-01",
+             "Entente préalable": "", "Validité (mois)": 6,
+             "Dernière facturation": "2026-09-15", "Notes": ""},
+        ]
+        dossier = pd.DataFrame(lignes, columns=loc.COLONNES_DOSSIER)
+        vue = loc.vue_affichable(dossier, AUJOURDHUI, loc.TRI_PATIENT)
+        assert vue.iloc[0]["Entente"] == loc.STATUT_ENTENTE_VALIDE
+        recap = loc.par_patient(dossier, AUJOURDHUI)
+        assert recap.iloc[0]["Entente"] == loc.STATUT_SANS_ENTENTE
+
+    def test_l_achat_regle_ne_gonfle_pas_le_a_renouveler(self):
+        recap = loc.par_patient(self._deux_patients(), AUJOURDHUI)
+        mixte = recap[recap["Patient"].str.upper() == "MME MIXTE"].iloc[0]
+        assert mixte["À renouveler"] == 0
+
+    def test_un_dossier_vide_ne_plante_rien(self):
+        assert loc.par_patient(loc.dossier_vide(), AUJOURDHUI).empty
+
+    def test_le_resume_distingue_les_deux_modes(self):
+        compte = loc.resume(self._deux_patients(), AUJOURDHUI)
+        assert compte["locations"] == 2
+        assert compte["achats"] == 1
+        assert compte["patients"] == 2

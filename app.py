@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.33"
+VERSION_APP = "6.34"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -550,7 +550,7 @@ if espace is None:  # premier rendu suivant une déselection
 
 if espace == ESPACE_LOCATION:
     import ui_location
-    _entete_espace("🛏️ Location — ententes préalables CAFAT",
+    _entete_espace("🛏️ Location & achat — ententes préalables CAFAT",
                    variante="location")
     ui_location.rendre(_etape, _tuile_kpi)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module

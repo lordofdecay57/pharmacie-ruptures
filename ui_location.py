@@ -1,16 +1,25 @@
 # -*- coding: utf-8 -*-
-"""Interface du Module 5 — Location de matériel et ententes préalables CAFAT.
+"""Interface du Module 5 — Location, achat, et ententes préalables CAFAT.
 
 Écran autonome, comme les commandes spéciales : il ne dépend d'aucun
 fichier déposé, et toute la logique vit dans ``location.py``. Ce fichier
 ne fait que l'habillage Streamlit.
 
-Ergonomie visée : **trois questions, trois sous-onglets**, dans l'ordre
+Ergonomie visée : **quatre questions, quatre sous-onglets**, dans l'ordre
 où elles se posent au comptoir —
 
 1. l'entente préalable est-elle faite, et jusqu'à quand ;
 2. qu'est-ce qui reste à facturer, et depuis combien de mois ;
-3. quels dossiers faut-il renouveler avant qu'ils n'expirent.
+3. quels dossiers faut-il renouveler avant qu'ils n'expirent ;
+4. où en sont les achats — ni mensuels ni renouvelables, ils se
+   perdraient dans des listes faites pour des échéances qui reviennent.
+
+HARMONISATION PAR PATIENT. Louer et acheter partagent ici tout ce qui peut
+l'être : le même dossier, les mêmes statuts, les mêmes couleurs, les mêmes
+gestes. La colonne « Mode » figure dans chaque liste, et un
+récapitulatif **par patient** ouvre le tableau de référence — parce que le
+patient au téléphone ne demande pas « où en est ma location de lit », il
+demande où il en est.
 
 Le tableau complet vient après : c'est la référence, pas le geste du
 matin. Aucune règle CAFAT n'est inventée ici — la durée de validité est
@@ -36,7 +45,7 @@ _MIME_CSV = "text/csv"
 
 #: Colonnes que l'on peut corriger directement dans le tableau. Les statuts,
 #: les échéances et les mois dus n'en font pas partie : ils se déduisent.
-_COLONNES_EDITABLES = ("Patient", "Matériel loué", "Début de location",
+_COLONNES_EDITABLES = ("Patient", "Matériel", "Mode", "Début de location",
                        "Entente préalable", "Validité (mois)",
                        "Dernière facturation", "Notes")
 
@@ -68,8 +77,23 @@ def _colonnes_vue() -> dict:
         "Facturation": st.column_config.TextColumn(
             "Facturation", width="small", alignment="center"),
         "Patient": st.column_config.TextColumn("Patient", alignment="center"),
-        "Matériel loué": st.column_config.TextColumn(
+        "Matériel": st.column_config.TextColumn(
             "Matériel", alignment="center"),
+        # Une liste fermée, et non du texte libre : « loc. », « LOCATION »
+        # et « louée » sortiraient le dossier de son sous-onglet sans que
+        # rien ne le signale.
+        # Sans `alignment` : `SelectboxColumn` ne l'accepte pas, et le
+        # passer faisait tomber l'écran entier au premier affichage.
+        "Mode": st.column_config.SelectboxColumn(
+            "Mode", options=list(loc.MODES), width="small", required=True),
+        "Locations": st.column_config.NumberColumn(
+            "🛏️ Loué", width="small", alignment="center"),
+        "Achats": st.column_config.NumberColumn(
+            "🛒 Acheté", width="small", alignment="center"),
+        "À renouveler": st.column_config.NumberColumn(
+            "🔁 À renouveler", width="small", alignment="center"),
+        "À facturer": st.column_config.NumberColumn(
+            "💰 À facturer", width="small", alignment="center"),
         "Début de location": st.column_config.TextColumn("Loué depuis", **jour),
         "Entente préalable": st.column_config.TextColumn(
             "Entente faite le", **jour),
@@ -145,8 +169,13 @@ def _appliquer(mouvement):
 
 
 def _libelles(vue: pd.DataFrame) -> list:
-    """« Patient — matériel » : c'est le couple qui identifie un dossier."""
-    return [f"{ligne['Patient']} — {ligne['Matériel loué']}"
+    """« Patient — matériel (mode) » : ce qui identifie un dossier.
+
+    Le mode fait partie du libellé parce qu'il fait partie de l'identité :
+    un fauteuil loué puis acheté donne deux dossiers, et deux lignes
+    identiques dans la liste ne laisseraient aucun moyen de viser la bonne.
+    """
+    return [f"{ligne['Patient']} — {ligne['Matériel']} ({ligne['Mode']})"
             for _, ligne in vue.iterrows()]
 
 
@@ -180,21 +209,29 @@ def _panneau_ajout(dossiers: pd.DataFrame) -> None:
              f"{'s' if nombre > 1 else ''} suivie"
              f"{'s' if nombre > 1 else ''}")
     with st.expander(titre, expanded=ouvert):
-        st.caption("Un dossier par patient ET par matériel : le même patient "
-                   "peut louer un lit et un concentrateur, chacun avec sa "
-                   "propre entente préalable.")
+        st.caption("Un dossier par patient, par matériel ET par mode : le "
+                   "même patient peut louer un lit et acheter un "
+                   "déambulateur, chacun avec sa propre entente préalable. "
+                   "Un fauteuil d'abord loué puis acheté fait lui aussi "
+                   "deux dossiers — deux ententes, deux facturations.")
         _formulaire_nouveau()
 
 
 def _formulaire_nouveau() -> None:
     """Ouvrir un dossier : un patient, un matériel, et les dates connues."""
     with st.form("lo_nouveau", clear_on_submit=True):
-        c1, c2 = st.columns(2)
+        c1, c2, c0 = st.columns([3, 3, 2])
         patient = c1.text_input("Patient", key="lo_nouveau_patient",
                                 placeholder="Nom du patient")
-        materiel = c2.text_input("Matériel loué", key="lo_nouveau_materiel",
+        materiel = c2.text_input("Matériel", key="lo_nouveau_materiel",
                                  placeholder="Lit médicalisé, VNI, "
                                              "concentrateur…")
+        mode = c0.selectbox(
+            "Mode", loc.MODES, key="lo_nouveau_mode",
+            help="Louer ou acheter. Les deux passent par une entente "
+                 "préalable ; seule la suite diffère — la location se "
+                 "facture tous les mois et se renouvelle, l'achat se "
+                 "facture une fois et se termine.")
         c3, c4, c5, c6 = st.columns(4)
         debut = c3.text_input("Début de location", key="lo_nouveau_debut",
                               placeholder="jj/mm/aaaa")
@@ -226,13 +263,13 @@ def _formulaire_nouveau() -> None:
     resultat = _appliquer(lambda courant: loc.ajouter_dossier(
         courant, patient, materiel, debut=debut, entente=entente,
         validite_mois=int(validite), derniere_facturation=facturation,
-        notes=notes))
+        notes=notes, mode=mode))
     if resultat is None:
         return
     st.session_state["lo_ajout_ouvert"] = True
     st.session_state["lo_message"] = (
-        "ok", f"📁 {patient} — {materiel} : dossier enregistré. "
-              f"{len(resultat)} location(s) suivie(s) — le formulaire est "
+        "ok", f"📁 {patient} — {materiel} ({mode}) : dossier enregistré. "
+              f"{len(resultat)} dossier(s) suivi(s) — le formulaire est "
               "vide, vous pouvez enchaîner avec le patient suivant.")
     st.rerun()
 
@@ -279,10 +316,11 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
             step=1, key="lo_entente_validite")
         if st.button("✅ Entente préalable faite", type="primary",
                      use_container_width=True, key="lo_entente_valider"):
-            patient, materiel = ligne["Patient"], ligne["Matériel loué"]
+            patient, materiel = ligne["Patient"], ligne["Matériel"]
+            mode = ligne["Mode"]
             if _appliquer(lambda courant: loc.enregistrer_entente(
                     courant, patient, materiel, accordee,
-                    int(validite))) is not None:
+                    int(validite), mode)) is not None:
                 fin = loc.ajouter_mois(accordee, int(validite))
                 st.session_state["lo_message"] = (
                     "ok", f"✅ {patient} — {materiel} : entente accordée le "
@@ -338,16 +376,22 @@ def _onglet_facturations(dossiers: pd.DataFrame, vue: pd.DataFrame,
             return
         jour = st.date_input("Facturé le", value=aujourdhui,
                              format="DD/MM/YYYY", key="lo_facture_date")
-        if st.button("💰 Mois facturé", type="primary",
+        if st.button("💰 Facturé", type="primary",
                      use_container_width=True, key="lo_facture_valider"):
-            patient, materiel = ligne["Patient"], ligne["Matériel loué"]
+            patient, materiel = ligne["Patient"], ligne["Matériel"]
+            mode = ligne["Mode"]
             if _appliquer(lambda courant: loc.enregistrer_facturation(
-                    courant, patient, materiel, jour)) is not None:
-                suivante = loc.prochaine_facturation(jour)
+                    courant, patient, materiel, jour, mode)) is not None:
+                suivante = loc.prochaine_facturation(jour, mode=mode)
+                # L'achat n'a pas de suite : le dire, plutôt que de laisser
+                # la phrase s'arrêter sur un blanc.
+                suite = (f" Prochaine facturation le {suivante:%d/%m/%Y}."
+                         if suivante is not None
+                         else " Achat réglé : il ne reviendra plus dans les "
+                              "facturations.")
                 st.session_state["lo_message"] = (
-                    "ok", f"💰 {patient} — {materiel} : facturé le "
-                          f"{jour:%d/%m/%Y}. Prochaine facturation le "
-                          f"{suivante:%d/%m/%Y}.")
+                    "ok", f"💰 {patient} — {materiel} ({mode}) : facturé le "
+                          f"{jour:%d/%m/%Y}.{suite}")
             st.rerun()
 
 
@@ -384,6 +428,72 @@ def _onglet_renouvellement(dossiers: pd.DataFrame, aujourdhui: date,
     st.caption("Quand l'accord revient de la caisse, enregistrez-le dans le "
                "sous-onglet « ✅ Ententes préalables » : l'échéance repart "
                "de la date d'accord.")
+
+
+# ---------------------------------------------------------------------------
+# Sous-onglet 4 — Achats
+# ---------------------------------------------------------------------------
+
+def _onglet_achats(vue: pd.DataFrame) -> None:
+    """Ce qui est acheté plutôt que loué : une entente, une facturation.
+
+    Sa propre liste parce qu'il ne se lit pas comme une location : ni
+    « prochaine facturation » ni « mois dus » — montrer deux colonnes vides
+    ferait douter d'une panne — et une fois réglé, il ne revient plus.
+    """
+    achats = loc.du_mode(vue, loc.MODE_ACHAT)
+    st.caption("L'achat passe par la même entente préalable qu'une location, "
+               "mais il se facture **une seule fois** : une fois réglé, il "
+               "ne revient ni dans les facturations ni dans les "
+               "renouvellements.")
+    if achats.empty:
+        st.info("Aucun achat enregistré. Ouvrez un dossier tout en haut de "
+                "l'écran en choisissant le mode « 🛒 Achat ».")
+        return
+
+    a_regler = achats[achats["Facturation"].isin(loc.STATUTS_A_FACTURER)]
+    if a_regler.empty:
+        st.success(f"✅ Les {len(achats)} achat(s) sont réglés.")
+    else:
+        st.markdown(f"**💰 {len(a_regler)} achat(s) à facturer** — livrés, "
+                    "jamais réglés. Aucune date ne viendra le rappeler.")
+        st.dataframe(loc.pour_affichage(a_regler[loc.COLONNES_ACHATS]),
+                     use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
+
+    st.markdown("**Tous les achats**")
+    st.dataframe(loc.pour_affichage(achats[loc.COLONNES_ACHATS]),
+                 use_container_width=True, hide_index=True,
+                 column_config=_colonnes_vue())
+    st.caption("Enregistrez le règlement dans le sous-onglet "
+               "« 💰 Facturations » : c'est le même geste que pour une "
+               "location, et c'est le mode du dossier qui décide de la "
+               "suite.")
+
+
+# ---------------------------------------------------------------------------
+# Le patient d'abord
+# ---------------------------------------------------------------------------
+
+def _recapitulatif_par_patient(dossiers: pd.DataFrame, aujourdhui: date,
+                               alerte: int) -> None:
+    """Une ligne par patient, locations ET achats confondus.
+
+    Le patient au téléphone ne demande pas « où en est ma location de
+    lit » : il demande où il en est. Éclaté en deux listes, il fallait le
+    chercher deux fois et recoller les réponses de tête — et c'est là qu'on
+    oublie le second appareil.
+    """
+    recap = loc.par_patient(dossiers, aujourdhui, alerte)
+    if recap.empty:
+        return
+    with st.expander(f"👤 Vue par patient — {len(recap)} personne(s) suivie(s)",
+                     expanded=True):
+        st.caption("Ceux dont une entente est tombée passent en tête. Un "
+                   "patient = une ligne, qu'il loue, qu'il achète, ou les "
+                   "deux.")
+        st.dataframe(recap, use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
 
 
 # ---------------------------------------------------------------------------
@@ -445,8 +555,9 @@ def _enregistrer_corrections(corrige: pd.DataFrame) -> None:
 
 def _bandeau(resume: dict, tuile) -> None:
     st.markdown('<div class="kpi-row">' + "".join([
-        tuile("Locations suivies", resume["dossiers"], "accent",
-              sous="un dossier par matériel"),
+        tuile("Dossiers suivis", resume["dossiers"], "accent",
+              sous=f'{resume["locations"]} loué(s) · '
+                   f'{resume["achats"]} acheté(s)'),
         tuile("🔁 À renouveler", resume["a_renouveler"],
               "accent" if resume["a_renouveler"] else "",
               sous=f'échéance sous {loc.ALERTE_RENOUVELLEMENT_J} jours'),
@@ -462,7 +573,7 @@ def _bandeau(resume: dict, tuile) -> None:
 def _barre_laterale(dossiers: pd.DataFrame, aujourdhui: date) -> tuple:
     with st.sidebar:
         st.markdown("### 🛏️ Location")
-        st.caption("Matériel loué au patient et ententes préalables CAFAT : "
+        st.caption("Matériel au patient et ententes préalables CAFAT : "
                    "deux horloges par dossier — la validité de l'entente, et "
                    "la facturation mensuelle.")
         aujourdhui = st.date_input("Date du jour", value=aujourdhui,
@@ -510,17 +621,25 @@ def rendre(etape, tuile_kpi) -> None:
           "qui expire bientôt.")
 
     vue = loc.vue_affichable(dossiers, aujourdhui, loc.TRI_ECHEANCE, alerte)
-    onglet_ententes, onglet_factures, onglet_renouveler = st.tabs(
-        ["✅ Ententes préalables", "💰 Facturations", "🔁 À renouveler"])
-    with onglet_ententes:
+    onglets = st.tabs(["✅ Ententes préalables", "💰 Facturations",
+                       "🔁 À renouveler", "🛒 Achats"])
+    with onglets[0]:
         _onglet_ententes(dossiers, vue, aujourdhui)
-    with onglet_factures:
+    with onglets[1]:
         _onglet_facturations(dossiers, vue, aujourdhui)
-    with onglet_renouveler:
+    with onglets[2]:
         _onglet_renouvellement(dossiers, aujourdhui, alerte)
+    with onglets[3]:
+        _onglet_achats(vue)
 
     st.divider()
-    etape("2", "Tous les dossiers", "La référence, corrigeable à la main.")
+    etape("2", "Chaque patient d'un coup d'œil",
+          "Ce qu'il loue, ce qu'il a acheté, et ce qui presse — sur une "
+          "seule ligne.")
+    _recapitulatif_par_patient(dossiers, aujourdhui, alerte)
+
+    st.divider()
+    etape("3", "Tous les dossiers", "La référence, corrigeable à la main.")
     colonne_recherche, colonne_tri = st.columns([3, 2])
     recherche = colonne_recherche.text_input(
         "🔍 Rechercher", key="lo_recherche",
@@ -539,7 +658,8 @@ def rendre(etape, tuile_kpi) -> None:
         # lignes masquées.
         motif = recherche.strip().lower()
         garde = classee.apply(
-            lambda l: motif in f"{l['Patient']} {l['Matériel loué']}".lower(),
+            lambda l: motif in f"{l['Patient']} {l['Matériel']} "
+                               f"{l['Mode']}".lower(),
             axis=1)
         filtree = classee[garde]
         st.dataframe(loc.pour_affichage(filtree[loc.COLONNES_VUE]),
@@ -554,7 +674,7 @@ def rendre(etape, tuile_kpi) -> None:
             st.rerun()
 
     st.divider()
-    etape("3", "Imprimez ou exportez",
+    etape("4", "Imprimez ou exportez",
           "La liste des ententes, à poser à côté du téléphone.")
     st.download_button(
         "📄 Exporter en CSV",
