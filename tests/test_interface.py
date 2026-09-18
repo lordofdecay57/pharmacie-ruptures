@@ -24,12 +24,13 @@ RACINE = Path(__file__).resolve().parent.parent
 NAVIGATEUR = "/opt/pw-browsers/chromium"
 DEMARRAGE_MAX_S = 60
 
-#: Libellés des TROIS espaces de travail, tels qu'affichés dans les onglets.
+#: Libellés des espaces de travail, tels qu'affichés dans les onglets.
 #: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
 ESPACE_CADENCIER = "Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "Stock interne"
 ESPACE_COMMANDES = "Commandes spéciales"
+ESPACE_LOCATION = "Location"
 
 
 def _port_libre() -> int:
@@ -366,7 +367,7 @@ class TestDemarrage:
             """() => [...document.querySelectorAll(
                     '.st-key-espace_travail button')].map(
                 b => b.innerText.replace(/\\s+/g, ' ').trim())""")
-        assert len(libelles) == 3, libelles
+        assert len(libelles) == 4, libelles
         assert ESPACE_STOCK_FERME in libelles[0], libelles
         assert ESPACE_CADENCIER in libelles[1], libelles
         assert ESPACE_STOCK_FERME in _onglet_actif(page, "espace_travail")
@@ -411,12 +412,12 @@ class TestDemarrage:
                             getComputedStyle(p || b).fontSize)};
             })""")
 
-    def test_les_trois_onglets_ont_la_meme_taille(self, page):
+    def test_les_onglets_ont_tous_la_meme_taille(self, page):
         """« Harmonise la taille des onglets avec les deux autres. »
 
         L'onglet du stock interne a été agrandi, puis ramené : deux fois
         plus haut que ses voisins, il déséquilibrait une barre par ailleurs
-        alignée. Les trois gardent donc la même forme — c'est la couleur,
+        alignée. Tous gardent donc la même forme — c'est la couleur,
         et elle seule, qui désigne celui où l'on douche.
 
         Hauteur et taille de police, pas largeur : la barre passe à la
@@ -425,12 +426,12 @@ class TestDemarrage:
         que le hasard de la coupure.
         """
         onglets = self._mesurer_les_onglets(page)
-        assert len(onglets) == 3, onglets
+        assert len(onglets) == 4, onglets
         assert len({o["hauteur"] for o in onglets}) == 1, onglets
         assert len({o["police"] for o in onglets}) == 1, onglets
 
     def test_l_onglet_ou_l_on_douche_ressort_en_couleur(self, page):
-        """Un seul des trois espaces se pratique la douchette à la main :
+        """Un seul des espaces se pratique la douchette à la main :
         celui-là doit se repérer sans lire.
 
         Mesuré pendant que l'onglet est ÉTEINT, et c'est le cas qui compte :
@@ -449,7 +450,7 @@ class TestDemarrage:
         douchette = onglets[0]
         assert "Stock interne" in douchette["texte"], onglets
         assert douchette["bord"] == "rgb(13, 148, 136)", onglets
-        for autre in (onglets[1], onglets[2]):
+        for autre in onglets[1:]:
             assert autre["bord"] != douchette["bord"], onglets
 
     def test_le_libelle_de_l_onglet_tient_en_deux_mots(self, page):
@@ -1183,9 +1184,9 @@ def page_commandes(tmp_path_factory, pilote):
 
 class TestCommandesSpeciales:
     def test_l_espace_est_propose_des_l_arrivee(self, page, application):
-        """Trois espaces, trois onglets visibles : savoir dans lequel on se
-        trouve est la première chose à voir. La page est ouverte ICI : un
-        test qui dépend de l'ordre d'exécution ne prouve rien."""
+        """Un onglet par espace : savoir dans lequel on se trouve est la
+        première chose à voir. La page est ouverte ICI : un test qui dépend
+        de l'ordre d'exécution ne prouve rien."""
         _ouvrir(page, application)
         assert _onglet(page, ESPACE_COMMANDES).count() == 1
 
@@ -1525,3 +1526,281 @@ class TestChoisirUnLotOuvreLaQuantite:
         # curseur, et il l'a ou non selon qu'on vient de le reconstruire.
         assert fonds["bord"] in ("rgb(13, 148, 136)", "rgb(15, 118, 110)"), (
             fonds)
+
+
+# ---------------------------------------------------------------------------
+# Module 5 — Location : ententes préalables CAFAT
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def page_location(tmp_path_factory, pilote):
+    """Onglet ouvert sur la location, quatre dossiers en place.
+
+    Les dossiers sont posés AVANT le démarrage, et chacun couvre un état
+    que l'écran doit nommer : entente valide, entente qui expire dans le
+    délai d'alerte, entente déjà expirée, et dossier sans entente du tout.
+    Un module vide ne prouverait rien — c'est justement ce classement qui
+    fait tout l'intérêt de l'écran.
+
+    Les dates sont calculées à partir du JOUR DU TEST : figées, elles
+    auraient basculé d'un état à l'autre avec le temps, et la suite se
+    serait mise à échouer toute seule un matin.
+    """
+    from datetime import date, timedelta
+    aujourdhui = date.today()
+
+    def il_y_a(jours):
+        return (aujourdhui - timedelta(days=jours)).isoformat()
+
+    travail = tmp_path_factory.mktemp("appli_location")
+    (travail / "location.csv").write_text(
+        "Patient;Matériel;Mode;Début de location;Entente préalable;"
+        "Validité (mois);Dernière facturation;Notes\n"
+        # Entente d'il y a un mois, valable six : largement valide.
+        f"Mme ANNE VALIDE;Lit médicalisé;🛏️ Location;{il_y_a(40)};"
+        f"{il_y_a(30)};6;{il_y_a(5)};\n"
+        # Entente d'il y a presque six mois : elle entre dans les 30 jours.
+        f"M. PIERRE BIENTOT;Concentrateur O2;🛏️ Location;{il_y_a(200)};"
+        f"{il_y_a(170)};6;{il_y_a(3)};\n"
+        # Entente de plus de six mois : expirée, plus prise en charge.
+        f"Mme SOPHIE EXPIREE;VNI;🛏️ Location;{il_y_a(400)};{il_y_a(300)};6;"
+        f"{il_y_a(90)};à relancer\n"
+        # Aucune entente, jamais facturé : le dossier qu'on vient d'ouvrir.
+        f"M. LUC SANSRIEN;Fauteuil roulant;🛏️ Location;{il_y_a(10)};;6;;\n"
+        # ACHAT RÉGLÉ, entente expirée depuis longtemps : il ne doit
+        # apparaître ni dans « à renouveler » ni dans « à facturer ».
+        f"Mme CLAIRE ACHAT;Déambulateur;🛒 Achat;{il_y_a(300)};{il_y_a(290)};"
+        f"6;{il_y_a(280)};\n"
+        # ACHAT LIVRÉ, JAMAIS RÉGLÉ : le cas qu'aucune date ne rappelle.
+        # Même patiente : c'est elle qui prouve l'harmonisation par patient.
+        f"Mme CLAIRE ACHAT;Lève-personne;🛒 Achat;{il_y_a(20)};{il_y_a(15)};"
+        f"6;;\n",
+        encoding="utf-8-sig")
+    lanceur = _lancer(travail)
+    url = next(lanceur)
+
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1500, "height": 1200})
+    onglet.goto(url, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    _onglet(onglet, ESPACE_LOCATION).first.click()
+    onglet.wait_for_timeout(8000)
+    yield onglet
+    navigateur.close()
+    for _ in lanceur:                       # referme Streamlit
+        pass
+
+
+def _sous_onglet(page, libelle: str):
+    """L'un des trois sous-onglets de la location.
+
+    Ciblé par le rôle « tab » : les mêmes mots (« Ententes préalables »,
+    « Facturations ») apparaissent aussi dans les légendes et les titres de
+    section, et « le premier texte trouvé » désignerait l'un d'eux.
+    """
+    return page.get_by_role("tab").filter(has_text=libelle)
+
+
+def _panneau_du_sous_onglet(page) -> str:
+    """Le texte du sous-onglet OUVERT, et de lui seul.
+
+    Le tableau de référence, plus bas sur la même page, liste TOUS les
+    dossiers : une assertion sur `page.content()` y retrouverait n'importe
+    quel patient et ne prouverait donc rien sur le contenu d'une liste.
+
+    Renvoie le HTML et non le texte : les tableaux de Streamlit se peignent
+    dans un canvas, et leurs cellules ne vivent que dans la table ARIA
+    parallèle — invisible, donc absente de `inner_text`.
+    """
+    panneaux = page.get_by_role("tabpanel")
+    for rang in range(panneaux.count()):
+        panneau = panneaux.nth(rang)
+        if panneau.is_visible():
+            return panneau.inner_html()
+    raise AssertionError("aucun sous-onglet ouvert")
+
+
+class TestEspaceLocation:
+    def test_l_espace_est_propose_des_l_arrivee(self, page, application):
+        """Le module ne sert à rien s'il faut savoir qu'il existe. La page
+        est ouverte ICI : un test qui dépend de l'ordre d'exécution ne
+        prouve rien."""
+        _ouvrir(page, application)
+        assert _onglet(page, ESPACE_LOCATION).count() == 1
+
+    def test_l_ecran_s_ouvre_sans_exception(self, page_location):
+        _sans_exception(page_location)
+        assert "ententes préalables CAFAT" in page_location.content()
+
+    def test_les_sous_onglets_demandes_sont_la(self, page_location):
+        """« Un sous-onglet donnant entente préalable faite la date, puis un
+        sous-onglet pour les facturations, et un sous-onglet qui nous
+        donnerait les dossiers à renouveler », puis « un sous-onglet avec
+        achat ». Les quatre, dans cet ordre."""
+        libelles = page_location.evaluate(
+            """() => [...document.querySelectorAll('[role="tab"]')].map(
+                t => t.innerText.replace(/\\s+/g, ' ').trim())""")
+        assert len(libelles) == 4, libelles
+        assert "Ententes préalables" in libelles[0], libelles
+        assert "Facturations" in libelles[1], libelles
+        assert "À renouveler" in libelles[2], libelles
+        assert "Achats" in libelles[3], libelles
+
+    def test_les_dossiers_en_place_sont_affiches(self, page_location):
+        contenu = page_location.content()
+        assert "ANNE VALIDE" in contenu
+        assert "SOPHIE EXPIREE" in contenu
+
+    def test_le_bandeau_compte_les_ententes_expirees(self, page_location):
+        """Une entente expirée n'est plus prise en charge : c'est le chiffre
+        qu'on doit voir sans ouvrir quoi que ce soit."""
+        contenu = page_location.content()
+        assert "Ententes expirées" in contenu
+        assert "À renouveler" in contenu
+
+    def test_un_dossier_sans_entente_est_signale(self, page_location):
+        """Tant que l'accord n'est pas saisi, la location n'est prise en
+        charge par personne — et rien d'autre ne le rappelle."""
+        assert "sans entente préalable" in page_location.content()
+
+    def test_le_sous_onglet_renouveler_liste_les_echeances(self,
+                                                           page_location):
+        """Les expirées d'abord : chaque jour compte double quand la prise
+        en charge est déjà tombée."""
+        _sous_onglet(page_location, "À renouveler").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "SOPHIE EXPIREE" in liste, liste
+        assert "PIERRE BIENTOT" in liste, liste
+        # Celle-ci tient encore : elle n'a rien à faire dans cette liste.
+        assert "ANNE VALIDE" not in liste, liste
+
+    def test_le_sous_onglet_facturation_compte_les_mois_dus(self,
+                                                            page_location):
+        """Une location oubliée depuis trois mois, ce sont trois mois à
+        facturer — pas un. Afficher « à facturer » tout court ferait
+        encaisser un mois et croire le dossier à jour."""
+        _sous_onglet(page_location, "Facturations").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Mois dus" in liste, liste
+        # Jamais facturée : le cas qu'aucune date ne vient rappeler.
+        assert "LUC SANSRIEN" in liste, liste
+
+    def test_enregistrer_une_entente_repousse_l_echeance(self, page_location):
+        """Le geste central du module : l'accord revient de la caisse, et
+        l'échéance repart de SA date — pas de celle de la demande."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        page_location.get_by_role(
+            "button", name="✅ Entente préalable faite", exact=True
+        ).first.click()
+        page_location.wait_for_timeout(6000)
+        _sans_exception(page_location)
+        assert "entente accordée le" in page_location.content()
+
+    def test_le_panneau_d_ajout_est_visible_sans_defiler(self):
+        """Même leçon que les commandes spéciales : l'ajout placé sous deux
+        sections ne se voit pas, et l'écran donne l'impression de ne gérer
+        que les dossiers déjà là.
+
+        Contrôle sur la source : l'ordre d'affichage est une décision, et
+        c'est elle qu'on protège."""
+        source = (RACINE / "ui_location.py").read_text(encoding="utf-8")
+        corps = source.split("def rendre(", 1)[1]
+        assert corps.index("_panneau_ajout(") < corps.index("st.tabs("), (
+            "l'ajout doit venir AVANT les trois sous-onglets")
+
+    def test_les_dossiers_patients_ne_partent_pas_au_depot(self):
+        """`location.csv` porte des noms de patients : il doit être ignoré
+        par git, comme les commandes spéciales. Un oubli ici publierait des
+        données nominatives sur GitHub."""
+        ignores = (RACINE / ".gitignore").read_text(encoding="utf-8")
+        assert "location.csv" in ignores
+
+
+class TestLouerOuAcheter:
+    """« On peut soit acheter soit louer, mais harmonisé par patient. »
+
+    Le fond du sujet : un achat ne se lit pas comme une location. Il se
+    facture une fois, et une fois réglé il ne revient plus — ni dans les
+    facturations, ni dans les renouvellements. Le confondre avec une
+    location ferait facturer deux fois le même fauteuil, et remonter tous
+    les mois un dossier clos.
+    """
+
+    def test_le_sous_onglet_achats_existe_et_les_liste(self, page_location):
+        _sous_onglet(page_location, "Achats").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Déambulateur" in liste, liste
+        assert "Lève-personne" in liste, liste
+
+    def test_un_achat_livre_et_jamais_regle_est_signale(self, page_location):
+        """Aucune date ne viendra le rappeler : c'est l'écran ou rien."""
+        _sous_onglet(page_location, "Achats").first.click()
+        page_location.wait_for_timeout(4000)
+        assert "achat(s) à facturer" in _panneau_du_sous_onglet(page_location)
+
+    def test_un_achat_regle_ne_revient_pas_dans_les_facturations(
+            self, page_location):
+        """Le fauteuil est payé. L'y laisser ferait le facturer deux fois."""
+        _sous_onglet(page_location, "Facturations").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        # Le lève-personne, jamais réglé, est dû ; le déambulateur, non.
+        assert "Lève-personne" in liste, liste
+        assert "Déambulateur" not in liste.split("Toutes les locations")[0], (
+            liste)
+
+    def test_un_achat_regle_ne_remonte_pas_dans_les_renouvellements(
+            self, page_location):
+        """Son entente a expiré il y a des mois, et c'est sans conséquence :
+        l'y laisser noierait les vraies échéances sous des dossiers clos.
+
+        La preuve se fait sur PIERRE BIENTOT, que rien n'a touché : un test
+        antérieur de ce module a renouvelé la première ligne de la liste,
+        et s'appuyer sur elle ferait dépendre celui-ci de cet ordre."""
+        _sous_onglet(page_location, "À renouveler").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "PIERRE BIENTOT" in liste, "la liste est vide"
+        assert "Déambulateur" not in liste, "l'achat réglé y figure encore"
+
+    def test_le_mode_se_lit_dans_les_listes(self, page_location):
+        """Sans lui, il faut retourner au tableau complet pour chaque
+        patient — et c'est ce va-et-vient que ces vues évitent."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Location" in liste, liste
+        assert "Achat" in liste, liste
+
+    def test_la_vue_par_patient_reunit_ses_deux_modes(self, page_location):
+        """Le patient au téléphone ne demande pas « où en est ma location
+        de lit » : il demande où il en est. Mme CLAIRE ACHAT a deux
+        dossiers — ils doivent tenir sur UNE ligne."""
+        _sans_exception(page_location)
+        contenu = page_location.content()
+        assert "Vue par patient" in contenu
+        # 5 patients pour 6 dossiers : les deux achats de Mme CLAIRE ACHAT
+        # sont réunis. Le nombre est dans le titre du dépliant.
+        assert "5 personne(s) suivie(s)" in contenu, [
+            l for l in contenu.split("<") if "personne(s)" in l]
+
+    def test_le_bandeau_distingue_loue_et_achete(self, page_location):
+        assert "loué(s)" in page_location.content()
+        assert "acheté(s)" in page_location.content()
+
+    def test_le_mode_est_une_liste_fermee_dans_le_tableau(self):
+        """« loc. », « LOCATION » ou « louée » tapés à la main sortiraient
+        le dossier de son sous-onglet sans que rien ne le signale.
+
+        Contrôle sur la source : c'est une décision d'ergonomie, et le
+        tableau de référence n'est pas toujours à l'écran."""
+        source = (RACINE / "ui_location.py").read_text(encoding="utf-8")
+        assert "SelectboxColumn" in source
+        assert "options=list(loc.MODES)" in source

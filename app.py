@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.32"
+VERSION_APP = "6.34"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -159,10 +159,10 @@ st.markdown("""
    comme éteint — quand les deux autres restent neutres.
    La COULEUR SEULE, et pas la taille : l'agrandir déséquilibrait la
    barre, un onglet deux fois plus haut que ses voisins au-dessus d'un
-   écran par ailleurs aligné. Les trois gardent donc la même forme, et
+   écran par ailleurs aligné. Tous gardent donc la même forme, et
    c'est le turquoise qui désigne celui-ci — il se voit d'aussi loin,
    sans rien décaler.
-   `:nth-child(1)` : le stock interne est le PREMIER des trois onglets —
+   `:nth-child(1)` : le stock interne est le PREMIER des onglets —
    il l'est devenu à la demande de la pharmacie, qui y passe ses journées.
    Ce sélecteur suit donc l'ordre de déclaration dans `app.py` : les
    déplacer sans le corriger colorerait le mauvais onglet, et un test le
@@ -292,6 +292,7 @@ st.markdown("""
   margin: 4px 0 16px 0; }
 .espace.ferme { border-left-color: #7c3aed; }
 .espace.speciales { border-left-color: #b45309; }
+.espace.location { border-left-color: #be123c; }
 .espace .titre { font-size: 1.3rem; font-weight: 700; color: #0b0b0b; }
 .espace .sous  { font-size: .88rem; color: #6b6a66; margin-top: 2px; }
 
@@ -400,6 +401,7 @@ def _onglet_simple(df: pd.DataFrame, message_vide: str, legende: str) -> None:
 ESPACE_CADENCIER = "📈  Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "🔒  Stock interne"
 ESPACE_COMMANDES = "💠  Commandes spéciales"
+ESPACE_LOCATION = "🛏️  Location"
 
 DOSSIER_APP = Path(__file__).resolve().parent
 
@@ -539,11 +541,19 @@ _proposer_raccourci()
 
 espace = st.segmented_control(
     "Espace de travail",
-    [ESPACE_STOCK_FERME, ESPACE_CADENCIER, ESPACE_COMMANDES],
+    [ESPACE_STOCK_FERME, ESPACE_CADENCIER, ESPACE_COMMANDES,
+     ESPACE_LOCATION],
     default=ESPACE_STOCK_FERME, label_visibility="collapsed",
     key="espace_travail", width="stretch", on_change=_garder_espace)
 if espace is None:  # premier rendu suivant une déselection
     espace = st.session_state.get("espace_retenu", ESPACE_STOCK_FERME)
+
+if espace == ESPACE_LOCATION:
+    import ui_location
+    _entete_espace("🛏️ Location & achat — ententes préalables CAFAT",
+                   variante="location")
+    ui_location.rendre(_etape, _tuile_kpi)
+    st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
 if espace == ESPACE_COMMANDES:
     import ui_commandes_speciales
