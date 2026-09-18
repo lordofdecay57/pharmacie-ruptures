@@ -33,3 +33,6 @@ maj_serveur.log
 
 # Module 4 — Commandes speciales (dossiers patients, donnees nominatives)
 commandes_speciales.csv
+
+# Module 5 — Location (dossiers patients CAFAT, donnees nominatives)
+location.csv

@@ -286,7 +286,8 @@ class TestIsolationDesModules:
                 trouves.add(noeud.module.split(".")[0])
         return trouves & projet
 
-    @pytest.mark.parametrize("moteur", ["stock_ferme", "commandes_speciales"])
+    @pytest.mark.parametrize("moteur", ["stock_ferme", "commandes_speciales",
+                                        "location"])
     def test_un_moteur_n_importe_que_le_service_de_stockage(self, moteur):
         interdits = self._imports(moteur) - self.SERVICES_AUTORISES
         assert not interdits, (
@@ -311,7 +312,7 @@ class TestIsolationDesModules:
 
     @pytest.mark.parametrize("moteur", ["stock_ferme", "commandes_speciales",
                                         "stock_rotation", "moteur_ruptures",
-                                        "stockage_partage"])
+                                        "location", "stockage_partage"])
     def test_aucun_moteur_n_importe_streamlit(self, moteur):
         """La logique métier doit être testable sans navigateur ni session :
         c'est ce qui rend possible les 700 tests qui tournent en 30 s."""
