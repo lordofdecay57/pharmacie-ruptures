@@ -11,7 +11,8 @@ parcours validés : prise en charge par dossier, achat privilégié des
 fauteuils, suivi de l’équipe, cautions et rappel mail des facturations.
 **Ces nouveaux parcours sont des propositions, pas des fonctionnalités
 installées par cette version.** Le rappel mail reste à développer puis à
-configurer ; l’adresse de la pharmacie sera communiquée ultérieurement.
+configurer ; l’adresse destinataire a été communiquée par la pharmacie et
+devra être renseignée dans la configuration privée du serveur.
 
 ---
 

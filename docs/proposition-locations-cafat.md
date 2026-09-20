@@ -122,7 +122,7 @@ Pour reprendre les anciens CSV, conserver toutes les valeurs d’origine et dema
 
 ### Rappel mail des facturations à préparer
 
-Demande de l’officine : envoyer à l’adresse mail de la pharmacie un rappel des facturations à générer. **L’adresse sera communiquée plus tard. Aucun destinataire, service d’envoi ou planning n’est configuré actuellement.** La version 6.35 ne contient pas encore de moteur d’envoi.
+Demande de l’officine : envoyer un rappel des facturations à générer à l’adresse destinataire communiquée par la pharmacie le 20 septembre 2026. Cette adresse sera renseignée dans la configuration privée du serveur, sans être publiée dans ce dépôt public ; elle ne définit pas l’expéditeur. **Le destinataire a été communiqué, mais aucun service d’envoi ni planning n’est configuré actuellement.** La version 6.35 ne contient pas encore de moteur d’envoi.
 
 Prévoir un récapitulatif unique des tâches de facturation encore ouvertes, à une fréquence et une heure configurables dans le fuseau Pacific/Noumea. Une proposition simple est un envoi quotidien les jours choisis par l’équipe, uniquement s’il reste quelque chose à traiter. Le mail rappelle les facturations à préparer ; il ne crée ni ne transmet de facture.
 
@@ -136,7 +136,7 @@ Exemple de message, sans données patient :
 > 2 autres dossiers nécessitent une vérification avant facturation.
 > Ouvrez le module Location pour consulter les périodes et enregistrer les factures émises.
 
-Prévoir une activation explicite après configuration de l’adresse de destination, de l’expéditeur et du service d’envoi. Les identifiants d’envoi restent dans la configuration locale du serveur, hors du dépôt Git. Exécuter la tâche sur un seul serveur, avec un journal d’envoi partagé pour éviter les doublons entre postes. Conserver la date du dernier envoi réussi et les erreurs ; limiter les nouvelles tentatives après échec et empêcher plusieurs envois simultanés du même rappel. L’envoi d’un rappel ne modifie jamais les factures, les accords ou les cautions.
+Prévoir une activation explicite après configuration privée du destinataire communiqué, de l’expéditeur et du service d’envoi. Les identifiants d’envoi restent dans la configuration locale du serveur, hors du dépôt Git. Exécuter la tâche sur un seul serveur, avec un journal d’envoi partagé pour éviter les doublons entre postes. Conserver la date du dernier envoi réussi et les erreurs ; limiter les nouvelles tentatives après échec et empêcher plusieurs envois simultanés du même rappel. L’envoi d’un rappel ne modifie jamais les factures, les accords ou les cautions.
 
 Vérifications à prévoir : aucun envoi sans configuration active, destinataire exact, respect du fuseau, omission des dossiers déjà facturés, alerte du dernier mois, absence de noms dans le contenu par défaut, échec SMTP sans perte de tâche et protection contre les doublons.
 
