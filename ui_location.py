@@ -180,14 +180,28 @@ def _libelles(vue: pd.DataFrame) -> list:
 
 
 def _choisir_un_dossier(vue: pd.DataFrame, cle: str):
-    """Liste déroulante des dossiers ; renvoie la ligne choisie."""
+    """Conserve le dossier choisi même si les échéances le reclassent."""
     libelles = _libelles(vue)
     if not libelles:
         return None
-    rang = st.selectbox("Dossier", range(len(libelles)),
-                        format_func=lambda i: libelles[i], key=cle,
-                        label_visibility="collapsed")
-    return vue.iloc[rang]
+    identites = [_identite_dossier(ligne) for _, ligne in vue.iterrows()]
+    positions = {identite: i for i, identite in enumerate(identites)}
+    if cle in st.session_state and st.session_state[cle] not in positions:
+        # Le dossier a disparu ou son identité a changé sur un autre poste.
+        # Ne pas proposer silencieusement un autre patient à sa place.
+        st.session_state[cle] = None
+    choix = st.selectbox("Dossier", identites,
+                         format_func=lambda identite: libelles[positions[identite]],
+                         key=cle, label_visibility="collapsed",
+                         placeholder="Choisissez un dossier")
+    return None if choix is None else vue.iloc[positions[choix]]
+
+
+def _identite_dossier(ligne) -> tuple:
+    """La même identité patient / matériel / mode que le moteur."""
+    return (loc.cle_patient(ligne["Patient"]),
+            loc.cle_patient(ligne["Matériel"]),
+            loc.parser_mode(ligne["Mode"]))
 
 
 # ---------------------------------------------------------------------------
@@ -307,12 +321,19 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
         ligne = _choisir_un_dossier(vue, "lo_entente_dossier")
         if ligne is None:
             return
+        duree = int(ligne["Validité (mois)"] or loc.VALIDITE_DEFAUT_MOIS)
+        reference = (_identite_dossier(ligne), duree)
+        if st.session_state.get("lo_entente_reference") != reference:
+            # Une clé de widget fixe garde sinon la durée du patient précédent.
+            st.session_state["lo_entente_validite"] = duree
+            st.session_state["lo_entente_date"] = aujourdhui
+            st.session_state["lo_entente_reference"] = reference
         c1, c2 = st.columns([3, 2])
         accordee = c1.date_input("Accordée le", value=aujourdhui,
                                  format="DD/MM/YYYY", key="lo_entente_date")
         validite = c2.number_input(
             "Validité (mois)", min_value=1, max_value=60,
-            value=int(ligne["Validité (mois)"] or loc.VALIDITE_DEFAUT_MOIS),
+            value=duree,
             step=1, key="lo_entente_validite")
         if st.button("✅ Entente préalable faite", type="primary",
                      use_container_width=True, key="lo_entente_valider"):
@@ -374,6 +395,10 @@ def _onglet_facturations(dossiers: pd.DataFrame, vue: pd.DataFrame,
         ligne = _choisir_un_dossier(vue, "lo_facture_dossier")
         if ligne is None:
             return
+        identite = _identite_dossier(ligne)
+        if st.session_state.get("lo_facture_reference") != identite:
+            st.session_state["lo_facture_date"] = aujourdhui
+            st.session_state["lo_facture_reference"] = identite
         jour = st.date_input("Facturé le", value=aujourdhui,
                              format="DD/MM/YYYY", key="lo_facture_date")
         if st.button("💰 Facturé", type="primary",
@@ -553,14 +578,15 @@ def _enregistrer_corrections(corrige: pd.DataFrame) -> None:
 # Écran
 # ---------------------------------------------------------------------------
 
-def _bandeau(resume: dict, tuile) -> None:
+def _bandeau(resume: dict, tuile,
+             alerte_j: int = loc.ALERTE_RENOUVELLEMENT_J) -> None:
     st.markdown('<div class="kpi-row">' + "".join([
         tuile("Dossiers suivis", resume["dossiers"], "accent",
               sous=f'{resume["locations"]} loué(s) · '
                    f'{resume["achats"]} acheté(s)'),
         tuile("🔁 À renouveler", resume["a_renouveler"],
               "accent" if resume["a_renouveler"] else "",
-              sous=f'échéance sous {loc.ALERTE_RENOUVELLEMENT_J} jours'),
+              sous=f'échéance sous {alerte_j} jours'),
         tuile("⛔ Ententes expirées", resume["expirees"],
               "critical" if resume["expirees"] else "",
               sous="plus prises en charge"),
@@ -612,7 +638,7 @@ def rendre(etape, tuile_kpi) -> None:
         niveau, texte = message
         (st.success if niveau == "ok" else st.warning)(texte)
 
-    _bandeau(loc.resume(dossiers, aujourdhui, alerte), tuile_kpi)
+    _bandeau(loc.resume(dossiers, aujourdhui, alerte), tuile_kpi, alerte)
 
     _panneau_ajout(dossiers)
 

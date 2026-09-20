@@ -614,7 +614,13 @@ def par_patient(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
     lignes = []
     for cle in dict.fromkeys(cle_patient(p) for p in vue["Patient"]):
         siens = vue[[cle_patient(p) == cle for p in vue["Patient"]]]
-        pire = max(siens["Entente"], key=lambda st: _GRAVITE.get(st, 0))
+        # Comme la liste des renouvellements, la synthèse ne doit pas
+        # alerter pour un achat déjà réglé. Son ancienne échéance reste
+        # consultable dans le dossier, mais ne dégrade plus le patient.
+        actifs = siens[~((siens["Mode"] == MODE_ACHAT)
+                         & (siens["Facturation"] == STATUT_ACHAT_REGLE))]
+        pire = (max(actifs["Entente"], key=lambda st: _GRAVITE.get(st, 0))
+                if not actifs.empty else STATUT_ACHAT_REGLE)
         lignes.append({
             "Patient": siens.iloc[0]["Patient"],
             "Locations": int((siens["Mode"] == MODE_LOCATION).sum()),
