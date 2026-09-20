@@ -1,5 +1,25 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
+## Version 6.36 — le nouveau suivi Location est dans l'utilitaire
+
+L'espace **Location** affiche maintenant quatre vues : **À faire**, **Dossiers
+patients**, **Factures**, **Réglages & essai**. Il intègre les périodes facturées,
+les ententes successives et leur initiateur, la qualification du remboursement,
+les cautions aérosol (5 000 F CFP) et tensiomètre (3 000 F CFP), chèque ou espèces,
+les retours et les règlements distincts des factures. L'achat est proposé en
+premier pour les fauteuils.
+
+Les rappels par mail sont implémentés, désactivés jusqu'à configuration du
+service d'envoi sur le serveur. L'adresse destinataire fournie par l'officine
+reste à renseigner dans les réglages privés, jamais dans le dépôt public.
+
+**Les anciens dossiers sont conservés et demandent une vérification de reprise.**
+Les montants se recopient depuis le logiciel métier : aucun tarif CAFAT,
+remboursement ou prorata n'est calculé automatiquement.
+
+Voir le [guide du suivi 6.36](docs/location-6.36.md). Les
+[maquettes précédentes](docs/maquettes/README.md) restent des archives de conception.
+
 ## Version 6.35 — correctifs Location et proposition d’évolution
 
 Cette version corrige la sélection des dossiers, la reprise des dates et

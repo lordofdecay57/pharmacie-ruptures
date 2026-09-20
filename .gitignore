@@ -36,3 +36,11 @@ commandes_speciales.csv
 
 # Module 5 — Location (dossiers patients CAFAT, donnees nominatives)
 location.csv
+
+# Suivi des locations, sauvegardes et configuration privée des mails
+locations_suivi.json*
+rappels_location.local.json*
+rappels_location_envois.json*
+location.csv.*
+.env
+.env.local

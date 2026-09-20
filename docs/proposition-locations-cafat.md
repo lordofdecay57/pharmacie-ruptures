@@ -4,7 +4,7 @@ Proposition fonctionnelle pour `pharmacie-ruptures` · 20 septembre 2026
 
 **Le changement essentiel : suivre les périodes de location couvertes par chaque facture, puis préparer les lignes admissibles selon le matériel et le dossier.** Le mois peut rester le rythme de travail de l’équipe ; il ne doit pas déterminer arbitrairement l’unité tarifaire.
 
-Cette proposition et ses maquettes complètent l’audit. Elles ne constituent pas un moteur de facturation installé ni une validation de tarifs. La version 6.35 intègre les correctifs techniques du module Location issus de la proposition GitHub nº 92. Les fonctionnalités ci-dessous restent à implémenter.
+Ce document conserve la proposition de conception. Depuis la **version 6.36**, le suivi des périodes, les ententes datées et leur initiateur, la prise en charge à vérifier, les cautions, retours, factures et rappels configurables sont intégrés à l'utilitaire. Le [guide de la version 6.36](location-6.36.md) décrit précisément ce qui fonctionne et ses limites. Les profils tarifaires, retenues de caution, contrats complets et calculs CAFAT automatisés restent à développer après validation métier.
 
 **Préférence de l’officine : privilégier l’achat pour les fauteuils.** À la création d’un dossier fauteuil, proposer « Achat » en premier. La prescription et l’accord doivent correspondre à ce mode. Conserver « Location temporaire » comme autre possibilité, sans abonnement mensuel créé par défaut pour un achat.
 
