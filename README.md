@@ -1,5 +1,20 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
+## Version 6.35 — correctifs Location et proposition d’évolution
+
+Cette version corrige la sélection des dossiers, la reprise des dates et
+durées d’un autre patient, et les alertes des achats déjà réglés.
+
+Le [cahier des charges de la prochaine évolution](docs/proposition-locations-cafat.md)
+et les [maquettes interactives](docs/maquettes/README.md) précisent les
+parcours validés : prise en charge par dossier, achat privilégié des
+fauteuils, suivi de l’équipe, cautions et rappel mail des facturations.
+**Ces nouveaux parcours sont des propositions, pas des fonctionnalités
+installées par cette version.** Le rappel mail reste à développer puis à
+configurer ; l’adresse de la pharmacie sera communiquée ultérieurement.
+
+---
+
 Application **locale** (elle tourne sur votre PC, hors-ligne) organisée en
 **modules fonctionnels indépendants** :
 

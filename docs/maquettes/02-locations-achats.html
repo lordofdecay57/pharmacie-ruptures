@@ -1,0 +1,303 @@
+<div id="pharma-cafat" lang="fr">
+  <style>
+#pharma-cafat {
+  --p-bg:light-dark(#f4f6f2,#151d19);
+  --p-panel:light-dark(#ffffff,#202a24);
+  --p-text:light-dark(#243b30,#e8f0e9);
+  --p-sub:light-dark(#65766a,#adbdaf);
+  --p-line:light-dark(#dce5dc,#3b4b40);
+  --p-soft:light-dark(#edf3ea,#293c2e);
+  --p-green:light-dark(#255e48,#abdab4);
+  --p-on:light-dark(#ffffff,#173323);
+  --p-red:light-dark(#a14847,#ffb7ad);
+  --p-redbg:light-dark(#fcf0ed,#432f2a);
+  --p-amber:light-dark(#856026,#efcf94);
+  --p-amberbg:light-dark(#fbf3e2,#3e3729);
+  --p-shadow:light-dark(rgba(36,59,48,.05),rgba(0,0,0,.13));
+  --p-scan-bg:light-dark(#eaf1e5,#25382b);
+  color:var(--p-text);background:var(--p-bg);
+  border:1px solid var(--p-line);border-radius:20px;overflow:hidden;
+  font:400 14px/1.5 "Inter","Aptos",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+#pharma-cafat *{box-sizing:border-box}
+#pharma-cafat [hidden]{display:none!important}
+#pharma-cafat h2,#pharma-cafat h3,#pharma-cafat p{margin:0}
+#pharma-cafat h2{font-size:30px;line-height:1.2;font-weight:500;letter-spacing:-1.05px}
+#pharma-cafat h3{font-size:17px;line-height:1.4;font-weight:500;letter-spacing:-.3px}
+#pharma-cafat strong{font-weight:500}
+#pharma-cafat .p-sub{color:var(--p-sub);font-size:12px;line-height:1.6}
+#pharma-cafat .p-top{padding:22px 28px 20px;display:flex;align-items:center;justify-content:space-between;gap:14px}
+#pharma-cafat .p-brand{display:flex;align-items:center;gap:11px;font-size:21px;line-height:1.15;letter-spacing:-.75px;font-weight:500}
+#pharma-cafat .p-mark{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border-radius:11px;background:var(--p-green);color:var(--p-on)}
+#pharma-cafat .p-mark svg{width:19px;height:19px;stroke-width:2}
+#pharma-cafat .p-top-right{display:flex;align-items:center;gap:16px}
+#pharma-cafat .p-demo{font-size:11px;color:var(--p-sub);letter-spacing:.1px}
+#pharma-cafat button,#pharma-cafat input,#pharma-cafat select{font:inherit}
+#pharma-cafat button{border:1px solid var(--p-line);border-radius:9px;padding:9px 14px;background:var(--p-panel);color:var(--p-text);min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:background .15s,border-color .15s,box-shadow .15s}
+#pharma-cafat button:hover{background:var(--p-soft);border-color:color-mix(in srgb,var(--p-green) 35%,var(--p-line))}
+#pharma-cafat button:focus-visible,#pharma-cafat input:focus-visible,#pharma-cafat select:focus-visible,#pharma-cafat summary:focus-visible{outline:3px solid var(--p-green);outline-offset:3px}
+#pharma-cafat button:disabled{opacity:.45;cursor:not-allowed}
+#pharma-cafat .p-primary,#pharma-cafat .p-primary:hover{background:var(--p-green);border-color:var(--p-green);color:var(--p-on);box-shadow:0 2px 4px var(--p-shadow)}
+#pharma-cafat #p-settings-toggle{background:transparent;border-color:transparent;color:var(--p-sub);padding:7px 0 7px 10px;font-size:12px}
+#pharma-cafat .p-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;padding:5px;margin:0 28px;background:var(--p-panel);border:1px solid var(--p-line);border-radius:13px;box-shadow:0 2px 6px var(--p-shadow)}
+#pharma-cafat .p-nav button{border:0;background:transparent;color:var(--p-sub);font-weight:500;min-height:42px;padding:9px 6px;border-radius:8px;font-size:13px}
+#pharma-cafat .p-nav button:hover{background:var(--p-soft);color:var(--p-text)}
+#pharma-cafat .p-nav button[aria-selected="true"]{background:var(--p-green);color:var(--p-on);box-shadow:0 2px 5px var(--p-shadow)}
+#pharma-cafat main{padding:29px 28px 24px}
+#pharma-cafat .p-heading{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:21px}
+#pharma-cafat .p-heading .p-sub{margin-top:6px;font-size:13px}
+#pharma-cafat .p-heading>button{font-size:12px;box-shadow:0 1px 2px var(--p-shadow)}
+#pharma-cafat .p-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#pharma-cafat .p-grow{flex:1;min-width:0}
+#pharma-cafat .p-scan{background:var(--p-scan-bg);border:1px solid color-mix(in srgb,var(--p-green) 12%,var(--p-line));border-radius:15px;padding:20px 22px 12px;margin-bottom:23px}
+#pharma-cafat label{display:block;font-weight:500;margin-bottom:8px;font-size:13px}
+#pharma-cafat .p-scan-label{display:flex;align-items:center;gap:9px;font-size:15px;letter-spacing:-.25px;margin-bottom:12px}
+#pharma-cafat .p-scan-label i,#pharma-cafat .p-scan-label svg{color:var(--p-green)}
+#pharma-cafat input:not([type=checkbox]),#pharma-cafat select{background:var(--p-panel);color:var(--p-text);border:1px solid var(--p-line);border-radius:9px;min-height:42px;padding:10px 12px;max-width:100%;width:100%}
+#pharma-cafat input::placeholder{color:var(--p-sub);opacity:1}
+#pharma-cafat .p-scanform{display:flex;align-items:center;gap:8px;padding:5px;background:var(--p-panel);border:1px solid var(--p-line);border-radius:11px;box-shadow:0 2px 6px var(--p-shadow)}
+#pharma-cafat .p-scanform:focus-within{border-color:var(--p-green);box-shadow:0 0 0 3px color-mix(in srgb,var(--p-green) 12%,transparent)}
+#pharma-cafat #p-scan-input{flex:1;min-width:0;min-height:43px;border:0;box-shadow:none;background:transparent;padding:8px 12px;font-size:15px}
+#pharma-cafat .p-scanform .p-primary{font-size:13px;min-height:43px;padding-inline:18px;white-space:nowrap}
+#pharma-cafat .p-inline-link{border:0;background:transparent;color:var(--p-green);padding:4px 0;min-height:32px;justify-content:flex-start;text-align:left}
+#pharma-cafat .p-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:16px 0 12px;flex-wrap:wrap}
+#pharma-cafat .p-toolbar input{max-width:280px}
+#pharma-cafat .p-checkbox{font-weight:400;font-size:12px;display:flex;gap:8px;align-items:center;margin:0;color:var(--p-sub)}
+#pharma-cafat input[type=checkbox]{accent-color:var(--p-green);width:16px;height:16px;flex:none}
+#pharma-cafat .p-inventory{background:var(--p-panel);border:1px solid var(--p-line);border-radius:15px;overflow:hidden;box-shadow:0 3px 10px var(--p-shadow)}
+#pharma-cafat .p-inventory-head{padding:19px 20px 14px}
+#pharma-cafat .p-inventory-head .p-toolbar{margin:13px 0 0}
+#pharma-cafat .p-inventory-head .p-toolbar input{min-height:36px;font-size:12px;background:var(--p-bg);border-color:transparent;max-width:260px;padding:8px 11px}
+#pharma-cafat .p-tablewrap{border:1px solid var(--p-line);border-radius:12px;background:var(--p-panel);overflow-x:auto}
+#pharma-cafat .p-inventory>.p-tablewrap{border:0;border-radius:0}
+#pharma-cafat table{width:100%;border-collapse:collapse;font-size:13px}
+#pharma-cafat th{color:var(--p-sub);font-weight:400;text-align:left;background:color-mix(in srgb,var(--p-bg) 70%,var(--p-panel));white-space:nowrap;font-size:11px;letter-spacing:.2px}
+#pharma-cafat th,#pharma-cafat td{padding:13px 20px;border-bottom:1px solid var(--p-line);vertical-align:middle}
+#pharma-cafat th{padding-block:9px}
+#pharma-cafat tbody tr:hover{background:color-mix(in srgb,var(--p-soft) 45%,var(--p-panel))}
+#pharma-cafat tr:last-child td{border-bottom:0}
+#pharma-cafat td.p-num,#pharma-cafat th.p-num{text-align:right;font-variant-numeric:tabular-nums}
+#pharma-cafat td .p-inline-link{color:var(--p-text);font-weight:500;min-height:30px;gap:11px}
+#pharma-cafat td .p-inline-link:hover{background:transparent}
+#pharma-cafat .p-product-icon{display:flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;border-radius:9px;background:var(--p-soft);color:var(--p-green)}
+#pharma-cafat .p-product-icon svg{width:16px;height:16px}
+#pharma-cafat .p-cip{font:400 11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.3px;white-space:nowrap;color:var(--p-sub)}
+#pharma-cafat .p-status{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:4px 8px;border-radius:6px;background:var(--p-soft);color:var(--p-green);white-space:nowrap}
+#pharma-cafat .p-status:before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+#pharma-cafat .p-status.p-danger{background:var(--p-redbg);color:var(--p-red)}
+#pharma-cafat .p-status.p-warn{background:var(--p-amberbg);color:var(--p-amber)}
+#pharma-cafat .p-feedback{padding:10px 12px;background:var(--p-soft);color:var(--p-green);border-radius:9px;margin:10px 0;font-size:13px}
+#pharma-cafat .p-feedback:empty{display:none}
+#pharma-cafat .p-notice{margin:12px 0;padding:12px 14px;background:var(--p-amberbg);color:var(--p-amber);border-radius:9px}
+#pharma-cafat .p-selection{margin-top:16px;border-top:1px solid var(--p-line);padding-top:16px}
+#pharma-cafat .p-selection .p-row{margin-top:13px}
+#pharma-cafat .p-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:12px 0}
+#pharma-cafat details{margin-top:10px}
+#pharma-cafat summary{color:var(--p-sub);min-height:32px;padding:6px 0;font-size:12px}
+#pharma-cafat .p-details-body{padding:12px 0}
+#pharma-cafat #p-stock-details{margin:0;padding:6px 20px;border-top:1px solid var(--p-line)}
+#pharma-cafat #p-stock-details[open]{padding-bottom:16px}
+#pharma-cafat .p-footer{padding:0 28px 18px;color:var(--p-sub);font-size:11px;display:flex;justify-content:flex-end;gap:8px}
+#pharma-cafat .p-segment{display:flex;gap:6px;flex-wrap:wrap}
+#pharma-cafat .p-segment button[aria-pressed="true"]{background:var(--p-green);border-color:var(--p-green);color:var(--p-on)}
+#pharma-cafat .p-file{padding:20px;background:var(--p-panel);border:1px solid var(--p-line);border-radius:13px;margin:15px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;box-shadow:0 2px 6px var(--p-shadow)}
+#pharma-cafat .p-settings{padding:18px 28px;background:var(--p-panel);border-block:1px solid var(--p-line);margin-bottom:15px}
+#pharma-cafat .p-empty{text-align:center;padding:28px;color:var(--p-sub)}
+#pharma-cafat .p-r-detail{margin-top:20px;padding:22px;background:var(--p-panel);border:1px solid var(--p-line);border-radius:15px;box-shadow:0 3px 10px var(--p-shadow)}
+#pharma-cafat .p-r-detail .p-heading{margin-bottom:14px}
+#pharma-cafat .p-r-facts{display:flex;gap:12px 28px;flex-wrap:wrap;margin:14px 0 18px}
+#pharma-cafat .p-r-facts>div{min-width:160px}
+#pharma-cafat .p-r-facts dt{color:var(--p-sub);font-size:12px}
+#pharma-cafat .p-r-facts dd{margin:3px 0 0;font-size:13px}
+#pharma-cafat .p-r-total{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:14px 0 18px;flex-wrap:wrap}
+#pharma-cafat .p-r-total strong{font-size:24px;letter-spacing:-.7px;font-variant-numeric:tabular-nums}
+#pharma-cafat .p-r-detail a{color:var(--p-green);text-decoration:underline}
+#pharma-cafat .p-r-detail form{margin-top:18px;border-top:1px solid var(--p-line);padding-top:2px}
+#pharma-cafat #p-rental .p-segment button{font-size:12px}
+#pharma-cafat #p-rental-rows td:first-child{min-width:155px}
+#pharma-cafat #p-orders-rows button,#pharma-cafat #p-rental-rows button{font-size:12px;border-color:transparent;background:var(--p-soft);color:var(--p-green);min-height:34px}
+@media(max-width:720px){
+  #pharma-cafat .p-top{padding:18px 18px 15px}
+  #pharma-cafat .p-top-right{gap:9px}
+  #pharma-cafat .p-demo{max-width:115px;text-align:right;line-height:1.5}
+  #pharma-cafat .p-nav{margin:0 18px;grid-template-columns:repeat(2,minmax(0,1fr))}
+  #pharma-cafat .p-nav button{min-height:40px}
+  #pharma-cafat main{padding:24px 18px 18px}
+  #pharma-cafat h2{font-size:27px}
+  #pharma-cafat .p-heading{gap:10px;align-items:flex-start}
+  #pharma-cafat .p-heading .p-sub{font-size:12px;max-width:300px}
+  #pharma-cafat .p-scan{padding:17px 16px 11px}
+  #pharma-cafat .p-inventory-head{padding:16px}
+  #pharma-cafat .p-tablewrap table{min-width:470px}
+  #pharma-cafat th,#pharma-cafat td{padding-inline:16px}
+  #pharma-cafat .p-fields{grid-template-columns:1fr}
+  #pharma-cafat .p-toolbar input,#pharma-cafat .p-inventory-head .p-toolbar input{max-width:none}
+  #pharma-cafat .p-footer{padding:0 18px 15px}
+}
+@media(max-width:420px){
+  #pharma-cafat .p-demo{display:none}
+  #pharma-cafat .p-brand{font-size:20px}
+  #pharma-cafat #p-settings-toggle{font-size:12px}
+  #pharma-cafat .p-scanform{flex-wrap:wrap;gap:5px;padding:7px}
+  #pharma-cafat #p-scan-input{flex-basis:100%;padding:8px 6px}
+  #pharma-cafat .p-scanform .p-primary{width:100%}
+  #pharma-cafat .p-heading{flex-wrap:wrap}
+  #pharma-cafat .p-heading>button{padding:7px 10px;min-height:36px}
+  #pharma-cafat .p-nav button{font-size:12px;gap:6px}
+  #pharma-cafat .p-footer:before{content:"Aperçu · données fictives"}
+  #pharma-cafat .p-footer span{display:none}
+}
+@media(pointer:coarse){#pharma-cafat button,#pharma-cafat summary{min-height:44px}#pharma-cafat input,#pharma-cafat select{font-size:16px!important}}
+@media(prefers-reduced-motion:reduce){#pharma-cafat button{transition:none}}
+  </style>
+  <header class="p-top">
+    <div class="p-brand"><span class="p-mark"><i data-lucide="cross" aria-hidden="true"></i></span>Pharmacie</div>
+    <div class="p-top-right"><span class="p-demo">Aperçu · données fictives</span>
+    <button class="cursor-interaction" id="p-settings-toggle" type="button" aria-expanded="false" aria-controls="p-settings"><i data-lucide="settings-2" aria-hidden="true"></i>Réglages</button></div>
+  </header>
+  <div id="p-settings" class="p-settings" hidden>
+    <h3>Réglages</h3><p class="p-sub">Date de démonstration : 20 septembre 2026</p>
+    <div class="p-fields"><div><label for="p-view-sort">Ordre du stock interne</label><select id="p-view-sort"><option value="expiry">Péremption la plus proche</option><option value="name">Nom du produit</option></select></div></div>
+  </div>
+  <nav class="p-nav" role="tablist" aria-label="Espaces de travail">
+    <button type="button" id="p-nav-stock" class="cursor-interaction" role="tab" aria-controls="p-stock" aria-selected="true" data-panel="stock"><i data-lucide="scan-barcode" aria-hidden="true"></i>Stock interne</button>
+    <button type="button" id="p-nav-analysis" class="cursor-interaction" role="tab" aria-controls="p-analysis" aria-selected="false" data-panel="analysis"><i data-lucide="file-spreadsheet" aria-hidden="true"></i>Stocks &amp; ruptures</button>
+    <button type="button" id="p-nav-orders" class="cursor-interaction" role="tab" aria-controls="p-orders" aria-selected="false" data-panel="orders"><i data-lucide="package" aria-hidden="true"></i>Commandes spéciales</button>
+    <button type="button" id="p-nav-rental" class="cursor-interaction" role="tab" aria-controls="p-rental" aria-selected="false" data-panel="rental"><i data-lucide="bed-single" aria-hidden="true"></i>Location &amp; achat</button>
+  </nav>
+  <main>
+    <section id="p-stock" role="tabpanel" aria-labelledby="p-nav-stock">
+      <div class="p-heading"><div><h2>Stock interne</h2><p class="p-sub">Vos entrées, vos sorties et vos péremptions au même endroit.</p></div><button type="button" class="cursor-interaction" id="p-export"><i data-lucide="printer" aria-hidden="true"></i>Imprimer</button></div>
+      <div class="p-scan">
+        <form id="p-scan-form"><label for="p-scan-input" class="p-scan-label"><i data-lucide="scan-line" aria-hidden="true"></i>Scanner ou rechercher un produit</label><div class="p-scanform"><input id="p-scan-input" list="p-catalogue" autocomplete="off" placeholder="Code-barres ou nom du produit"><button type="submit" class="p-primary cursor-interaction">Identifier<i data-lucide="arrow-right" aria-hidden="true"></i></button></div><datalist id="p-catalogue"><option value="Paracétamol 1 g"></option><option value="Amoxicilline 500 mg"></option><option value="Compresses stériles"></option><option value="Sérum physiologique"></option></datalist></form>
+        <div id="p-stock-message" class="p-feedback" role="status" aria-live="polite"></div>
+        <div id="p-candidate" class="p-selection" hidden>
+          <h3 id="p-candidate-name"></h3><p id="p-candidate-meta" class="p-sub"></p>
+          <div class="p-row"><button id="p-entry" type="button" class="p-primary cursor-interaction"><i data-lucide="plus" aria-hidden="true"></i>Entrée · 1 boîte</button><button id="p-exit" type="button" class="cursor-interaction"><i data-lucide="minus" aria-hidden="true"></i>Sortie</button><button id="p-cancel" type="button" class="cursor-interaction">Annuler</button></div>
+          <form id="p-exit-form" hidden><div class="p-fields"><div><label for="p-exit-quantity">Nombre de boîtes</label><input type="number" min="1" step="1" value="1" id="p-exit-quantity" required></div><div><label>Lot sélectionné</label><p id="p-exit-lot" class="p-sub"></p></div></div><button type="submit" class="p-primary cursor-interaction">Confirmer la sortie</button></form>
+        </div>
+        <details><summary class="cursor-interaction">Saisie manuelle</summary><form id="p-manual-form" class="p-details-body"><div class="p-fields"><div><label for="p-manual-name">Produit</label><input id="p-manual-name" required placeholder="Nom et dosage"></div><div><label for="p-manual-cip">Code du produit</label><input id="p-manual-cip" required placeholder="Code de démonstration"></div><div><label for="p-manual-date">Péremption</label><input type="date" id="p-manual-date" required></div><div><label for="p-manual-lot">Lot</label><input id="p-manual-lot" required></div></div><button type="submit" class="p-primary cursor-interaction">Enregistrer une boîte</button></form></details>
+      </div>
+      <div class="p-inventory"><div class="p-inventory-head"><h3>Inventaire</h3>
+      <div class="p-toolbar"><input id="p-search" aria-label="Filtrer l’inventaire" placeholder="Rechercher dans l’inventaire"><label class="p-checkbox"><input type="checkbox" id="p-only-alert">Lots à retirer uniquement</label></div></div>
+      <div class="p-tablewrap"><table aria-label="Inventaire du stock interne"><thead><tr><th>Produit</th><th>Code CIP</th><th>État</th></tr></thead><tbody id="p-stock-rows"></tbody></table></div>
+      <details id="p-stock-details"><summary class="cursor-interaction">Quantités, lots et péremptions</summary><div class="p-tablewrap"><table aria-label="Détail des lots"><thead><tr><th>Produit</th><th>Lot</th><th>Péremption</th><th class="p-num">Boîtes</th></tr></thead><tbody id="p-detail-rows"></tbody></table></div></details></div>
+      <div id="p-print-panel" class="p-selection" hidden><div class="p-heading"><h3>Aperçu de la liste à imprimer</h3><button type="button" id="p-close-print" class="cursor-interaction">Fermer</button></div><p class="p-sub">Reprend le filtre et le classement de l’inventaire.</p><div id="p-print-content"></div></div>
+    </section>
+    <section id="p-analysis" role="tabpanel" aria-labelledby="p-nav-analysis" hidden>
+      <div class="p-heading"><div><h2>Stocks &amp; ruptures</h2><p class="p-sub">Un fichier, une analyse, une liste à utiliser.</p></div></div>
+      <div class="p-segment" aria-label="Type d’analyse"><button id="p-mode-stock" type="button" class="cursor-interaction" aria-pressed="true">Stocks min / max</button><button id="p-mode-break" type="button" class="cursor-interaction" aria-pressed="false">Ruptures fournisseurs</button></div>
+      <div class="p-file"><div><strong>Cadencier d’exemple</strong><div class="p-sub">4 produits · colonnes reconnues</div></div><span class="p-status">Prêt à analyser</span></div>
+      <div id="p-provider-files" hidden><div class="p-file"><div><strong>Listes fournisseurs d’exemple</strong><div class="p-sub">GPNC + UNIPHARMA</div></div><span class="p-status">2 fichiers prêts</span></div></div>
+      <details><summary class="cursor-interaction">Réglages de l’analyse</summary><div class="p-fields"><div><label for="p-cover-min">Couverture minimum (jours)</label><input type="number" id="p-cover-min" min="1" max="90" value="14"></div><div><label for="p-cover-max">Couverture maximum (jours)</label><input type="number" id="p-cover-max" min="1" max="180" value="30"></div></div></details>
+      <div id="p-stale" class="p-notice" role="status" hidden>Réglages modifiés : relancez l’analyse avant d’exporter.</div>
+      <div class="p-toolbar"><button id="p-analyze" type="button" class="p-primary cursor-interaction">Analyser les exemples</button><button id="p-analysis-export" type="button" class="cursor-interaction" disabled>Aperçu de l’export</button></div>
+      <div id="p-analysis-results" hidden><div class="p-heading"><h3 id="p-analysis-title">Stocks min / max</h3><span class="p-sub" id="p-analysis-stamp"></span></div><div class="p-tablewrap"><table aria-label="Résultats d’analyse fictifs"><thead id="p-analysis-head"></thead><tbody id="p-analysis-body"></tbody></table></div><div id="p-analysis-message" class="p-feedback" role="status" aria-live="polite"></div></div>
+    </section>
+    <section id="p-orders" role="tabpanel" aria-labelledby="p-nav-orders" hidden>
+      <div class="p-heading"><div><h2>Commandes spéciales</h2><p class="p-sub">Les dossiers qui demandent une action aujourd’hui.</p></div><button id="p-new-order" type="button" class="p-primary cursor-interaction">Nouveau dossier</button></div>
+      <form id="p-order-form" class="p-scan" hidden><div class="p-fields"><div><label for="p-order-person">Patient fictif</label><input id="p-order-person" required></div><div><label for="p-order-product">Produit</label><input id="p-order-product" required></div></div><div class="p-row"><button class="p-primary cursor-interaction" type="submit">Créer le dossier</button><button id="p-order-cancel" class="cursor-interaction" type="button">Annuler</button></div></form>
+      <div class="p-toolbar"><h3>À traiter</h3><label class="p-checkbox"><input id="p-orders-all" type="checkbox">Voir aussi les dossiers à jour</label></div>
+      <div class="p-tablewrap"><table aria-label="Commandes spéciales fictives"><thead><tr><th>Patient / produit</th><th>Situation</th><th>Action</th></tr></thead><tbody id="p-orders-rows"></tbody></table></div>
+      <div id="p-orders-message" class="p-feedback" role="status" aria-live="polite"></div>
+    </section>
+    <section id="p-rental" role="tabpanel" aria-labelledby="p-nav-rental" hidden>
+      <div class="p-heading"><div><h2>Locations &amp; achats</h2><p class="p-sub">Fauteuils : achat privilégié. Les dossiers utiles, au même endroit.</p></div><span class="p-sub">Arrêté au 13 septembre 2026</span></div>
+      <div class="p-toolbar"><div class="p-segment" aria-label="Suivi des locations"><button id="p-r-ready" class="cursor-interaction" type="button" aria-pressed="true">À facturer · 2</button><button id="p-r-blocked" class="cursor-interaction" type="button" aria-pressed="false">À compléter · 2</button><button id="p-r-history" class="cursor-interaction" type="button" aria-pressed="false">Historique · 1</button></div></div>
+      <div class="p-inventory"><div class="p-inventory-head"><h3 id="p-r-title">Dossiers prêts à préparer</h3><p class="p-sub" id="p-r-subtitle">Dossiers fictifs · montants illustratifs, sans valeur tarifaire CAFAT.</p></div><div class="p-tablewrap"><table aria-label="Préparation des locations fictives"><thead><tr><th>Patient / matériel</th><th>Période / délivrance</th><th>Situation</th><th>Action</th></tr></thead><tbody id="p-rental-rows"></tbody></table></div></div>
+      <div id="p-rental-message" class="p-feedback" role="status" aria-live="polite"></div>
+      <section id="p-r-detail" class="p-r-detail" aria-labelledby="p-r-detail-title" hidden>
+        <div class="p-heading"><div><span class="p-sub" id="p-r-detail-person"></span><h3 id="p-r-detail-title">Préparer une période</h3></div><button type="button" class="cursor-interaction" id="p-r-close">Fermer</button></div>
+        <div id="p-r-detail-content"></div>
+      </section>
+    </section>
+  </main>
+  <footer class="p-footer"><span>Une proposition pour votre quotidien en pharmacie.</span></footer>
+  <script>
+    (() => {
+      const root=document.getElementById('pharma-cafat');
+      const $=id=>root.querySelector('#'+id);
+      const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const fmt=d=>d.split('-').reverse().join('/');
+      const stock=[{id:'DEMO-001',name:'Paracétamol 1 g',expiry:'2026-08-31',lot:'EX-A',qty:2},{id:'DEMO-002',name:'Amoxicilline 500 mg',expiry:'2026-10-05',lot:'EX-B',qty:4},{id:'DEMO-003',name:'Compresses stériles',expiry:'2027-04-30',lot:'EX-C',qty:12},{id:'DEMO-004',name:'Sérum physiologique',expiry:'2027-08-31',lot:'EX-D',qty:8}];
+      const status=s=>s.expiry<'2026-09-20'?['Périmé','p-danger']:s.expiry<'2026-10-20'?['Moins d’un mois','p-warn']:['Valide',''];
+      let selected=null;
+      function visibleStock(){const q=$('p-search').value.toLocaleLowerCase('fr');return stock.filter(s=>s.qty>0&&(!q||(s.name+' '+s.id+' '+s.lot).toLocaleLowerCase('fr').includes(q))&&(!$('p-only-alert').checked||status(s)[1])).sort((a,b)=>$('p-view-sort').value==='name'?a.name.localeCompare(b.name,'fr'):a.expiry.localeCompare(b.expiry));}
+      function renderStock(){const rows=visibleStock();$('p-stock-rows').innerHTML=rows.map(s=>`<tr><td><button type="button" class="p-inline-link cursor-interaction" data-product="${esc(s.id)}"><span class="p-product-icon"><i data-lucide="${s.name.includes('Compresses')?'bandage':s.name.includes('Sérum')?'droplet':'pill'}" aria-hidden="true"></i></span>${esc(s.name)}</button></td><td class="p-cip">${esc(s.id)}</td><td><span class="p-status ${status(s)[1]}">${status(s)[0]}</span></td></tr>`).join('')||'<tr><td colspan="3" class="p-empty">Aucun lot ne correspond à votre recherche.</td></tr>';$('p-detail-rows').innerHTML=rows.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.lot)}</td><td>${fmt(s.expiry)}</td><td class="p-num">${s.qty}</td></tr>`).join('')||'<tr><td colspan="4" class="p-empty">Aucun lot.</td></tr>';if(!$('p-print-panel').hidden)renderPrint();if(typeof lucide!=='undefined')lucide.createIcons({attrs:{width:16,height:16}});}
+      function closeCandidate(){$('p-candidate').hidden=true;$('p-exit-form').hidden=true;selected=null;}
+      function choose(s){if(selected){$('p-stock-message').textContent='Terminez ou annulez le mouvement en cours avant de choisir un autre produit.';return;}selected=s;$('p-candidate-name').textContent=s.name;$('p-candidate-meta').textContent=s.id+' · lot '+s.lot+' · péremption '+fmt(s.expiry)+' · '+s.qty+' boîte(s)';$('p-candidate').hidden=false;$('p-exit-form').hidden=true;$('p-stock-message').textContent='';}
+      function finish(text){closeCandidate();$('p-stock-message').textContent=text;$('p-scan-input').value='';renderStock();$('p-scan-input').focus();}
+      root.querySelectorAll('[data-panel]').forEach(button=>button.addEventListener('click',()=>{root.querySelectorAll('[data-panel]').forEach(b=>b.setAttribute('aria-selected',String(b===button)));root.querySelectorAll('[role=tabpanel]').forEach(panel=>panel.hidden=panel.id!=='p-'+button.dataset.panel);}));
+      $('p-settings-toggle').addEventListener('click',()=>{$('p-settings').hidden=!$('p-settings').hidden;$('p-settings-toggle').setAttribute('aria-expanded',String(!$('p-settings').hidden));});
+      $('p-view-sort').addEventListener('change',renderStock);
+      $('p-search').addEventListener('input',renderStock);$('p-only-alert').addEventListener('change',renderStock);
+      $('p-stock-rows').addEventListener('click',e=>{const b=e.target.closest('[data-product]');if(b)choose(stock.find(s=>s.id===b.dataset.product));});
+      $('p-scan-form').addEventListener('submit',e=>{e.preventDefault();if(selected){$('p-stock-message').textContent='Terminez ou annulez le mouvement en cours avant le prochain scan.';return;}const q=$('p-scan-input').value.trim().toLocaleLowerCase('fr');if(!q){$('p-stock-message').textContent='Scannez un code ou saisissez un nom.';return;}const matches=stock.filter(s=>s.id.toLocaleLowerCase('fr')===q||s.name.toLocaleLowerCase('fr').includes(q));if(matches.length===1){choose(matches[0]);}else{closeCandidate();$('p-stock-message').textContent=matches.length?'Plusieurs produits correspondent. Précisez le nom.':'Produit inconnu. Ouvrez « Saisie manuelle » pour le renseigner.';}});
+      $('p-entry').addEventListener('click',()=>{if(selected){selected.qty++;finish('Entrée enregistrée : 1 boîte de '+selected.name+'.');}});
+      $('p-exit').addEventListener('click',()=>{if(!selected)return;$('p-exit-form').hidden=false;$('p-exit-quantity').value='1';$('p-exit-quantity').max=String(selected.qty);$('p-exit-lot').textContent=selected.lot+' · '+selected.qty+' boîte(s) disponible(s)';});
+      $('p-exit-form').addEventListener('submit',e=>{e.preventDefault();const n=Number($('p-exit-quantity').value);if(!selected||!Number.isInteger(n)||n<1||n>selected.qty){$('p-stock-message').textContent='Quantité indisponible dans ce lot.';return;}selected.qty-=n;finish('Sortie enregistrée : '+n+' boîte(s) de '+selected.name+'.');});
+      $('p-cancel').addEventListener('click',()=>{closeCandidate();$('p-stock-message').textContent='Mouvement annulé. Le stock est inchangé.';});
+      $('p-manual-form').addEventListener('submit',e=>{e.preventDefault();const id=$('p-manual-cip').value.trim(),name=$('p-manual-name').value.trim(),lot=$('p-manual-lot').value.trim(),expiry=$('p-manual-date').value;if(!id||!name||!lot||!expiry)return;if(stock.some(s=>s.id===id)){$('p-stock-message').textContent='Ce code existe déjà. Sélectionnez le produit dans l’inventaire.';return;}stock.push({id,name,lot,expiry,qty:1});e.target.reset();e.target.closest('details').open=false;finish('Entrée enregistrée : 1 boîte de '+name+'.');});
+      function renderPrint(){$('p-print-content').innerHTML='<div class="p-tablewrap"><table><thead><tr><th>Produit</th><th>Lot</th><th>Péremption</th><th class="p-num">Boîtes</th></tr></thead><tbody>'+$('p-detail-rows').innerHTML+'</tbody></table></div>';}
+      $('p-export').addEventListener('click',()=>{$('p-print-panel').hidden=false;renderPrint();});$('p-close-print').addEventListener('click',()=>{$('p-print-panel').hidden=true;});
+      let mode='stock',analyzed=false;
+      function invalidate(){if(analyzed){$('p-stale').hidden=false;$('p-analysis-export').disabled=true;$('p-analysis-stamp').textContent='Ancien résultat';$('p-analysis-message').textContent='';}}
+      function analysisMode(next){mode=next;$('p-mode-stock').setAttribute('aria-pressed',String(mode==='stock'));$('p-mode-break').setAttribute('aria-pressed',String(mode==='break'));$('p-provider-files').hidden=mode!=='break';$('p-analysis-results').hidden=true;analyzed=false;$('p-analysis-export').disabled=true;$('p-stale').hidden=true;}
+      $('p-mode-stock').addEventListener('click',()=>analysisMode('stock'));$('p-mode-break').addEventListener('click',()=>analysisMode('break'));['p-cover-min','p-cover-max'].forEach(id=>$(id).addEventListener('input',invalidate));
+      $('p-analyze').addEventListener('click',()=>{const min=Number($('p-cover-min').value),max=Number($('p-cover-max').value);if(!Number.isFinite(min)||!Number.isFinite(max)||min<1||min>90||max<min||max>180){$('p-stale').hidden=false;$('p-stale').textContent='Le maximum doit être au moins égal au minimum, dans les limites indiquées.';return;}analyzed=true;$('p-stale').hidden=true;$('p-stale').textContent='Réglages modifiés : relancez l’analyse avant d’exporter.';$('p-analysis-export').disabled=false;$('p-analysis-results').hidden=false;$('p-analysis-message').textContent='';$('p-analysis-stamp').textContent='Exemple recalculé · '+min+' / '+max+' jours';$('p-analysis-title').textContent=mode==='stock'?'Stocks min / max':'Commande UNIPHARMA';$('p-analysis-head').innerHTML=mode==='stock'?'<tr><th>Produit</th><th>Code CIP</th><th class="p-num">Min</th><th class="p-num">Max</th></tr>':'<tr><th>Produit</th><th>Situation</th><th class="p-num">À commander</th></tr>';$('p-analysis-body').innerHTML=mode==='stock'?stock.slice(0,4).map((s,i)=>`<tr><td>${esc(s.name)}</td><td class="p-cip">${esc(s.id)}</td><td class="p-num">${Math.ceil((i+1)*min/3)}</td><td class="p-num">${Math.ceil((i+1)*max/3)}</td></tr>`).join(''):`<tr><td>Produit de démonstration A</td><td><span class="p-status p-danger">Stock épuisé</span></td><td class="p-num">${Math.ceil(max/3)}</td></tr><tr><td>Produit de démonstration B</td><td><span class="p-status p-warn">À anticiper</span></td><td class="p-num">${Math.ceil(max/5)}</td></tr>`;});
+      $('p-analysis-export').addEventListener('click',()=>{$('p-analysis-message').textContent='Aperçu prêt : le fichier reprendrait exactement les lignes et valeurs affichées.';});
+      const orders=[{name:'Patient exemple A',product:'Produit A',state:'À commander',action:'Commande envoyée',done:false},{name:'Patient exemple B',product:'Produit B',state:'Livraison attendue',action:'Boîte reçue',done:false},{name:'Patient exemple C',product:'Produit C',state:'À facturer',action:'Facturé et délivré',done:false}];
+      function renderWork(kind,items){const all=$(kind==='orders'?'p-orders-all':'p-rental-all').checked;$(kind==='orders'?'p-orders-rows':'p-rental-rows').innerHTML=items.map((s,i)=>({s,i})).filter(({s})=>all||!s.done).map(({s,i})=>`<tr><td>${esc(s.name)}<div class="p-sub">${esc(s.product)}</div></td><td><span class="p-status ${s.done?'':'p-warn'}">${s.done?'À jour':esc(s.state)}</span></td><td>${s.done?'—':`<button type="button" class="cursor-interaction" data-task="${i}">${esc(s.action)}</button>`}</td></tr>`).join('')||'<tr><td colspan="3" class="p-empty">Tout est à jour pour aujourd’hui.</td></tr>';}
+      [['orders',orders]].forEach(([kind,items])=>{$('p-'+kind+'-all').addEventListener('change',()=>renderWork(kind,items));$('p-'+kind+'-rows').addEventListener('click',e=>{const b=e.target.closest('[data-task]');if(!b)return;const item=items[Number(b.dataset.task)];item.done=true;$('p-'+kind+'-message').textContent=item.name+' : '+item.action.toLocaleLowerCase('fr')+'.';renderWork(kind,items);});renderWork(kind,items);});
+      $('p-new-order').addEventListener('click',()=>{$('p-order-form').hidden=false;$('p-order-person').focus();});$('p-order-cancel').addEventListener('click',()=>{$('p-order-form').hidden=true;});
+      $('p-order-form').addEventListener('submit',e=>{e.preventDefault();const name=$('p-order-person').value.trim(),product=$('p-order-product').value.trim();if(!name||!product)return;orders.push({name,product,state:'À commander',action:'Commande envoyée',done:false});e.target.reset();e.target.hidden=true;renderWork('orders',orders);$('p-orders-message').textContent='Dossier créé : '+name+'.';});
+      const rentalCases=[
+        {id:'lit',name:'Patient exemple D',product:'Lit médicalisé',start:'2026-08-03',covered:'2026-08-16',from:'2026-08-17',to:'2026-09-13',status:'ready',approval:'EX-ACCORD-01',approvalFrom:'2026-08-03',approvalTo:'2026-11-02',lines:[{label:'Location · 4 semaines complètes',from:'2026-08-17',to:'2026-09-13',units:4,rate:1000}]},
+        {id:'fauteuil',mode:'achat',name:'Patient exemple E',product:'Fauteuil roulant · achat',start:'2026-09-07',covered:null,from:'2026-09-07',to:'2026-09-07',status:'ready',approval:'EX-ACCORD-02',approvalFrom:'2026-09-02',approvalTo:'2026-10-02',lines:[{label:'Fauteuil roulant · achat unique',from:'2026-09-07',to:'2026-09-07',units:1,rate:70000}]},
+        {id:'accord',name:'Patient exemple F',product:'Lit médicalisé',start:'2026-08-31',covered:null,from:'2026-08-31',to:'2026-09-13',status:'blocked',reason:'Accord manquant',lines:[{label:'Location · 2 semaines complètes',from:'2026-08-31',to:'2026-09-13',units:2,rate:1000}]},
+        {id:'limite',name:'Patient exemple G',product:'Fauteuil roulant · courte durée',start:'2026-03-02',covered:'2026-08-30',from:'2026-08-31',to:'2026-09-13',status:'blocked',reason:'Limite de durée atteinte',lines:[]}
+      ];
+      const rentalHistory=[{id:'ex-h1',name:'Patient exemple D',product:'Lit médicalisé',from:'2026-08-03',to:'2026-08-16',ref:'EX-2026-008',issued:'2026-08-18',amount:2000,paid:true}];
+      let rentalView='ready',activeRental=null;
+      const cfp=n=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:0}).format(n)+' F CFP';
+      const range=(a,b)=>fmt(a)+' – '+fmt(b);
+      function rentalRender(){
+        ['ready','blocked','history'].forEach(v=>{const b=$('p-r-'+v);b.setAttribute('aria-pressed',String(v===rentalView));b.textContent=({ready:'À facturer',blocked:'À compléter',history:'Historique'})[v]+' · '+(v==='history'?rentalHistory.length:rentalCases.filter(x=>x.status===v).length);});
+        $('p-r-title').textContent=({ready:'Dossiers prêts à préparer',blocked:'Un point à résoudre',history:'Factures enregistrées'})[rentalView];
+        const rows=rentalView==='history'?rentalHistory:rentalCases.filter(x=>x.status===rentalView);
+        $('p-rental-rows').innerHTML=rows.map(x=>`<tr><td><strong>${esc(x.name)}</strong><div class="p-sub">${esc(x.product)}</div></td><td>${x.mode==='achat'?fmt(x.from):esc(range(x.from,x.to))}<div class="p-sub">${rentalView==='history'?esc(x.ref):x.mode==='achat'?'Délivrance · facture unique':x.id==='limite'?'Dossier à réexaminer':'Semaines complètes'}</div></td><td><span class="p-status ${rentalView==='blocked'?'p-warn':''}">${rentalView==='history'?(x.paid?'Réglée':'Paiement à suivre'):rentalView==='blocked'?esc(x.reason):'Prêt'}</span></td><td><button type="button" class="cursor-interaction" data-rental="${esc(x.id)}">${rentalView==='history'?'Voir':rentalView==='blocked'?(x.id==='limite'?'Examiner l’achat':'Compléter'):'Préparer'}</button></td></tr>`).join('')||'<tr><td colspan="4" class="p-empty">Aucun dossier dans cette vue.</td></tr>';
+      }
+      function showRental(id){
+        const historical=rentalHistory.find(x=>x.id===id);
+        const item=historical||rentalCases.find(x=>x.id===id);if(!item)return;
+        activeRental=item.id;$('p-r-detail').hidden=false;$('p-r-detail-person').textContent=item.name+' · '+item.product;
+        $('p-r-detail-title').textContent=historical?'Facture '+item.ref:item.status==='blocked'?item.reason:item.mode==='achat'?'Préparer l’achat du fauteuil':'Récapitulatif de la période';
+        const box=$('p-r-detail-content');
+        if(historical){box.innerHTML=`<dl class="p-r-facts"><div><dt>${item.mode==='achat'?'Délivrance':'Prestation couverte'}</dt><dd>${item.mode==='achat'?fmt(item.from):range(item.from,item.to)}</dd></div><div><dt>Facture émise le</dt><dd>${fmt(item.issued)}</dd></div><div><dt>Montant fictif</dt><dd>${cfp(item.amount)}</dd></div><div><dt>Suivi</dt><dd>${item.paid?'Règlement enregistré':'Facturée · règlement attendu'}</dd></div></dl>${item.paid?'':`<button type="button" class="p-primary cursor-interaction" id="p-r-paid">Simuler le règlement</button>`}`;
+          if(!item.paid)$('p-r-paid').addEventListener('click',()=>{item.paid=true;rentalRender();showRental(item.id);$('p-rental-message').textContent='Règlement fictif enregistré. Les dates de prestation sont conservées.';});return;}
+        if(item.id==='limite'){
+          box.innerHTML=`<dl class="p-r-facts"><div><dt>Début réel</dt><dd>${fmt(item.start)}</dd></div><div><dt>Déjà facturé jusqu’au</dt><dd>${fmt(item.covered)}</dd></div></dl><div class="p-notice">26 semaines atteintes. La période suivante demande une décision documentée.</div><p>Achat à examiner en priorité : vérifier la prescription, le devis et les conditions de prise en charge. La location en cours et son historique restent conservés jusqu’à décision.</p><details><summary class="cursor-interaction">Référence du profil</summary><p class="p-sub">Fauteuil courte durée · document CAFAT du 02/02/2026, présenté comme provisoire. Les exceptions et dossiers anciens doivent être vérifiés.</p></details>`;return;
+        }
+        if(item.status==='blocked'){
+          box.innerHTML=`<p>Renseigner l’accord reçu pour la période du ${range(item.from,item.to)}.</p><form id="p-r-approval-form"><div class="p-fields"><div><label for="p-r-approval-ref">Référence fictive de l’accord</label><input id="p-r-approval-ref" required placeholder="EX-ACCORD-03"></div><div><label for="p-r-approval-from">Prise en charge du</label><input id="p-r-approval-from" type="date" required></div><div><label for="p-r-approval-to">Au</label><input id="p-r-approval-to" type="date" required></div></div><p id="p-r-error" role="alert"></p><button class="p-primary cursor-interaction" type="submit">Enregistrer l’accord fictif</button></form>`;
+          $('p-r-approval-form').addEventListener('submit',e=>{e.preventDefault();const ref=$('p-r-approval-ref').value.trim(),from=$('p-r-approval-from').value,to=$('p-r-approval-to').value;if(!ref||!from||!to||from>to){$('p-r-error').textContent='Renseignez une référence et des dates cohérentes.';return;}item.approval=ref;item.approvalFrom=from;item.approvalTo=to;if(from>item.from||to<item.to){$('p-r-error').textContent='Cet accord ne couvre pas toute la période proposée. Le dossier reste à compléter.';return;}item.status='ready';rentalView='ready';rentalRender();showRental(item.id);$('p-rental-message').textContent='Accord fictif enregistré. La période peut être préparée.';});return;
+        }
+        const amount=item.lines.reduce((n,x)=>n+x.units*x.rate,0);
+        box.innerHTML=`<div class="p-row"><span class="p-status">Accord renseigné</span><span class="p-status">${item.mode==='achat'?'Prescription d’achat renseignée':'Prescription renseignée'}</span><span class="p-sub">Tarifs de démonstration</span></div><dl class="p-r-facts"><div><dt>${item.mode==='achat'?'Date de délivrance':'Début réel'}</dt><dd>${fmt(item.start)}</dd></div><div><dt>${item.mode==='achat'?'Facturation':'Déjà facturé jusqu’au'}</dt><dd>${item.mode==='achat'?'Unique · sans renouvellement mensuel':item.covered?fmt(item.covered):'Aucune période'}</dd></div><div><dt>Accord · ${esc(item.approval)}</dt><dd>${range(item.approvalFrom,item.approvalTo)}</dd></div></dl><div class="p-tablewrap"><table aria-label="Lignes de préparation fictives"><thead><tr><th>Prestation / période</th><th class="p-num">Unités</th><th class="p-num">Tarif fictif</th><th class="p-num">Montant</th></tr></thead><tbody>${item.lines.map(l=>`<tr><td>${esc(l.label)}<div class="p-sub">${item.mode==='achat'?'Délivré le '+fmt(l.from):range(l.from,l.to)}</div></td><td class="p-num">${l.units}</td><td class="p-num">${cfp(l.rate)}</td><td class="p-num">${cfp(l.units*l.rate)}</td></tr>`).join('')}</tbody></table></div><div class="p-r-total"><span>Montant illustratif · part CAFAT non calculée</span><strong>${cfp(amount)}</strong></div><form id="p-r-invoice-form"><div class="p-fields"><div><label for="p-r-invoice-ref">Référence de la facture émise</label><input id="p-r-invoice-ref" placeholder="EX-2026-009" required></div><div><label for="p-r-invoice-date">Date d’émission</label><input type="date" id="p-r-invoice-date" value="2026-09-20" max="2026-09-20" required></div></div><p id="p-r-error" role="alert"></p><div class="p-row"><button type="submit" class="p-primary cursor-interaction">Enregistrer la référence</button><span class="p-sub">Simulation · aucun envoi à la CAFAT</span></div></form>`;
+        $('p-r-invoice-form').addEventListener('submit',e=>{e.preventDefault();const ref=$('p-r-invoice-ref').value.trim(),issued=$('p-r-invoice-date').value;
+          if(!ref||!issued||issued<'2026-09-14'||issued>'2026-09-20'){$('p-r-error').textContent='Indiquez une référence et une date entre le 14 et le 20 septembre pour cet exemple.';return;}
+          if(rentalHistory.some(x=>x.ref===ref||x.caseId===item.id&&x.from<=item.to&&x.to>=item.from)){$('p-r-error').textContent='Cette référence ou cette période est déjà enregistrée.';return;}
+          const entry={id:'ex-h'+(rentalHistory.length+1),caseId:item.id,mode:item.mode,name:item.name,product:item.product,from:item.from,to:item.to,ref,issued,amount,paid:false};
+          rentalHistory.push(entry);item.status='invoiced';item.covered=item.to;rentalView='history';rentalRender();showRental(entry.id);$('p-rental-message').textContent=item.mode==='achat'?'Achat fictif facturé. Aucune échéance mensuelle créée ; le paiement reste à suivre.':'Facture fictive enregistrée : période couverte jusqu’au '+fmt(item.to)+'. Le paiement reste à suivre.';
+        });
+      }
+      ['ready','blocked','history'].forEach(v=>$('p-r-'+v).addEventListener('click',()=>{rentalView=v;$('p-r-detail').hidden=true;$('p-rental-message').textContent='';rentalRender();}));
+      $('p-rental-rows').addEventListener('click',e=>{const b=e.target.closest('[data-rental]');if(b)showRental(b.dataset.rental);});
+      $('p-r-close').addEventListener('click',()=>{$('p-r-detail').hidden=true;activeRental=null;});
+      rentalRender();
+      renderStock();
+      $('p-nav-rental').click();
+    })();
+  </script>
+</div>
