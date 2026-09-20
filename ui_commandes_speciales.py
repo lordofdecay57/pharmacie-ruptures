@@ -5,15 +5,15 @@
 dans ``commandes_speciales.py`` ; ce fichier ne fait que l'habillage
 Streamlit.
 
-Ergonomie visée : **répondre à trois questions avant tout le reste** — qui
-puis-je facturer aujourd'hui, pour qui faut-il commander, quelle commande
-est en retard. Le tableau complet vient après : c'est la référence, pas le
-geste du matin.
+Une liste de suivi filtrable par priorité, avec les gestes du dossier à
+côté. Les corrections, imports et réglages restent accessibles à la demande.
 """
 
 from __future__ import annotations
 
 import logging
+import json
+from ui_style import escape
 from datetime import date
 
 import pandas as pd
@@ -23,6 +23,7 @@ import base_medicaments
 import commandes_speciales as cs
 import commun
 import ui_commun
+import ui_style
 
 _journal = logging.getLogger("pharmacie.commandes_speciales.ui")
 
@@ -198,31 +199,21 @@ def _medicament_choisi() -> None:
         st.session_state["cs_nouveau_cip"] = medicament["cip"]
 
 
+def _basculer_ajout() -> None:
+    st.session_state["cs_ajout_ouvert"] = not st.session_state.get("cs_ajout_ouvert", False)
+
+
 def _panneau_ajout(dossiers: pd.DataFrame) -> None:
-    """L'ajout d'un dossier, en haut de l'écran et prêt à enchaîner.
-
-    Trois décisions, chacune née d'un défaut constaté :
-
-    - **en haut**, avant les listes du matin. Placé en troisième position,
-      on ne le voyait pas sans faire défiler, et l'écran donnait
-      l'impression de ne gérer qu'un seul patient — celui de la liste
-      déroulante des gestes ;
-    - **ouvert d'office** tant qu'aucun dossier n'existe : un module vide
-      n'a que cette action-là. Et il **reste ouvert** après un ajout, pour
-      qu'on enchaîne les saisies sans le rouvrir à chaque fois ;
-    - **replié** ensuite, pour ne pas manger l'écran de l'usage quotidien.
-    """
-    vide = dossiers is None or dossiers.empty
-    ouvert = vide or st.session_state.get("cs_ajout_ouvert", False)
-    nombre = 0 if vide else len(dossiers)
-    titre = ("➕ Ouvrez un premier dossier" if vide else
-             f"➕ Ouvrir un dossier — {nombre} dossier"
-             f"{'s' if nombre > 1 else ''} déjà suivi"
-             f"{'s' if nombre > 1 else ''}")
-    with st.expander(titre, expanded=ouvert):
-        st.caption("Un dossier par patient ET par médicament. Le même "
-                   "patient peut en avoir plusieurs, et il n'y a pas de "
-                   "limite au nombre de dossiers.")
+    if not dossiers.empty and not st.session_state.get("cs_ajout_ouvert", False):
+        return
+    with st.container(border=True, key="cs_ajout"):
+        titre, fermer = st.columns([5, 1])
+        with titre:
+            ui_style.section("Nouveau dossier" if not dossiers.empty else "Ouvrir votre premier dossier")
+            st.caption("Un patient, un médicament. Les autres informations peuvent être complétées ensuite.")
+        if not dossiers.empty:
+            fermer.button("Fermer", key="cs_fermer_ajout", on_click=_basculer_ajout,
+                          use_container_width=True)
         _formulaire_nouveau()
 
 
@@ -413,112 +404,65 @@ def _formulaire_nouveau() -> None:
     st.rerun()
 
 
-def _actions_rapides(dossiers: pd.DataFrame, aujourdhui: date) -> None:
-    """Les trois gestes du comptoir, sans passer par le tableau.
-
-    Facturer, recevoir, commander : chacun met à jour la bonne date ET le
-    nombre de boîtes, parce que ce sont les mêmes gestes dans la réalité.
-    Laisser corriger deux cases à la main serait laisser l'avance fausse.
-    """
-    if dossiers.empty:
-        st.info("Aucun dossier pour l'instant — ouvrez-en un tout en haut "
-                "de l'écran, dans « ➕ Ouvrez un premier dossier ».")
+def _actions_rapides(dossiers: pd.DataFrame, aujourdhui: date,
+                     vue: pd.DataFrame | None = None) -> None:
+    """Agir sur un dossier visible, avec une sélection stable après un tri."""
+    if vue is None:
+        vue = cs.vue_affichable(dossiers, aujourdhui, cs.TRI_PATIENT)
+    if vue.empty:
+        ui_style.vide("Aucun dossier à sélectionner", "Changez de filtre ou ouvrez un nouveau dossier.")
         return
-    vue = cs.vue_affichable(dossiers, aujourdhui, cs.TRI_PATIENT)
-    libelles = [f"{l['Patient']} — {l['Nom du produit']}"
-                for _, l in vue.iterrows()]
-
-    with st.container(border=True):
-        st.markdown("**Enregistrer un geste**")
-        choix = st.selectbox("Dossier", range(len(libelles)),
-                             format_func=lambda i: libelles[i],
-                             key="cs_geste_dossier",
-                             label_visibility="collapsed")
-        ligne = vue.iloc[choix]
-        jour = st.date_input("Date du geste", value=aujourdhui,
-                            format="DD/MM/YYYY", key="cs_geste_date")
-        c1, c2, c3 = st.columns(3)
-        patient, cip = ligne["Patient"], ligne["Code CIP"]
-        produit = ligne["Nom du produit"]
-
-        if c1.button("💰 Facturé et délivré", use_container_width=True,
-                     type="primary"):
-            if _appliquer(lambda courant: cs.enregistrer_facturation(
-                    courant, patient, cip, produit, jour)) is not None:
-                st.session_state["cs_message"] = (
-                    "ok", f"💰 {patient} — facturé le {jour:%d/%m/%Y}, une "
-                          "boîte sortie. Prochaine facturation possible le "
-                          f"{cs.facturable_le(jour):%d/%m/%Y}.")
-            st.rerun()
-
-        if c2.button("📥 Boîte reçue", use_container_width=True):
-            if _appliquer(lambda courant: cs.enregistrer_reception(
-                    courant, patient, cip, produit, jour)) is not None:
-                st.session_state["cs_message"] = (
-                    "ok", f"📥 {patient} — boîte reçue le {jour:%d/%m/%Y}, "
-                          "elle entre en avance.")
-            st.rerun()
-
-        if c3.button("📧 Mail de commande envoyé", use_container_width=True):
-            if _appliquer(lambda courant: cs.enregistrer_envoi(
-                    courant, patient, cip, produit, jour)) is not None:
-                st.session_state["cs_message"] = (
-                    "ok", f"📧 {patient} — commande partie le "
-                          f"{jour:%d/%m/%Y}.")
-            st.rerun()
+    # Une POSITION change de patient après un filtre ou une écriture voisine.
+    # Le sélecteur garde ici l'identité du dossier, jamais son rang.
+    lignes = {
+        json.dumps([l["Patient"], l["Code CIP"], l["Nom du produit"]], ensure_ascii=False): l
+        for _, l in vue.iterrows()}
+    retenu = st.session_state.get("cs_geste_dossier")
+    if retenu not in lignes:
+        st.session_state.pop("cs_geste_dossier", None)
+    choix = st.selectbox(
+        "Dossier à traiter", list(lignes),
+        format_func=lambda cle: f"{lignes[cle]['Patient']} — {lignes[cle]['Nom du produit']}",
+        key="cs_geste_dossier")
+    ligne = lignes[choix]
+    patient, cip, produit = ligne["Patient"], ligne["Code CIP"], ligne["Nom du produit"]
+    st.markdown(
+        f'<div class="ph-selection"><strong>{escape(patient)}</strong>'
+        f'<p>{escape(produit)}</p></div>', unsafe_allow_html=True)
+    st.caption(f"{int(ligne['Boîtes en main'])} boîte(s) en main · CIP {cip or 'non renseigné'}")
+    prochaine = cs.parser_date(ligne["Facturable le"])
+    st.caption(f"Prochaine échéance : {prochaine:%d/%m/%Y}" if prochaine else
+               "Aucune facturation enregistrée pour ce dossier.")
+    identite_date = (choix, aujourdhui)
+    if st.session_state.get("cs_geste_identite") != identite_date:
+        st.session_state["cs_geste_date"] = aujourdhui
+        st.session_state["cs_geste_identite"] = identite_date
+    jour = st.date_input("Date du geste", format="DD/MM/YYYY", key="cs_geste_date")
+    if st.button("💰 Facturé et délivré", use_container_width=True,
+                 type="primary", key="cs_facturer"):
+        if _appliquer(lambda courant: cs.enregistrer_facturation(
+                courant, patient, cip, produit, jour)) is not None:
+            st.session_state["cs_message"] = (
+                "ok", f"{patient} — facturé le {jour:%d/%m/%Y}, une boîte sortie. "
+                      f"Prochaine échéance le {cs.facturable_le(jour):%d/%m/%Y}.")
+        st.rerun()
+    if st.button("📥 Boîte reçue", use_container_width=True, key="cs_recevoir"):
+        if _appliquer(lambda courant: cs.enregistrer_reception(
+                courant, patient, cip, produit, jour)) is not None:
+            st.session_state["cs_message"] = (
+                "ok", f"{patient} — boîte reçue le {jour:%d/%m/%Y} et ajoutée au dossier.")
+        st.rerun()
+    if st.button("📧 Mail de commande envoyé", use_container_width=True, key="cs_envoyer"):
+        if _appliquer(lambda courant: cs.enregistrer_envoi(
+                courant, patient, cip, produit, jour)) is not None:
+            st.session_state["cs_message"] = (
+                "ok", f"{patient} — commande partie le {jour:%d/%m/%Y}.")
+        st.rerun()
+    st.caption("Enregistrez ici les gestes effectués dans votre logiciel métier ou votre messagerie.")
 
 
 # ---------------------------------------------------------------------------
 # Les trois listes du matin
-# ---------------------------------------------------------------------------
-
-def _liste(titre: str, aide: str, tableau: pd.DataFrame,
-           colonnes: list, vide: str) -> None:
-    """Une des trois listes. Vide, elle le dit — et c'est une bonne
-    nouvelle, pas une absence de données."""
-    st.markdown(f"**{titre}**")
-    if tableau.empty:
-        st.caption(vide)
-        return
-    st.caption(aide)
-    st.dataframe(cs.pour_affichage(tableau[colonnes]),
-                 use_container_width=True, hide_index=True,
-                 column_config=_colonnes_vue())
-
-
-def _listes_du_matin(dossiers: pd.DataFrame, aujourdhui: date,
-                     avance: int) -> None:
-    facturer = cs.a_facturer_aujourdhui(dossiers, aujourdhui)
-    commander = cs.a_commander_maintenant(dossiers, aujourdhui, avance)
-    retard = cs.commandes_en_retard(dossiers, aujourdhui)
-
-    colonne_gauche, colonne_droite = st.columns(2)
-    with colonne_gauche:
-        _liste("💰 À facturer aujourd'hui",
-               "Les 22 jours sont écoulés : la caisse acceptera.",
-               facturer,
-               ["Patient", "Nom du produit", "Boîtes en main",
-                "Dernière facturation"],
-               "Personne à facturer aujourd'hui.")
-    with colonne_droite:
-        _liste("📦 À commander maintenant",
-               "Sans quoi la boîte n'arrivera pas avant la facturation "
-               "suivante.",
-               commander,
-               ["Patient", "Nom du produit", "Boîtes en main",
-                "Jours avant facturation", "Délai observé (j)"],
-               "Rien à commander : les avances tiennent.")
-
-    if not retard.empty:
-        _liste("⏰ Commandes en retard",
-               "Mail parti, rien reçu, délai habituel dépassé : relancez.",
-               retard,
-               ["Patient", "Nom du produit", "Envoi du mail", "Attente (j)"],
-               "")
-
-
-# ---------------------------------------------------------------------------
-# Tableau complet
 # ---------------------------------------------------------------------------
 
 def _tableau(dossiers: pd.DataFrame, aujourdhui: date, tri: str,
@@ -605,7 +549,7 @@ def _rapprochement(dossiers: pd.DataFrame) -> None:
     ecarts = cs.ecarts_a_verifier(rapprochement)
     titre = ("✅ Dossiers et stock interne d'accord" if ecarts.empty else
              f"⚠️ {len(ecarts)} écart(s) entre les dossiers et le stock interne")
-    with st.expander(titre, expanded=not ecarts.empty):
+    with st.expander(titre):
         st.caption(
             "Le code CIP identifie un produit, pas une boîte : si deux "
             "patients suivent le même médicament, rien ne dit laquelle des "
@@ -620,46 +564,27 @@ def _rapprochement(dossiers: pd.DataFrame) -> None:
 # Écran
 # ---------------------------------------------------------------------------
 
-def _bandeau(resume: dict, tuile) -> None:
-    st.markdown('<div class="kpi-row">' + "".join([
-        tuile("Dossiers suivis", resume["dossiers"], "accent",
-              sous=f'{resume["patients"]} patient(s)'),
-        tuile("💰 À facturer", resume["a_facturer"],
-              "accent" if resume["a_facturer"] else "",
-              sous="les 22 jours sont écoulés"),
-        tuile("📦 À commander", resume["a_commander"],
-              "critical" if resume["a_commander"] else "",
-              sous="sinon le patient attendra"),
-        tuile("⏰ En retard", resume["en_retard"],
-              "critical" if resume["en_retard"] else "",
-              sous="à relancer"),
-    ]) + "</div>", unsafe_allow_html=True)
-
-
-def _barre_laterale(dossiers: pd.DataFrame, aujourdhui: date) -> tuple:
-    with st.sidebar:
-        st.markdown("### 💠 Commandes spéciales")
-        st.caption("Produits chers importés du continent : deux horloges par "
-                   "patient — l'import, et les "
-                   f"{cs.DELAI_FACTURATION_J} jours de la caisse.")
-        aujourdhui = st.date_input("Date du jour", value=aujourdhui,
-                                   format="DD/MM/YYYY", key="cs_date")
-        avance = st.number_input(
-            "Boîtes d'avance visées", min_value=0, max_value=10,
-            value=cs.AVANCE_CIBLE_DEFAUT, step=1, key="cs_avance",
-            help="L'avance qui absorbe le délai d'import. En dessous, le "
-                 "dossier passe dans « à commander ».")
-        st.divider()
-        st.markdown("#### Mémoire")
-        st.caption(f"{len(dossiers)} dossier(s)\n\n`{DOSSIERS_PATH.name}`")
-        with st.expander("🗑️ Vider les dossiers"):
-            st.warning("Supprime tous les dossiers de commandes spéciales.")
-            if st.button("Confirmer la remise à zéro",
-                         use_container_width=True, key="cs_vider"):
-                if _appliquer(lambda _: cs.dossier_vide()) is not None:
-                    st.session_state["cs_message"] = (
-                        "ok", "Dossiers remis à zéro.")
-                st.rerun()
+def _reglages(dossiers: pd.DataFrame, aujourdhui: date) -> tuple:
+    st.markdown("**Réglages des commandes**")
+    st.caption("Date de travail et niveau d’avance souhaité.")
+    aujourdhui = st.date_input("Date du jour", value=aujourdhui,
+                               format="DD/MM/YYYY", key="cs_date")
+    avance = st.number_input(
+        "Boîtes d'avance visées", min_value=0, max_value=10,
+        value=cs.AVANCE_CIBLE_DEFAUT, step=1, key="cs_avance",
+        help="L'avance qui absorbe le délai d'import. En dessous, le "
+             "dossier passe dans « à commander ».")
+    st.divider()
+    st.markdown("#### Mémoire")
+    st.caption(f"{len(dossiers)} dossier(s)\n\n`{DOSSIERS_PATH.name}`")
+    with st.expander("🗑️ Vider les dossiers"):
+        st.warning("Supprime tous les dossiers de commandes spéciales.")
+        if st.button("Confirmer la remise à zéro",
+                     use_container_width=True, key="cs_vider"):
+            if _appliquer(lambda _: cs.dossier_vide()) is not None:
+                st.session_state["cs_message"] = (
+                    "ok", "Dossiers remis à zéro.")
+            st.rerun()
     return aujourdhui, int(avance)
 
 
@@ -682,79 +607,101 @@ def _zone_impression(dossiers: pd.DataFrame, aujourdhui: date,
         mime=_MIME_PDF, use_container_width=True, type="primary")
 
 
-def rendre(etape, tuile_kpi) -> None:
-    """Affiche l'écran complet du module.
-
-    ``etape`` et ``tuile_kpi`` sont les fonctions d'habillage de ``app.py``,
-    passées en paramètre pour garder ce module indépendant de l'application.
-    """
+def rendre(etape=None, tuile_kpi=None) -> None:
+    """Une liste de suivi et un panneau d'actions sur les dossiers visibles."""
     dossiers = _etat()
-    aujourdhui, avance = _barre_laterale(dossiers, date.today())
-
+    titre, ajout, outils = st.columns([4, 1.3, 1])
+    with titre:
+        ui_style.entete("Commandes spéciales", "Chaque patient, sa commande et sa prochaine échéance.")
+    ajout.button("+ Nouveau dossier", type="primary", use_container_width=True,
+                 key="cs_ouvrir_ajout", on_click=_basculer_ajout)
+    with outils:
+        with st.popover("Réglages", use_container_width=True):
+            aujourdhui, avance = _reglages(dossiers, date.today())
+            _import_fichier(dossiers)
+    dossiers = _etat()
     message = st.session_state.pop("cs_message", None)
     if message:
         niveau, texte = message
         (st.success if niveau == "ok" else st.warning)(texte)
-
-    _bandeau(cs.resume(dossiers, aujourdhui, avance), tuile_kpi)
-
-    # --- Ajouter, tout en haut ---------------------------------------------
-    # L'ajout était en troisième position, sous deux sections : on ne le
-    # voyait pas sans faire défiler, et l'écran donnait l'impression de ne
-    # gérer qu'un seul patient — celui de la liste déroulante des gestes.
-    # C'est pourtant l'action de départ : un module vide n'a que celle-là.
     _panneau_ajout(dossiers)
-    _import_fichier(dossiers)
-
-    # --- Le matin ----------------------------------------------------------
-    etape("1", "Ce qu'il y a à faire aujourd'hui",
-          "Trois questions, trois listes — le reste peut attendre.")
-    _listes_du_matin(dossiers, aujourdhui, avance)
-
-    st.divider()
-    etape("2", "Enregistrez un geste",
-          "Facturer, recevoir, commander sur un dossier DÉJÀ ouvert : la "
-          "date et les boîtes bougent ensemble.")
-    _actions_rapides(dossiers, aujourdhui)
-
-    # --- La référence ------------------------------------------------------
-    st.divider()
-    etape("3", "Tous les dossiers", "La référence, corrigeable à la main.")
-    colonne_vue, colonne_recherche, colonne_tri = st.columns([2, 3, 2])
-    vue_choisie = colonne_vue.selectbox("👓 Afficher", cs.VUES, key="cs_vue")
-    recherche = colonne_recherche.text_input(
-        "🔍 Rechercher", key="cs_recherche",
-        placeholder="Nom du patient, médicament ou code CIP")
-    tri = colonne_tri.selectbox("↕️ Classer par", cs.TRIS, key="cs_tri")
-
     if dossiers.empty:
-        st.info("Aucun dossier — ouvrez-en un tout en haut de l'écran.")
-    elif recherche.strip():
-        # Le tableau ne devient modifiable que sur la liste ENTIÈRE :
-        # corriger une vue filtrée réécrirait les dossiers en perdant les
-        # lignes masquées.
-        vue = cs.vue_affichable(dossiers, aujourdhui, tri, avance)
-        motif = recherche.strip().lower()
-        garde = vue.apply(
-            lambda l: motif in f"{l['Patient']} {l['Nom du produit']} "
-                               f"{l['Code CIP']}".lower(), axis=1)
-        filtree = vue[garde]
-        colonnes = (cs.COLONNES_LECTURE if vue_choisie == cs.VUE_LECTURE
-                    else cs.COLONNES_CORRECTION)
-        st.dataframe(cs.pour_affichage(filtree[colonnes]),
-                     use_container_width=True, hide_index=True,
-                     column_config=_colonnes_vue())
-        st.caption(f"{len(filtree)} dossier(s) trouvé(s). Videz la "
-                   "recherche pour corriger le tableau.")
-    else:
-        corrige = _tableau(dossiers, aujourdhui, tri, avance, vue_choisie)
-        if corrige is not None:
-            _enregistrer_corrections(corrige)
-            st.rerun()
+        return
 
+    # Les statuts et délais sont calculés sur TOUS les dossiers : le délai
+    # d'import d'un produit ne doit pas changer quand on filtre un patient.
+    tri = st.session_state.get("cs_tri", cs.TRI_FACTURATION)
+    vue = cs.vue_affichable(dossiers, aujourdhui, tri, avance)
+    masques = {
+        "Tous": pd.Series(True, index=vue.index),
+        "À facturer": vue["Facturation"].isin((cs.STATUT_FACTURABLE, cs.STATUT_JAMAIS_FACTURE)),
+        "À commander": vue["À commander"] != "",
+        "En retard": vue["Commande"] == cs.STATUT_RETARD,
+    }
+    nombres = {nom: int(masque.sum()) for nom, masque in masques.items()}
+    priorite = st.segmented_control(
+        "Priorité des dossiers", list(masques), default="Tous", key="cs_priorite",
+        format_func=lambda nom: f"{nom} · {nombres[nom]}",
+        label_visibility="collapsed", width="stretch") or "Tous"
+
+    liste, gestes = st.columns([2.5, 1], gap="medium")
+    with liste:
+        with st.container(border=True, key="cs_liste"):
+            en_tete, export = st.columns([4, 1])
+            with en_tete:
+                ui_style.section("Dossiers patients", f"{len(dossiers)} dossier(s) suivis")
+            exports = export.popover("Exporter", use_container_width=True)
+            col_recherche, col_tri = st.columns([3, 2])
+            recherche = col_recherche.text_input(
+                "Rechercher un dossier", key="cs_recherche",
+                placeholder="Patient, médicament ou CIP")
+            tri = col_tri.selectbox("Classer par", cs.TRIS, key="cs_tri")
+            # La sélection du tri a déjà mis l'état de session à jour lors
+            # du rerendu ; on conserve les masques alignés sur cette vue.
+            filtree = vue[masques[priorite]].copy()
+            motif = recherche.strip().casefold()
+            if motif:
+                garde = filtree.apply(
+                    lambda l: motif in f"{l['Patient']} {l['Nom du produit']} {l['Code CIP']}".casefold(), axis=1)
+                filtree = filtree.loc[garde.astype(bool)]
+            if filtree.empty:
+                ui_style.vide("Aucun dossier dans cette vue", "Choisissez une autre priorité ou modifiez votre recherche.")
+            else:
+                lecture = cs.pour_affichage(filtree)
+                lecture["À commander"] = lecture["À commander"].map(
+                    lambda valeur: "À commander" if valeur else "")
+                ui_style.tableau(
+                    lecture[["Patient", "Nom du produit", "Boîtes en main", "Facturation", "Facturable le", "Commande", "À commander"]],
+                    "Suivi des commandes spéciales",
+                    libelles={"Nom du produit": "Médicament", "Boîtes en main": "En main"},
+                    secondaires={"Facturation": "Facturable le", "Commande": "À commander"},
+                    badges={
+                        "Facturation": {
+                            cs.STATUT_FACTURABLE: ("Échéance atteinte", "vert"),
+                            cs.STATUT_ATTENTE_FACTURATION: ("À attendre", "ambre"),
+                            cs.STATUT_JAMAIS_FACTURE: ("Première facturation", ""),
+                        },
+                        "Commande": {
+                            cs.STATUT_RIEN_EN_COURS: ("Rien en cours", ""),
+                            cs.STATUT_EN_TRANSIT: ("En transit", "bleu"),
+                            cs.STATUT_RETARD: ("En retard", "rouge"),
+                            cs.STATUT_RECU: ("Reçu", "vert"),
+                        }})
+            st.caption(f"{len(filtree)} dossier(s) affiché(s) · suivi au {aujourdhui:%d/%m/%Y}")
+            with exports:
+                st.caption("Export de tous les dossiers dans le classement choisi.")
+                _zone_impression(dossiers, aujourdhui, tri)
+    with gestes:
+        with st.container(border=True, key="cs_actions"):
+            ui_style.section("Enregistrer un geste")
+            _actions_rapides(dossiers, aujourdhui, filtree)
+
+    with st.expander("Corriger les dates et les quantités"):
+        if recherche.strip() or priorite != "Tous":
+            st.caption("Choisissez Tous et videz la recherche pour corriger les dossiers.")
+        else:
+            corrige = _tableau(dossiers, aujourdhui, tri, avance, cs.VUE_CORRECTION)
+            if corrige is not None:
+                _enregistrer_corrections(corrige)
+                st.rerun()
     _rapprochement(dossiers)
-
-    st.divider()
-    etape("4", "Imprimez ou exportez",
-          "La liste du matin, à poser à côté du téléphone.")
-    _zone_impression(dossiers, aujourdhui, tri)

@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.36"
+VERSION_APP = "6.37"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -89,239 +89,16 @@ COLONNES_HISTORIQUE = ui_commun.COLONNES_HISTORIQUE
 # ne lit ni n'écrit ce fichier (isolation fonctionnelle des deux modules).
 
 st.set_page_config(page_title="Pharmacie — stock & ruptures", page_icon="💊",
-                   layout="wide", initial_sidebar_state="expanded")
+                   layout="wide", initial_sidebar_state="collapsed")
 
 # ---------------------------------------------------------------------------
 # Habillage (bandeau, tuiles KPI) — l'urgence/alerte est TOUJOURS icône +
 # libellé, la couleur n'est qu'un renfort (accessibilité, impression N&B).
 # ---------------------------------------------------------------------------
 
-st.markdown("""
-<style>
-/* Bandeau volontairement DISCRET : il rappelle où l'on est et quelle
-   version tourne, rien de plus. La place revient au choix de l'espace de
-   travail, juste en dessous, qui est la vraie décision de l'écran. */
-.hero {
-  background: linear-gradient(120deg, #214d3d, #39644d);
-  border-radius: 10px; padding: 10px 18px; color: #ffffff;
-  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-}
-.hero h1 { color: #ffffff; font-size: 1.12rem; margin: 0; padding: 0;
-  font-weight: 700; }
-.hero .version { font-size: .74rem; font-weight: 600;
-  background: rgba(255,255,255,.22); border-radius: 999px; padding: 1px 9px;
-  letter-spacing: .3px; }
-/* Version périmée : signalé en ambre, impossible à confondre avec le reste
-   du bandeau — c'est la seule information du bandeau qui appelle une action. */
-.hero .maj { background: #b45309; color: #fff; font-size: .78rem;
-  font-weight: 600; border-radius: 999px; padding: 3px 12px; }
+import ui_style
 
-/* Choix de l'espace de travail : deux grands onglets, impossibles à
-   manquer. Ciblé par la clé du widget (st-key-espace_travail) pour ne pas
-   déformer les autres groupes de boutons de l'application. */
-.st-key-espace_travail { margin: 12px 0 4px 0; }
-/* `align-items` ne sert à rien tant que Streamlit dispose ce groupe en
-   bloc — il l'a fait en flex par le passé, et le fera peut-être encore.
-   La règle est là pour ce jour-là : en flex, l'alignement par défaut
-   étirerait les trois onglets à la hauteur du plus haut, et l'onglet où
-   l'on douche — volontairement plus grand, voir plus bas — n'aurait
-   soudain plus rien de plus grand que ses voisins. */
-.st-key-espace_travail [data-testid="stButtonGroup"] {
-  gap: 10px; align-items: center;
-}
-.st-key-espace_travail button {
-  padding: 15px 20px !important; border-radius: 10px !important;
-  border: 1px solid rgba(11,11,11,.14) !important;
-}
-.st-key-espace_travail button p {
-  font-size: 1.05rem !important; font-weight: 600 !important;
-}
-/* L'onglet ACTIF est plein : la couleur seule ne suffirait pas à le
-   distinguer d'un survol, un fond franc le rend évident.
-   DEUX sélecteurs : « aria-checked » est l'attribut standard, stable d'une
-   version de Streamlit à l'autre ; « kind » était l'attribut interne des
-   versions ≤ 1.58, disparu depuis. S'appuyer sur le seul attribut interne
-   faisait perdre le remplissage — et les onglets redevenaient indistincts —
-   au premier Streamlit un peu récent. */
-.st-key-espace_travail button[aria-checked="true"],
-.st-key-espace_travail button[kind="segmented_controlActive"] {
-  background: #0f766e !important; border-color: #0f766e !important;
-  box-shadow: 0 2px 6px rgba(15,118,110,.30) !important;
-}
-.st-key-espace_travail button[aria-checked="true"] p,
-.st-key-espace_travail button[kind="segmented_controlActive"] p {
-  color: #ffffff !important;
-}
-
-/* L'ONGLET OÙ L'ON DOUCHE. Trois espaces de travail, et un seul se
-   pratique la douchette à la main : celui-là doit se repérer sans lire.
-   Il porte donc le turquoise de l'application en permanence — allumé
-   comme éteint — quand les deux autres restent neutres.
-   La COULEUR SEULE, et pas la taille : l'agrandir déséquilibrait la
-   barre, un onglet deux fois plus haut que ses voisins au-dessus d'un
-   écran par ailleurs aligné. Tous gardent donc la même forme, et
-   c'est le turquoise qui désigne celui-ci — il se voit d'aussi loin,
-   sans rien décaler.
-   `:nth-child(1)` : le stock interne est le PREMIER des onglets —
-   il l'est devenu à la demande de la pharmacie, qui y passe ses journées.
-   Ce sélecteur suit donc l'ordre de déclaration dans `app.py` : les
-   déplacer sans le corriger colorerait le mauvais onglet, et un test le
-   vérifie sur ce que rend le navigateur. */
-.st-key-espace_travail button:nth-child(1) {
-  border-color: #0d9488 !important; background: #f0fdfa !important;
-}
-.st-key-espace_travail button:nth-child(1) p { color: #0f766e !important; }
-.st-key-espace_travail button:nth-child(1)[aria-checked="true"],
-.st-key-espace_travail
-  button:nth-child(1)[kind="segmented_controlActive"] {
-  background: #0d9488 !important; border-color: #0d9488 !important;
-}
-.st-key-espace_travail button:nth-child(1)[aria-checked="true"] p,
-.st-key-espace_travail
-  button:nth-child(1)[kind="segmented_controlActive"] p {
-  color: #ffffff !important;
-}
-
-/* LA ZONE OÙ L'ON DOUCHE. C'est le point de départ de tout l'écran, et
-   c'était un champ de texte gris comme les autres : rien ne disait que
-   c'est là que ça se passe.
-   Un premier essai s'était contenté de teinter le champ en #f0fdfa — un
-   turquoise si pâle qu'à l'écran de l'officine il passait pour du blanc.
-   La zone porte donc maintenant un vrai PANNEAU coloré, et le champ y est
-   blanc AU MILIEU : c'est le contraste entre les deux qui se voit de
-   loin, pas la teinte du champ seul.
-   Ciblé par la clé du CONTENEUR (st-key-sf_zone_scan) et non du champ :
-   celui-ci change de clé après chaque choix à la souris — il faut le
-   faire renaître, sans quoi la douchette cesse de repondre (voir
-   `_remonter_le_champ` dans ui_stock_ferme.py). Une règle accrochée au
-   champ lui-même se décrocherait au premier clic dans la liste. */
-.st-key-sf_zone_scan {
-  background: #ccfbf1 !important;
-  border: 2px solid #0d9488 !important;
-  border-radius: 16px !important;
-  padding: 16px 18px !important;
-  margin-bottom: 10px !important;
-  box-shadow: 0 3px 12px rgba(13,148,136,.22) !important;
-}
-/* Le champ est une LISTE déroulante et non plus une simple ligne de
-   texte : les deux barres de recherche ont fusionné, et c'est elle qui
-   reçoit aussi bien la douchette que les premières lettres d'un nom.
-   Le cadre à habiller est celui que Streamlit pose AUTOUR du champ —
-   `[role="group"]`, qui réunit la saisie et le chevron — et non l'`input`
-   lui-même : le styler seul laisserait le liseré gris par-dessus.
-   Le RÔLE ARIA, et non une classe interne : Streamlit 1.61 a remplacé
-   BaseWeb par React Aria sur ce composant, et un sélecteur
-   `data-baseweb` n'y accroche plus rien — il a été écrit, et il ne
-   colorait rien du tout. Le rôle, lui, décrit ce que la chose EST. */
-/* `min-height` et non `padding` : Streamlit fixe la hauteur de ce cadre,
-   et un rembourrage seul le laissait à ses 40 px d'origine — la zone
-   « agrandie » ne l'était plus du tout depuis que le champ est une liste. */
-.st-key-sf_zone_scan [role="group"] {
-  border: 2px solid #0d9488 !important; background: #ffffff !important;
-  border-radius: 10px !important; padding: 0 10px !important;
-  min-height: 68px !important; height: auto !important;
-  display: flex !important; align-items: center !important;
-  box-shadow: none !important;
-}
-.st-key-sf_zone_scan input {
-  font-size: 1.5rem !important; font-weight: 700 !important;
-  color: #134e4a !important; background: transparent !important;
-}
-/* L'invite reste lisible mais s'efface derrière ce qu'on tape. Elle est
-   longue — elle nomme les deux gestes — donc plus petite que la saisie. */
-.st-key-sf_zone_scan input::placeholder {
-  font-weight: 400 !important; color: #5b7f7a !important;
-  font-size: 1.02rem !important;
-}
-/* Le champ ACTIF s'allume : la douchette n'écrit que dans le champ qui a
-   le curseur, et un bip perdu parce que le curseur était ailleurs ne
-   laisse aucune trace à l'écran. */
-.st-key-sf_zone_scan [role="group"]:focus-within {
-  border-color: #0f766e !important;
-  box-shadow: 0 0 0 4px rgba(15,118,110,.30) !important;
-}
-
-/* LES DEUX BULLES : Entrée et Sortie, proposées APRÈS le scan.
-   Elles ont remplacé deux rectangles posés en permanence au-dessus de
-   l'écran, qui portaient un mode COLLANT — réglé le matin, oublié, et
-   chaque bip suivant partait du mauvais côté.
-   Rondes et pleines, parce qu'elles ne sont plus un réglage mais une
-   question posée à l'instant : on y répond, elles s'en vont. */
-.st-key-sf_bulles { margin: 4px 0 14px 0; border-radius: 18px !important;
-  border: 2px solid #0d9488 !important; background: #f0fdfa !important; }
-.st-key-sf_bulles h3 { margin: 0 0 2px 0 !important;
-  font-size: 1.35rem !important; color: #0f766e !important; }
-.st-key-sf_bulle_entree button,
-.st-key-sf_bulle_sortie button {
-  border-radius: 999px !important; padding: 20px 10px !important;
-  border: 2px solid #0f766e !important; background: #0f766e !important;
-  box-shadow: 0 3px 10px rgba(15,118,110,.30) !important;
-}
-.st-key-sf_bulle_entree button p,
-.st-key-sf_bulle_sortie button p {
-  font-size: 1.3rem !important; font-weight: 700 !important;
-  color: #ffffff !important;
-}
-/* La SORTIE retire du stock : ambre, pour qu'on ne clique pas une entrée
-   en croyant faire une sortie, ou l'inverse. */
-.st-key-sf_bulle_sortie button {
-  border-color: #b45309 !important; background: #b45309 !important;
-  box-shadow: 0 3px 10px rgba(180,83,9,.30) !important;
-}
-/* « ANNULER ». Il avait été traité en lien discret, pour ne pas passer
-   pour un troisième choix à côté d'Entrée et de Sortie. C'était trop
-   discret : on bipe la mauvaise boîte, et le geste qui rattrape doit se
-   voir. Il est donc rond et cadré comme les deux autres — mais gris, et
-   sans aplat : on lit d'abord les deux bulles de couleur, on trouve
-   celle-ci quand on la cherche. */
-.st-key-sf_bulle_annuler button {
-  border: 2px solid #9ca3af !important; background: #ffffff !important;
-  border-radius: 999px !important; padding: 14px 10px !important;
-  margin-top: 8px !important;
-}
-.st-key-sf_bulle_annuler button p { font-size: 1.05rem !important;
-  font-weight: 600 !important; color: #4b5563 !important; }
-.st-key-sf_bulle_annuler button:hover {
-  border-color: #b45309 !important; background: #fff7ed !important;
-}
-.st-key-sf_bulle_annuler button:hover p { color: #b45309 !important; }
-
-/* Séparateur d'espace : une barre de couleur propre à chaque module, pour
-   qu'on sache d'un coup d'œil dans lequel on travaille. */
-.espace { border-left: 5px solid #0f766e; padding: 2px 0 2px 14px;
-  margin: 4px 0 16px 0; }
-.espace.ferme { border-left-color: #7c3aed; }
-.espace.speciales { border-left-color: #b45309; }
-.espace.location { border-left-color: #be123c; }
-.espace .titre { font-size: 1.3rem; font-weight: 700; color: #0b0b0b; }
-.espace .sous  { font-size: .88rem; color: #6b6a66; margin-top: 2px; }
-
-.kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 14px 0; }
-.kpi { flex: 1 1 180px; max-width: 340px; background: #ffffff;
-  border: 1px solid rgba(11,11,11,.10); border-radius: 12px;
-  padding: 14px 18px 12px; border-top: 4px solid #e1e0d9; }
-.kpi .label { font-size: .82rem; color: #52514e; }
-.kpi .value { font-size: 2.05rem; font-weight: 700; color: #0b0b0b; line-height: 1.2; }
-.kpi .sub   { font-size: .76rem; color: #898781; margin-top: 2px; }
-.kpi.accent   { border-top-color: #0f766e; }
-.kpi.critical { border-top-color: #d03b3b; }
-.kpi.warning  { border-top-color: #fab219; }
-.kpi.serious  { border-top-color: #ec835a; }
-
-/* En-tête d'étape numérotée — rend le parcours linéaire et évident. */
-.step { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
-.step .num { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
-  background: #0f766e; color: #fff; font-weight: 700; font-size: 1.05rem;
-  display: flex; align-items: center; justify-content: center; }
-.step .txt { font-size: 1.25rem; font-weight: 700; color: #0b0b0b; }
-.step .txt small { display: block; font-size: .82rem; font-weight: 400;
-  color: #6b6a66; margin-top: 1px; }
-
-/* Lisibilité générale : tableaux un peu plus aérés et lisibles. */
-[data-testid="stDataFrame"] { font-size: .95rem; }
-section.main .block-container { padding-top: 2.2rem; }
-</style>
-""", unsafe_allow_html=True)
+ui_style.appliquer()
 
 
 def _etape(numero: str, titre: str, sous_titre: str = "") -> None:
@@ -365,12 +142,12 @@ if st.session_state.get("verifier_version", True):
 
 st.markdown(f"""
 <div class="hero">
-  <h1>💊 Pilotage pharmacie</h1>
+  <span class="marque" aria-hidden="true">+</span>
+  <h1>Pilotage pharmacie</h1>
   <span class="version">v{VERSION_APP}</span>
   {_maj}
 </div>
 """, unsafe_allow_html=True)
-st.write("")
 
 
 def _tuile_kpi(label: str, valeur, variante: str = "", sous: str = "") -> str:
@@ -551,7 +328,11 @@ espace = st.segmented_control(
     [ESPACE_STOCK_FERME, ESPACE_CADENCIER, ESPACE_COMMANDES,
      ESPACE_LOCATION],
     default=ESPACE_STOCK_FERME, label_visibility="collapsed",
-    key="espace_travail", width="stretch", on_change=_garder_espace)
+    key="espace_travail", width="stretch", on_change=_garder_espace,
+    format_func=lambda nom: {ESPACE_STOCK_FERME: "Stock interne",
+                             ESPACE_CADENCIER: "Cadencier",
+                             ESPACE_COMMANDES: "Commandes spéciales",
+                             ESPACE_LOCATION: "Location"}[nom])
 if espace is None:  # premier rendu suivant une déselection
     espace = st.session_state.get("espace_retenu", ESPACE_STOCK_FERME)
 
@@ -562,15 +343,11 @@ if espace == ESPACE_LOCATION:
 
 if espace == ESPACE_COMMANDES:
     import ui_commandes_speciales
-    _entete_espace("💠 Commandes spéciales", variante="speciales")
     ui_commandes_speciales.rendre(_etape, _tuile_kpi)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
 if espace == ESPACE_STOCK_FERME:
     import ui_stock_ferme
-    # Sans sous-titre : la barre latérale décrit déjà ce qu'est ce stock, et
-    # l'étape 1 dit quoi faire. Le répéter ici n'ajoutait qu'une ligne.
-    _entete_espace("🔒 Stock interne", variante="ferme")
     ui_stock_ferme.rendre(_etape)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 
