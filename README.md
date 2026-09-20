@@ -1,5 +1,24 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
+## Version 6.37 — refonte des écrans Stock interne et Commandes spéciales
+
+Les deux onglets de l'application ont été réorganisés : fond clair, panneaux
+blancs, navigation harmonisée et statuts avec des libellés lisibles.
+
+- **Stock interne** : scan au premier plan, saisie et sortie manuelles directement
+  accessibles, inventaire à trois colonnes avec recherche et filtre des péremptions.
+  Le détail des lots et les corrections restent dans un panneau repliable.
+- **Commandes spéciales** : une liste filtrable (**Tous**, **À facturer**,
+  **À commander**, **En retard**) et les gestes du dossier à côté. Le bouton
+  **Nouveau dossier** est en haut ; la sélection conserve le bon patient après
+  un tri ou l'ajout d'un dossier depuis un autre poste.
+- **Réglages** regroupe les paramètres et imports ; **Exporter** donne accès
+  aux listes CSV et PDF. Le scan continue à demander **Entrée** ou **Sortie**.
+
+Après installation de la mise à jour, fermez puis relancez l'utilitaire.
+Le bandeau doit afficher **v6.37**. Les fichiers de stock et de dossiers
+existants sont conservés ; aucune migration n'est nécessaire pour ces deux onglets.
+
 ## Version 6.36 — le nouveau suivi Location est dans l'utilitaire
 
 L'espace **Location** affiche maintenant quatre vues : **À faire**, **Dossiers

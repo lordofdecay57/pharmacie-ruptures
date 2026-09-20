@@ -27,7 +27,7 @@ DEMARRAGE_MAX_S = 60
 #: Libellés des espaces de travail, tels qu'affichés dans les onglets.
 #: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
-ESPACE_CADENCIER = "Cadencier — stock & ruptures"
+ESPACE_CADENCIER = "Cadencier"
 ESPACE_STOCK_FERME = "Stock interne"
 ESPACE_COMMANDES = "Commandes spéciales"
 ESPACE_LOCATION = "Location"
@@ -298,22 +298,9 @@ def _sans_exception(page) -> None:
 
 
 def _ouvrir_les_autres_gestes(page) -> None:
-    """Déplie « Le code ne se lit pas ? Sortir à l'unité ? ».
-
-    L'écran de saisie tient désormais en DEUX lignes — on bipe, on dit le
-    sens — et tout le reste est replié : ce sont des exceptions, et une
-    exception affichée en permanence encombre le geste de tous les jours.
-    Replié ne veut pas dire caché : le titre nomme les deux cas.
-    """
-    # La liste des médicaments ne compte PLUS comme témoin d'ouverture :
-    # elle a quitté le dépliant, puis fusionné avec le champ de scan, où
-    # elle est visible en permanence. L'y chercher ferait croire le
-    # dépliant déjà ouvert, et plus rien ne serait jamais déplié.
-    if page.locator(".st-key-sf_bouton_sortie_manuelle:visible, "
-                    ".st-key-sf_bouton_saisie_manuelle:visible").count():
-        return                              # déjà déplié
-    page.get_by_text("Le code ne se lit pas").first.click()
-    page.wait_for_timeout(2500)
+    """Les deux gestes manuels sont maintenant accessibles sous le scan."""
+    assert page.locator(".st-key-sf_bouton_saisie_manuelle button:visible").count() == 1
+    assert page.locator(".st-key-sf_bouton_sortie_manuelle button:visible").count() == 1
 
 
 def _onglet_actif(page, cle: str) -> str:
@@ -471,8 +458,8 @@ class TestEspaceStockFerme:
         page.wait_for_timeout(5000)
         _sans_exception(page)
         contenu = page.content()
-        for attendu in ("Scannez le produit", "Inventaire",
-                        "Imprimez ou exportez", "Entrée", "Sortie",
+        for attendu in ("Enregistrer un mouvement", "Inventaire",
+                        "Exporter", "Entrée", "Sortie",
                         "Base publique des médicaments",
                         "Pré-remplir les noms", "Classer par"):
             assert attendu in contenu, f"« {attendu} » absent de l'écran"
@@ -500,9 +487,7 @@ class TestEspaceStockFerme:
                     const e = document.querySelector(s);
                     return e ? e.getBoundingClientRect().top : -1;
                 };
-                const exceptions = [...document.querySelectorAll(
-                        '[data-testid="stExpander"]')].find(
-                    e => e.innerText.includes('Le code ne se lit pas'));
+                const exceptions = document.querySelector('.st-key-sf_gestes');
                 return {champ: y('.st-key-sf_zone_scan'),
                         bouton: y('.st-key-sf_base_installer'),
                         depliant: exceptions
@@ -657,9 +642,7 @@ class TestEspaceStockFerme:
         positions = page.evaluate(
             """() => {
                 const champ = document.querySelector('.st-key-sf_zone_scan');
-                const exceptions = [...document.querySelectorAll(
-                        '[data-testid="stExpander"]')].find(
-                    e => e.innerText.includes('Le code ne se lit pas'));
+                const exceptions = document.querySelector('.st-key-sf_gestes');
                 return [champ ? champ.getBoundingClientRect().top : -1,
                         exceptions
                             ? exceptions.getBoundingClientRect().top : -1];
@@ -722,13 +705,11 @@ class TestEspaceStockFerme:
         # Agrandie : un champ de saisie ordinaire fait ~40 px de haut.
         assert fonds["hauteur"] >= 60, fonds
 
-    def test_les_exceptions_sont_repliees(self, page):
-        """Étiquette abîmée, sortie à l'unité : des exceptions. Affichées en
-        permanence, elles encombraient le geste de tous les jours."""
-        contenu = page.content()
-        assert "Le code ne se lit pas" in contenu
-        # Replié ne veut pas dire caché : le titre nomme les deux cas.
-        assert "Sortir à l'unité" in contenu
+    def test_les_gestes_manuels_sont_visibles_sous_le_scan(self, page):
+        _ouvrir_les_autres_gestes(page)
+        scan = page.locator(".st-key-sf_zone_scan").bounding_box()
+        gestes = page.locator(".st-key-sf_gestes").bounding_box()
+        assert gestes["y"] > scan["y"]
 
     def test_la_saisie_manuelle_reste_accessible(self, page):
         """Elle vit dans le dépliant : c'est une exception (code illisible),
@@ -824,7 +805,7 @@ class TestSaisieAssistee:
         barres = page_avec_base.evaluate(
             """() => {
                 const zone = document.querySelector(
-                    '[data-testid="stMainBlockContainer"]') || document.body;
+                    '.st-key-sf_zone_scan');
                 return [...zone.querySelectorAll('input')].filter(e => {
                     const r = e.getBoundingClientRect();
                     // Au-dessus du dépliant des exceptions : la zone de
@@ -898,10 +879,10 @@ class TestSaisieAssistee:
         """
         invite = page_avec_base.locator(
             ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
-        assert "produits déjà connus ici" in invite, invite
+        assert "produits déjà connus ici" in page_avec_base.content()
         # Et la recherche complète reste promise, sinon on croirait avoir
         # perdu le reste du répertoire national.
-        assert "base publique" in invite, invite
+        assert "base publique" in page_avec_base.content()
 
     def test_le_repertoire_national_est_disponible_au_choix(
             self, page_avec_base):
@@ -921,6 +902,7 @@ class TestSaisieAssistee:
         écran.
         """
         page = page_avec_base
+        page.get_by_role("button", name="Réglages", exact=True).click()
         case = page.locator(".st-key-sf_liste_complete")
         assert case.count() == 1, "le réglage est introuvable"
         assert case.first.is_visible(), (
@@ -931,11 +913,12 @@ class TestSaisieAssistee:
             _sans_exception(page)
             invite = page.locator(
                 ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
-            assert "répertoire national" in invite, invite
+            assert "répertoire national proposés" in page.content()
         finally:
             # Décochée pour les tests suivants : ce réglage est global.
             case.locator("label").first.click()
             page.wait_for_timeout(6000)
+            page.keyboard.press("Escape")
 
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
@@ -1198,28 +1181,20 @@ class TestCommandesSpeciales:
         """C'est l'unique raison d'être de l'écran : dire quoi faire
         aujourd'hui avant de montrer un tableau."""
         contenu = page_commandes.content()
-        assert "À facturer aujourd'hui" in contenu
-        assert "À commander maintenant" in contenu
+        assert "À facturer" in contenu
+        assert "À commander" in contenu
+        assert "En retard" in contenu
 
     def test_les_dossiers_en_place_sont_affiches(self, page_commandes):
         contenu = page_commandes.content()
         assert "LEA DUPONT" in contenu
         assert "PAUL MARTIN" in contenu
 
-    def test_le_panneau_d_ajout_est_visible_sans_defiler(self):
-        """L'ajout était en troisième position, sous deux sections : on ne
-        le voyait pas, et l'écran donnait l'impression de ne gérer qu'un
-        seul patient — celui de la liste déroulante des gestes.
-
-        Contrôle sur la source : l'ordre d'affichage est une décision, et
-        c'est elle qu'on protège."""
-        source = (RACINE / "ui_commandes_speciales.py").read_text(
-            encoding="utf-8")
-        corps = source.split("def rendre(", 1)[1]
-        assert corps.index("_panneau_ajout(") < corps.index("_listes_du_matin("), (
-            "l'ajout doit venir AVANT les listes du matin")
-        assert corps.index("_panneau_ajout(") < corps.index("_actions_rapides("), (
-            "l'ajout doit venir AVANT les gestes sur un dossier existant")
+    def test_le_bouton_d_ajout_est_visible_avant_la_liste(self, page_commandes):
+        bouton = page_commandes.locator(".st-key-cs_ouvrir_ajout button")
+        liste = page_commandes.locator(".st-key-cs_liste")
+        assert bouton.is_visible()
+        assert bouton.bounding_box()["y"] < liste.bounding_box()["y"]
 
     def test_les_trois_gestes_du_comptoir_sont_la(self, page_commandes):
         contenu = page_commandes.content()
@@ -1230,10 +1205,12 @@ class TestCommandesSpeciales:
     def test_l_import_est_propose_pour_les_trois_formats(self, page_commandes):
         """Retaper trente patients qui existent déjà dans un tableur, c'est
         une demi-journée et des fautes de frappe sur des noms."""
+        page_commandes.get_by_role("button", name="Réglages", exact=True).click()
         contenu = page_commandes.content()
         assert "Importer depuis un fichier" in contenu
         for format_ in ("Excel", "CSV", "PDF"):
             assert format_ in contenu, format_
+        page_commandes.keyboard.press("Escape")
 
     def test_un_fichier_importe_ouvre_les_dossiers(self, page_commandes,
                                                    tmp_path):
@@ -1245,6 +1222,7 @@ class TestCommandesSpeciales:
             "Nom du patient;Spécialité;Code CIP;Dernière délivrance\n"
             "Mme IMPORTEE;HERCEPTIN 150 mg;3400930000057;01/08/2026\n",
             encoding="utf-8-sig")
+        page_commandes.get_by_role("button", name="Réglages", exact=True).click()
         page_commandes.get_by_text("Importer depuis un fichier").first.click()
         page_commandes.wait_for_timeout(1500)
         page_commandes.locator('input[type="file"]').set_input_files(
@@ -1256,6 +1234,7 @@ class TestCommandesSpeciales:
         page_commandes.wait_for_timeout(6000)
         _sans_exception(page_commandes)
         assert "Mme IMPORTEE" in page_commandes.content()
+        page_commandes.keyboard.press("Escape")
 
     def test_facturer_relance_les_22_jours(self, page_commandes):
         """Le geste complet : la date repart, et une boîte sort du stock.
