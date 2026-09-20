@@ -59,7 +59,7 @@ _journal = logging.getLogger("pharmacie.app")
 
 # Version affichée dans le bandeau : permet de vérifier d'un coup d'œil que
 # la bonne version tourne (utile après une mise à jour du dossier local).
-VERSION_APP = "6.35"
+VERSION_APP = "6.36"
 
 # Dossier du PROGRAMME, et non des données : les marqueurs de présence
 # disent qui travaille sur CE dossier d'application — c'est lui que la
@@ -102,7 +102,7 @@ st.markdown("""
    version tourne, rien de plus. La place revient au choix de l'espace de
    travail, juste en dessous, qui est la vraie décision de l'écran. */
 .hero {
-  background: linear-gradient(120deg, #0f766e, #0d9488);
+  background: linear-gradient(120deg, #214d3d, #39644d);
   border-radius: 10px; padding: 10px 18px; color: #ffffff;
   display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
 }
@@ -536,6 +536,13 @@ presence.rafraichir(DOSSIER_APPLICATION)
 # plus bas, chacune de son côté, et l'espace « stock interne » s'arrête sur un
 # st.stop(). Poser la proposition ici est le seul endroit d'où elle est
 # visible dans les deux.
+# Un seul travailleur par serveur, même si plusieurs comptoirs sont connectés.
+@st.cache_resource
+def _demarrer_rappels(dossier: str):
+    import rappels_location
+    return rappels_location.demarrer(Path(dossier))
+
+_demarrer_rappels(str(_DONNEES))
 _proposer_mise_a_jour()
 _proposer_raccourci()
 
@@ -550,8 +557,6 @@ if espace is None:  # premier rendu suivant une déselection
 
 if espace == ESPACE_LOCATION:
     import ui_location
-    _entete_espace("🛏️ Location & achat — ententes préalables CAFAT",
-                   variante="location")
     ui_location.rendre(_etape, _tuile_kpi)
     st.stop()  # le parcours « cadencier » ci-dessous ne concerne pas ce module
 

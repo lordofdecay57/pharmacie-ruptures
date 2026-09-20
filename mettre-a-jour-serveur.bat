@@ -143,7 +143,7 @@ REM  depot contient aussi tout ce qui sert a le fabriquer - 2,3 Mo de
 REM  tests, les outils, une application web sans rapport - qui noyaient
 REM  lancer.bat sous une centaine de fichiers inconnus. Personne ne
 REM  lance un utilitaire dont il ne reconnait aucun fichier.
-robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /R:2 /W:5 /NFL /NDL /NJH /NJS /NP /XD tests outils web .github .pytest_cache __pycache__ /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv >nul
+robocopy "%EXDIR%\pharmacie-ruptures-main" "%~dp0." /E /R:2 /W:5 /NFL /NDL /NJH /NJS /NP /XD tests outils web .github .pytest_cache __pycache__ /XF mettre-a-jour.bat mettre-a-jour-serveur.bat config.yaml historique_commandes.csv etat_stock_precedent.csv etat_stock_precedent.sig stock_ferme.csv stock_ferme_produits.csv commandes_speciales.csv base_medicaments.csv location.csv locations_suivi.json locations_suivi.json.bak rappels_location.local.json rappels_location_envois.json >nul
 if %ERRORLEVEL% GEQ 8 (
     call :dire "[ERREUR] Copie des fichiers impossible."
     goto echec

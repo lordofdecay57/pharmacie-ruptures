@@ -149,9 +149,11 @@ def test_le_compteur_utilise_le_delai_d_alerte_choisi(tmp_path, monkeypatch):
         chemin)
     app = AppTest.from_string('''
 import ui_location as ui
-ui.rendre(lambda *args: None,
-          lambda label, valeur, *args, **kwargs:
-              f"{label}={valeur};{kwargs.get('sous', '')}")
+from datetime import date
+import location as loc
+ui._bandeau(loc.resume(loc.charger(ui.DOSSIERS_PATH), date(2026, 9, 20), 5),
+            lambda label, valeur, *args, **kwargs:
+                f"{label}={valeur};{kwargs.get('sous', '')}", 5)
 ''')
     app.session_state["lo_date"] = date(2026, 9, 20)
     app.session_state["lo_alerte"] = 5

@@ -92,6 +92,11 @@ FICHIERS_PROTEGES = (
     "stock_ferme_produits.csv",
     "commandes_speciales.csv",
     "base_medicaments.csv",
+    "location.csv",
+    "locations_suivi.json",
+    "locations_suivi.json.bak",
+    "rappels_location.local.json",
+    "rappels_location_envois.json",
 )
 
 PORT_APPLICATION = 8501
