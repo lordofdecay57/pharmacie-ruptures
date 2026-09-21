@@ -1,8 +1,8 @@
-# Utiliser le suivi Location — version 6.36
+# Utiliser le suivi Location — version 6.38
 
 Cette version remplace l'écran Location dans l'application Streamlit.
 Les fichiers HTML du dossier `maquettes` ne sont pas nécessaires pour l'utiliser.
-Le numéro **6.36** doit apparaître en haut de l'utilitaire après mise à jour et
+Le numéro **6.38** doit apparaître en haut de l'utilitaire après mise à jour et
 redémarrage du serveur. Une actualisation du navigateur seule ne met pas le
 programme à jour.
 
@@ -15,12 +15,20 @@ programme à jour.
    Remboursable ou Non remboursable. Consigner le motif, les conditions
    vérifiées et la prescription. Un aérosol n'est jamais classé automatiquement
    comme remboursable du seul fait de sa catégorie.
-4. Pour une entente, enregistrer la demande déjà envoyée, son canal et son
-   initiateur. À réception, saisir la référence et les deux dates de couverture
-   figurant sur l'accord. Les renouvellements gardent leurs propres auteurs.
-5. **À faire** présente les périodes prêtes. Après création de la facture dans
-   le logiciel métier, enregistrer sa référence, sa date et son montant.
-   Dans **Factures**, enregistrer le règlement séparément.
+4. Dans **Facturation**, choisir le dossier. Renseigner d'abord la **date de
+   demande d'entente préalable** et le **membre de l'équipe ayant initié la
+   demande**, puis le canal et la référence. La date est celle de l'envoi réel,
+   laissée vide jusqu'à sa saisie. Les demandes déjà enregistrées restent
+   visibles, sans ressaisie. L'initiateur peut être différent de la personne
+   qui enregistre le dossier. À réception, saisir la référence et les dates
+   de couverture figurant sur l'accord. Chaque renouvellement garde son auteur.
+5. **À faire** présente les périodes prêtes. Dans **Facturation**, après création
+   de la facture dans le logiciel métier, enregistrer sa référence, sa date et
+   son montant. L'entente correspondant à cette période est rappelée avant
+   validation ; une demande de renouvellement ne remplace pas son historique.
+   Le règlement s'enregistre séparément dans **Historique de toutes les factures
+   et règlements**. Les dossiers non remboursables n'exigent pas de demande
+   d'entente dans ce suivi.
 
 Les mensualités suivent le début de la prestation, même si une facture est
 enregistrée tardivement. Une période déjà facturée ne peut pas être facturée
@@ -77,7 +85,7 @@ couverture. Aucune caution n'est supposée reçue sur un ancien dossier.
 
 Les écritures sont verrouillées entre postes, atomiques, et précédées d'une
 copie `.bak` de la dernière version lisible. Les exports et sauvegardes se
-trouvent dans Factures et Réglages. Ils contiennent des données patients.
+trouvent dans Facturation et Réglages. Ils contiennent des données patients.
 
 ## Activer les rappels mail
 
