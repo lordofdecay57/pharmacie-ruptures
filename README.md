@@ -1,5 +1,22 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
+## Version 6.38 — « Bip une boîte » ouvre les mouvements
+
+L'onglet **Stock interne** s'ouvre directement sur l'inventaire. Le scan et
+les formulaires d'entrée/sortie sont masqués tant que vous n'avez pas cliqué
+sur le bouton vert **Bip une boîte**, à côté du titre.
+
+Après le clic, scannez la boîte ou choisissez le médicament dans le champ
+unique : les boutons **Entrée** et **Sortie** apparaissent pour cette boîte.
+Les saisies manuelles restent accessibles dans ce panneau. **Fermer** le
+replie et annule seulement le mouvement qui n'a pas été validé. Le panneau
+reste ouvert après une validation pour enchaîner plusieurs boîtes.
+
+Après la mise à jour et le redémarrage de l'utilitaire, le bandeau doit afficher
+**v6.38** et le bouton **Bip une boîte** doit être visible dans Stock interne.
+Sur une installation en serveur, c'est l'utilitaire du serveur qui doit être
+mis à jour, puis la page rechargée sur les postes.
+
 ## Version 6.37 — refonte des écrans Stock interne et Commandes spéciales
 
 Les deux onglets de l'application ont été réorganisés : fond clair, panneaux

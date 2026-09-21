@@ -16,7 +16,7 @@ CSS = """
 <style>
 :root { --ph-encre: #243a30; --ph-vert: #255e48; --ph-ligne: #dce5dc; }
 [data-testid="stMainBlockContainer"] {
-  max-width: 1520px; padding: 1.8rem 2.5rem 3rem;
+  max-width: 1520px; padding: 5rem 2.5rem 3rem;
 }
 [data-testid="stSidebar"] { background: #edf2e9; }
 .hero { display:flex; align-items:center; gap:12px; padding:0 0 8px; flex-wrap:wrap; }
@@ -48,6 +48,14 @@ CSS = """
   gap:12px; margin:0 0 4px; }
 .ph-section h3 { font-size:1.15rem; font-weight:600; padding:0; margin:0; color:var(--ph-encre); }
 .ph-section span { color:#65766a; font-size:.8rem; }
+.st-key-sf_ouvrir_saisie button {
+  min-height:54px; border-radius:12px; padding:12px 22px;
+  background:var(--ph-vert); border:1px solid var(--ph-vert);
+  box-shadow:0 4px 12px #255e481a;
+}
+.st-key-sf_ouvrir_saisie button p { color:#fff; font-size:1.05rem; font-weight:650; }
+.st-key-sf_ouvrir_saisie button:hover { background:#194833; border-color:#194833; }
+.st-key-sf_fermer_saisie button { min-height:42px; border-radius:8px; }
 .st-key-sf_saisie, .st-key-sf_inventaire, .st-key-cs_liste,
 .st-key-cs_actions, .st-key-cs_ajout {
   background:#fff; border:1px solid var(--ph-ligne) !important;
@@ -127,7 +135,7 @@ CSS = """
   height:32px; display:grid; place-items:center; flex-shrink:0; }
 .step .txt { font-size:1.2rem; font-weight:600; } .step small { display:block; font-weight:400; }
 @media (max-width: 760px) {
-  [data-testid="stMainBlockContainer"] { padding:1rem 1rem 2rem; }
+  [data-testid="stMainBlockContainer"] { padding:4.5rem 1rem 2rem; }
   .ph-entete h2 { font-size:1.65rem; }
   .st-key-espace_travail button { padding:8px 10px !important; }
   .st-key-espace_travail button p { font-size:.86rem !important; }

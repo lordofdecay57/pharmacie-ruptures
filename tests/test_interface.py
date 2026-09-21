@@ -217,6 +217,7 @@ def _saisir(page, texte: str, attente: int = 5000):
     Le délai de 8 ms par caractère est celui d'une douchette réelle : elle
     tape vite, et c'est justement ce qu'il faut éprouver.
     """
+    _ouvrir_la_saisie(page)
     champ = page.get_by_placeholder("Douchez la boîte").first
     champ.click()
     # Vidé au clavier et non par `fill("")` : le champ garde peut-être une
@@ -249,6 +250,7 @@ def _choisir_dans_la_liste(page, fragment: str, attente: int = 6000):
     panneau de quantité. Entrée valide « ce que j'ai tapé », le clic
     désigne « cette boîte-là ».
     """
+    _ouvrir_la_saisie(page)
     champ = page.get_by_placeholder("Douchez la boîte").first
     champ.click()
     page.wait_for_selector("[role='option']", timeout=15000)
@@ -297,8 +299,16 @@ def _sans_exception(page) -> None:
         page.locator('[data-testid="stException"]').first.inner_text())
 
 
+def _ouvrir_la_saisie(page) -> None:
+    """Le panneau est replié tant qu'on n'a pas cliqué Bip une boîte."""
+    if page.locator(".st-key-sf_saisie").count() == 0:
+        page.get_by_role("button", name="Bip une boîte", exact=True).click()
+        page.locator(".st-key-sf_zone_scan input").wait_for(state="visible")
+
+
 def _ouvrir_les_autres_gestes(page) -> None:
-    """Les deux gestes manuels sont maintenant accessibles sous le scan."""
+    """Les gestes manuels sont accessibles dans le panneau de mouvement."""
+    _ouvrir_la_saisie(page)
     assert page.locator(".st-key-sf_bouton_saisie_manuelle button:visible").count() == 1
     assert page.locator(".st-key-sf_bouton_sortie_manuelle button:visible").count() == 1
 
@@ -457,6 +467,9 @@ class TestEspaceStockFerme:
         _onglet(page, ESPACE_STOCK_FERME).first.click()
         page.wait_for_timeout(5000)
         _sans_exception(page)
+        assert page.get_by_role("button", name="Bip une boîte", exact=True).is_visible()
+        assert page.locator(".st-key-sf_saisie").count() == 0
+        _ouvrir_la_saisie(page)
         contenu = page.content()
         for attendu in ("Enregistrer un mouvement", "Inventaire",
                         "Exporter", "Entrée", "Sortie",
@@ -732,6 +745,7 @@ class TestSortieALUnite:
 
     def _ouvrir_le_panneau(self, page_avec_stock):
         page = page_avec_stock
+        _ouvrir_la_saisie(page)
         if page.locator(".st-key-sf_sortie_choix").count() == 0:
             _ouvrir_les_autres_gestes(page)
             page.locator(

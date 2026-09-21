@@ -855,6 +855,9 @@ def _hors_du_fragment() -> None:
 
 
 def _saisie_manuelle_vierge() -> None:
+    st.session_state.pop("sf_a_orienter", None)
+    st.session_state["sf_sortie_manuelle"] = False
+    st.session_state.pop("sf_lot_choisi", None)
     st.session_state["sf_en_attente"] = {
         "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
         "peremption": None, "lot": "", "brut": "", "reconnu": True}
@@ -1039,6 +1042,8 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
 
 def _basculer_sortie_manuelle() -> None:
     """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
+    st.session_state.pop("sf_a_orienter", None)
+    st.session_state.pop("sf_en_attente", None)
     st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
         "sf_sortie_manuelle", False)
     # Aucune boîte n'a été désignée par ce chemin : la fiche doit
@@ -1660,12 +1665,31 @@ def _reglages(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
     return aujourdhui
 
 
+def _ouvrir_saisie() -> None:
+    """Le bouton Bip une boîte ouvre la saisie sans modifier le stock."""
+    st.session_state["sf_saisie_ouverte"] = True
+
+
+def _fermer_saisie() -> None:
+    """Replie le panneau et abandonne seulement le mouvement non validé."""
+    st.session_state["sf_saisie_ouverte"] = False
+    for cle in ("sf_a_orienter", "sf_en_attente", "sf_lot_choisi",
+                "sf_rerendu_complet", "sf_message"):
+        st.session_state.pop(cle, None)
+    st.session_state["sf_sortie_manuelle"] = False
+    _remonter_le_champ()
+
+
 def rendre(etape=None) -> None:
-    """Deux zones de travail : enregistrer un mouvement, consulter le stock."""
+    """L'inventaire d'abord ; le mouvement s'ouvre sur un clic explicite."""
     inventaire, repertoire = _etat()
-    titre, outils = st.columns([5, 1])
+    titre, biper, outils = st.columns([4, 2, 1], vertical_alignment="center")
     with titre:
-        ui_style.entete("Stock interne", "Vos entrées, vos sorties et vos péremptions au même endroit.")
+        ui_style.entete("Stock interne", "Consultez vos médicaments et surveillez les péremptions.")
+    with biper:
+        st.button("Bip une boîte", key="sf_ouvrir_saisie", type="primary",
+                  use_container_width=True, on_click=_ouvrir_saisie,
+                  help="Ouvrir le scan ou la saisie d'une entrée ou d'une sortie.")
     with outils:
         with st.popover("Réglages", use_container_width=True):
             aujourdhui = _reglages(
@@ -1678,30 +1702,36 @@ def rendre(etape=None) -> None:
         niveau, texte = message
         (st.success if niveau == "ok" else st.warning)(texte)
 
-    with st.container(border=True, key="sf_saisie"):
-        ui_style.section("Enregistrer un mouvement", "Douchette ou clavier")
-        # Le fragment conserve le scan rapide et la confirmation du sens.
-        _zone_de_saisie(inventaire, aujourdhui)
-        with st.container(key="sf_gestes"):
-            gauche, droite, aide = st.columns([1, 1, 2])
-            gauche.button(
-                "Saisie manuelle", use_container_width=True,
-                key="sf_bouton_saisie_manuelle", on_click=_saisie_manuelle_vierge,
-                help="Ajouter une boîte sans code lisible.")
-            droite.button(
-                "Sortie manuelle", use_container_width=True,
-                key="sf_bouton_sortie_manuelle", on_click=_basculer_sortie_manuelle,
-                disabled=inventaire.empty,
-                help="Retirer des boîtes ou des unités sans scanner.")
-            aide.caption("Scannez un produit, puis choisissez Entrée ou Sortie.")
+    if st.session_state.get("sf_saisie_ouverte", False):
+        with st.container(border=True, key="sf_saisie"):
+            en_tete, fermer = st.columns([4, 1], vertical_alignment="center")
+            with en_tete:
+                ui_style.section("Enregistrer un mouvement", "Douchette ou clavier")
+            fermer.button("Fermer", key="sf_fermer_saisie", on_click=_fermer_saisie,
+                          use_container_width=True,
+                          help="Replier la saisie et annuler le mouvement non validé.")
+            # Le fragment conserve le scan rapide et la confirmation du sens.
+            _zone_de_saisie(inventaire, aujourdhui)
+            with st.container(key="sf_gestes"):
+                gauche, droite, aide = st.columns([1, 1, 2])
+                gauche.button(
+                    "Saisie manuelle", use_container_width=True,
+                    key="sf_bouton_saisie_manuelle", on_click=_saisie_manuelle_vierge,
+                    help="Ajouter une boîte sans code lisible.")
+                droite.button(
+                    "Sortie manuelle", use_container_width=True,
+                    key="sf_bouton_sortie_manuelle", on_click=_basculer_sortie_manuelle,
+                    disabled=inventaire.empty,
+                    help="Retirer des boîtes ou des unités sans scanner.")
+                aide.caption("Scannez un produit, puis choisissez Entrée ou Sortie.")
 
-        if st.session_state.get("sf_sortie_manuelle") and not inventaire.empty:
-            _panneau_sortie_manuelle(
-                inventaire, aujourdhui,
-                st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION))
-        if "sf_en_attente" in st.session_state:
-            _formulaire_complement()
-            inventaire, repertoire = _etat()
+            if st.session_state.get("sf_sortie_manuelle") and not inventaire.empty:
+                _panneau_sortie_manuelle(
+                    inventaire, aujourdhui,
+                    st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION))
+            if "sf_en_attente" in st.session_state:
+                _formulaire_complement()
+                inventaire, repertoire = _etat()
 
     with st.container(border=True, key="sf_inventaire"):
         en_tete, imprimer = st.columns([5, 1])
@@ -1722,7 +1752,7 @@ def rendre(etape=None) -> None:
             stock_ferme.STATUTS_A_TRAITER if a_traiter else None, aujourdhui, tri)
         filtre_actif = bool(recherche.strip()) or a_traiter
         if inventaire.empty:
-            ui_style.vide("Votre inventaire commence ici", "Scannez une première boîte ou utilisez Saisie manuelle.")
+            ui_style.vide("Votre inventaire commence ici", "Cliquez sur « Bip une boîte » pour enregistrer votre premier produit.")
         elif vue_filtree.empty:
             ui_style.vide("Aucun lot trouvé", "Modifiez la recherche ou désactivez le filtre des lots à traiter.")
         else:

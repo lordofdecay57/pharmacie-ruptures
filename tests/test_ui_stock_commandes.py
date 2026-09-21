@@ -1,4 +1,4 @@
-"""Parcours des écrans 6.37 sur des fichiers isolés, avec les vrais widgets."""
+"""Parcours des écrans de stock et de commandes sur des fichiers isolés, avec les vrais widgets."""
 
 import json
 from datetime import date, timedelta
@@ -66,8 +66,49 @@ def commandes(tmp_path, monkeypatch):
     return app, ui.DOSSIERS_PATH
 
 
+def test_stock_mouvements_masques_jusqu_au_clic_bip(stock):
+    app, path = stock
+    avant = path.read_bytes()
+    assert "PRODUIT ALPHA" in table_html(app)
+    assert not any(b.key in {"sf_bulle_entree", "sf_bulle_sortie",
+                            "sf_bouton_saisie_manuelle", "sf_bouton_sortie_manuelle"}
+                   for b in app.button)
+    assert not any(s.key.startswith("sf_scan_") for s in app.selectbox)
+    clic(app, "Bip une boîte")
+    assert app.selectbox(key="sf_scan_0").value is None
+    assert not any(b.key in {"sf_bulle_entree", "sf_bulle_sortie"} for b in app.button)
+    choix = next(o for o in app.selectbox(key="sf_scan_0").options if "ALPHA" in o)
+    app.selectbox(key="sf_scan_0").select(choix).run()
+    assert not app.exception
+    assert app.button(key="sf_bulle_entree") and app.button(key="sf_bulle_sortie")
+    assert path.read_bytes() == avant
+
+
+@pytest.mark.parametrize("geste", [None, "sf_bulle_entree", "sf_bulle_sortie"])
+def test_stock_fermer_annule_le_mouvement_et_rouvre_un_champ_vide(stock, geste):
+    app, path = stock
+    avant = path.read_bytes()
+    clic(app, "Bip une boîte")
+    choix = next(o for o in app.selectbox(key="sf_scan_0").options if "ALPHA" in o)
+    app.selectbox(key="sf_scan_0").select(choix).run()
+    if geste:
+        app.button(key=geste).click().run()
+        assert not app.exception
+    clic(app, "Fermer")
+    assert not any(s.key.startswith("sf_scan_") for s in app.selectbox)
+    assert not any(b.key in {"sf_bulle_entree", "sf_bulle_sortie"} for b in app.button)
+    assert "PRODUIT ALPHA" in table_html(app)
+    clic(app, "Bip une boîte")
+    assert next(s for s in app.selectbox if s.key.startswith("sf_scan_")).value is None
+    assert not app.session_state.get("sf_a_orienter")
+    assert not app.session_state.get("sf_en_attente")
+    assert not app.session_state["sf_sortie_manuelle"]
+    assert path.read_bytes() == avant
+
+
 def test_stock_selection_puis_sortie_retirent_seulement_le_lot_choisi(stock):
     app, path = stock
+    clic(app, "Bip une boîte")
     choix = next(o for o in app.selectbox(key="sf_scan_0").options if "ALPHA" in o)
     app.selectbox(key="sf_scan_0").select(choix).run()
     assert not app.exception
@@ -79,10 +120,14 @@ def test_stock_selection_puis_sortie_retirent_seulement_le_lot_choisi(stock):
     relu = sf.charger_inventaire(path).set_index("Nom du produit")
     assert relu.at["PRODUIT ALPHA", "Boîtes"] == 1
     assert relu.at["PRODUIT BETA", "Boîtes"] == 2
+    # Le panneau reste ouvert pour la boîte suivante, sans sens mémorisé.
+    assert any(s.key.startswith("sf_scan_") for s in app.selectbox)
+    assert not any(b.key in {"sf_bulle_entree", "sf_bulle_sortie"} for b in app.button)
 
 
 def test_stock_saisie_manuelle_enregistre_et_actualise_la_liste(stock):
     app, path = stock
+    clic(app, "Bip une boîte")
     app.button(key="sf_bouton_saisie_manuelle").click().run()
     champ(app, "text_input", "Nom du médicament *").set_value("PRODUIT MANUEL")
     champ(app, "text_input", "Date de péremption *").set_value("122028")
@@ -209,4 +254,4 @@ def test_app_complete_ouvre_les_deux_espaces(tmp_path, monkeypatch, espace):
     app.session_state["espace_travail"] = espace
     app.run(timeout=20)
     assert not app.exception
-    assert any('v6.37' in m.value for m in app.markdown)
+    assert any('v6.38' in m.value for m in app.markdown)
