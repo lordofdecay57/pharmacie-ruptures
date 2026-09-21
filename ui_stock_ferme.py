@@ -1697,10 +1697,14 @@ def rendre(etape=None) -> None:
     st.session_state["sf_date"] = aujourdhui
     inventaire, repertoire = _etat()
 
+    # Garder la même position pour le fragment de scan : insérer une alerte
+    # seulement après une écriture déplace le panneau et peut laisser son
+    # ancien rendu grisé à l'écran, avec un second champ de scan.
+    zone_message = st.empty()
     message = st.session_state.pop("sf_message", None)
     if message:
         niveau, texte = message
-        (st.success if niveau == "ok" else st.warning)(texte)
+        (zone_message.success if niveau == "ok" else zone_message.warning)(texte)
 
     if st.session_state.get("sf_saisie_ouverte", False):
         with st.container(border=True, key="sf_saisie"):
