@@ -5,8 +5,10 @@
 ruptures fournisseurs). Toute la logique métier est dans ``stock_ferme.py`` ;
 ce fichier ne fait que l'habillage Streamlit.
 
-La douchette identifie le produit, puis l'équipe choisit Entrée ou Sortie.
-La fiche demande uniquement les informations manquantes.
+Ergonomie visée : la douchette doit suffire. Un scan de Data Matrix qui
+donne à la fois le CIP, la péremption et le lot d'un produit déjà connu
+entre au stock **sans un clic** ; les autres cas ouvrent un formulaire de
+complément pré-rempli.
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ import base_medicaments
 import commun
 import stock_ferme
 import ui_commun
-import ui_style
 
 _journal = logging.getLogger("pharmacie.stock_ferme.ui")
 
@@ -855,9 +856,6 @@ def _hors_du_fragment() -> None:
 
 
 def _saisie_manuelle_vierge() -> None:
-    st.session_state.pop("sf_a_orienter", None)
-    st.session_state["sf_sortie_manuelle"] = False
-    st.session_state.pop("sf_lot_choisi", None)
     st.session_state["sf_en_attente"] = {
         "cip": "", "nom": "", "dosage": "", "unites_par_boite": 0,
         "peremption": None, "lot": "", "brut": "", "reconnu": True}
@@ -1012,7 +1010,15 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
     st.session_state["sf_options_par_libelle"] = {
         m["libelle"]: m for m in familiers}
     options = [m["libelle"] for m in familiers]
-    invite = "Douchez la boîte — ou tapez son nom"
+    invite = (
+        f"🔦 Douchez la boîte — ou tapez son nom ({len(options)} "
+        + ("médicaments du répertoire national)"
+           if st.session_state.get("sf_liste_complete") else
+           "produits déjà connus ici ; un nom inconnu est cherché dans "
+           "la base publique à la validation)")
+        if options else
+        "🔦 Douchez la boîte — ou tapez le nom du médicament "
+        "et appuyez sur Entrée")
 
     # Le CONTENEUR porte la clé stable : c'est lui que le style habille.
     # Le champ, lui, change de clé après chaque choix à la souris — voir
@@ -1024,26 +1030,24 @@ def _champ_unique(inventaire, aujourdhui: date) -> None:
             key=_cle_scan(), on_change=_traiter_scan,
             accept_new_options=True,
             label_visibility="collapsed", placeholder=invite)
-    if catalogue:
-        st.caption(
-            f"{len(options)} "
-            + ("médicaments du répertoire national proposés."
-               if st.session_state.get("sf_liste_complete") else
-               "produits déjà connus ici. Un autre nom ? Validez pour chercher "
-               "dans la base publique."))
-        return
     if options:
-        st.caption(f"{len(options)} produits déjà connus ici.")
-    st.caption("Base publique non installée : ajoutez-la pour reconnaître "
-               "les médicaments par leur code ou leur nom.")
-    if st.button("⬇️ Installer la base des médicaments", key="sf_base_installer"):
+        return
+    # « En tapant doliprane, l'utilitaire ne propose toujours pas de
+    # liste. » La cause était juste : la base n'est pas installée. Mais le
+    # seul bouton pour l'installer vivait dans la colonne de gauche,
+    # REPLIÉE par défaut — on lisait donc « installez-la » sans jamais
+    # trouver où. Le remède appartient à l'endroit où la panne se voit.
+    st.caption("🔎 **Taper un nom demande la base publique des "
+               "médicaments**, qui n'est pas encore installée sur ce "
+               "poste : un code-barres ne contient que le code CIP, "
+               "jamais le nom. Un seul téléchargement, puis elle "
+               "fonctionne hors ligne.")
+    if st.button("⬇️ Installer la base des médicaments",
+                 use_container_width=True, type="primary",
+                 key="sf_base_installer"):
         _telecharger_la_base()
-
-
 def _basculer_sortie_manuelle() -> None:
     """Ouvre (ou referme) le choix de la boîte à sortir à la main."""
-    st.session_state.pop("sf_a_orienter", None)
-    st.session_state.pop("sf_en_attente", None)
     st.session_state["sf_sortie_manuelle"] = not st.session_state.get(
         "sf_sortie_manuelle", False)
     # Aucune boîte n'a été désignée par ce chemin : la fiche doit
@@ -1633,160 +1637,177 @@ def _zone_impression(inventaire: pd.DataFrame, aujourdhui: date,
         col_pdf.warning(str(e))
 
 
-def _reglages(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
-               aujourdhui: date) -> date:
-    st.markdown("**Réglages du stock interne**")
-    st.caption("Inventaire tenu à part du stock officinal : armoire "
-               "sécurisée, dotation d'urgence, trousse, réserve de garde.")
+def _barre_laterale(inventaire: pd.DataFrame, repertoire: pd.DataFrame,
+                    aujourdhui: date) -> date:
+    with st.sidebar:
+        st.markdown("## 🔒 Stock interne")
+        st.caption("Inventaire tenu à part du stock officinal : armoire "
+                   "sécurisée, dotation d'urgence, trousse, réserve de garde.")
 
-    aujourdhui = st.date_input("Date du jour", value=aujourdhui,
-                               format="DD/MM/YYYY", key="sf_date_reglage")
-    st.divider()
-    # Réglages qu'on fait UNE FOIS, pas des gestes de comptoir. Au
-    # milieu de l'écran, entre le scan et l'inventaire, ils occupaient
-    # la place de ce qu'on regarde tous les jours — et il fallait les
-    # dépasser du regard à chaque boîte scannée.
-    _base_publique()
-    _reglage_de_la_liste()
-    _import_repertoire()
+        aujourdhui = st.date_input("Date du jour", value=aujourdhui,
+                                   format="DD/MM/YYYY")
+        st.checkbox("Ajout immédiat des boîtes reconnues", value=True,
+                    key="sf_ajout_direct",
+                    help="Un Data Matrix qui donne le CIP, la péremption et "
+                         "un produit déjà connu entre au stock sans "
+                         "confirmation.")
 
-    st.divider()
-    st.markdown("#### Mémoire")
-    st.caption(f"{len(inventaire)} lot(s) · {len(repertoire)} produit(s) "
-               f"mémorisé(s)\n\n`{INVENTAIRE_PATH.name}`")
-    with st.expander("🗑️ Vider l'inventaire"):
-        st.warning("Supprime tous les lots enregistrés. Les produits "
-                   "mémorisés (noms, dosages) sont conservés.")
-        if st.button("Confirmer la remise à zéro",
-                     use_container_width=True):
-            _enregistrer(inventaire=stock_ferme.inventaire_vide())
-            st.session_state.pop("sf_en_attente", None)
-            st.rerun()
+        st.divider()
+        # Réglages qu'on fait UNE FOIS, pas des gestes de comptoir. Au
+        # milieu de l'écran, entre le scan et l'inventaire, ils occupaient
+        # la place de ce qu'on regarde tous les jours — et il fallait les
+        # dépasser du regard à chaque boîte scannée.
+        _base_publique()
+        _reglage_de_la_liste()
+        _import_repertoire()
+
+        st.divider()
+        st.markdown("#### Mémoire")
+        st.caption(f"{len(inventaire)} lot(s) · {len(repertoire)} produit(s) "
+                   f"mémorisé(s)\n\n`{INVENTAIRE_PATH.name}`")
+        with st.expander("🗑️ Vider l'inventaire"):
+            st.warning("Supprime tous les lots enregistrés. Les produits "
+                       "mémorisés (noms, dosages) sont conservés.")
+            if st.button("Confirmer la remise à zéro",
+                         use_container_width=True):
+                _enregistrer(inventaire=stock_ferme.inventaire_vide())
+                st.session_state.pop("sf_en_attente", None)
+                st.rerun()
     return aujourdhui
 
 
-def _ouvrir_saisie() -> None:
-    """Le bouton Bip une boîte ouvre la saisie sans modifier le stock."""
-    st.session_state["sf_saisie_ouverte"] = True
+def rendre(etape) -> None:
+    """Affiche l'écran complet du module.
 
+    ``etape`` est la fonction d'habillage de ``app.py``, passée en
+    paramètre pour garder ce module indépendant de l'application.
 
-def _fermer_saisie() -> None:
-    """Replie le panneau et abandonne seulement le mouvement non validé."""
-    st.session_state["sf_saisie_ouverte"] = False
-    for cle in ("sf_a_orienter", "sf_en_attente", "sf_lot_choisi",
-                "sf_rerendu_complet", "sf_message"):
-        st.session_state.pop(cle, None)
-    st.session_state["sf_sortie_manuelle"] = False
-    _remonter_le_champ()
-
-
-def rendre(etape=None) -> None:
-    """L'inventaire d'abord ; le mouvement s'ouvre sur un clic explicite."""
+    Les compteurs du haut — lots, boîtes, périmés, moins d'un mois,
+    moins de trois mois — ont été retirés : le tableau dit la même chose
+    ligne par ligne, et ils repoussaient l'inventaire hors de l'écran.
+    """
     inventaire, repertoire = _etat()
-    titre, biper, outils = st.columns([4, 2, 1], vertical_alignment="center")
-    with titre:
-        ui_style.entete("Stock interne", "Consultez vos médicaments et surveillez les péremptions.")
-    with biper:
-        st.button("Bip une boîte", key="sf_ouvrir_saisie", type="primary",
-                  use_container_width=True, on_click=_ouvrir_saisie,
-                  help="Ouvrir le scan ou la saisie d'une entrée ou d'une sortie.")
-    with outils:
-        with st.popover("Réglages", use_container_width=True):
-            aujourdhui = _reglages(
-                inventaire, repertoire, st.session_state.get("sf_date", date.today()))
+    aujourdhui = _barre_laterale(inventaire, repertoire,
+                                 st.session_state.get("sf_date", date.today()))
     st.session_state["sf_date"] = aujourdhui
+    # La barre latérale porte l'import du répertoire : il peut avoir ajouté
+    # des produits à l'instant, et l'écran doit les voir tout de suite.
     inventaire, repertoire = _etat()
 
-    # Garder la même position pour le fragment de scan : insérer une alerte
-    # seulement après une écriture déplace le panneau et peut laisser son
-    # ancien rendu grisé à l'écran, avec un second champ de scan.
-    zone_message = st.empty()
     message = st.session_state.pop("sf_message", None)
     if message:
         niveau, texte = message
-        (zone_message.success if niveau == "ok" else zone_message.warning)(texte)
+        (st.success if niveau == "ok" else st.warning)(texte)
 
-    if st.session_state.get("sf_saisie_ouverte", False):
-        with st.container(border=True, key="sf_saisie"):
-            en_tete, fermer = st.columns([4, 1], vertical_alignment="center")
-            with en_tete:
-                ui_style.section("Enregistrer un mouvement", "Douchette ou clavier")
-            fermer.button("Fermer", key="sf_fermer_saisie", on_click=_fermer_saisie,
-                          use_container_width=True,
-                          help="Replier la saisie et annuler le mouvement non validé.")
-            # Le fragment conserve le scan rapide et la confirmation du sens.
-            _zone_de_saisie(inventaire, aujourdhui)
-            with st.container(key="sf_gestes"):
-                gauche, droite, aide = st.columns([1, 1, 2])
-                gauche.button(
-                    "Saisie manuelle", use_container_width=True,
-                    key="sf_bouton_saisie_manuelle", on_click=_saisie_manuelle_vierge,
-                    help="Ajouter une boîte sans code lisible.")
-                droite.button(
-                    "Sortie manuelle", use_container_width=True,
-                    key="sf_bouton_sortie_manuelle", on_click=_basculer_sortie_manuelle,
-                    disabled=inventaire.empty,
-                    help="Retirer des boîtes ou des unités sans scanner.")
-                aide.caption("Scannez un produit, puis choisissez Entrée ou Sortie.")
+    # --- Saisie ------------------------------------------------------------
+    # Deux lignes, et rien d'autre. C'est la demande de la pharmacie, et
+    # elle a raison : au comptoir on bipe, puis on dit dans quel sens.
+    # L'écran portait auparavant deux dispositions différentes selon le
+    # mode — trois boutons en Entrée, deux encadrés en Sortie — et il
+    # fallait relire l'écran à chaque bascule pour retrouver le champ.
+    etape("1", "Scannez le produit",
+          "Douchette ou clavier, puis le sens du mouvement.")
 
-            if st.session_state.get("sf_sortie_manuelle") and not inventaire.empty:
-                _panneau_sortie_manuelle(
-                    inventaire, aujourdhui,
-                    st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION))
-            if "sf_en_attente" in st.session_state:
-                _formulaire_complement()
-                inventaire, repertoire = _etat()
+    # LE champ et LES BULLES, dans un fragment : biper ne réexécute plus
+    # que cette zone-là. Voir `_zone_de_saisie` — c'est ce qui fait passer
+    # un bip de 4,4 s à moins d'une seconde.
+    _zone_de_saisie(inventaire, aujourdhui)
 
-    with st.container(border=True, key="sf_inventaire"):
-        en_tete, imprimer = st.columns([5, 1])
-        with en_tete:
-            ui_style.section("Inventaire", f"{len(inventaire)} lot(s) · {aujourdhui:%d/%m/%Y}")
-        # Placer l'export en haut, le calculer après le choix de classement.
-        exports = imprimer.popover("Exporter", use_container_width=True)
-        col_rech, col_tri, col_filtre = st.columns([3, 2, 2])
-        recherche = col_rech.text_input(
-            "Rechercher dans l'inventaire", key="sf_recherche",
-            placeholder="Nom, CIP ou numéro de lot")
-        tri = col_tri.selectbox("Classer par", stock_ferme.TRIS, key="sf_tri")
-        a_traiter = col_filtre.checkbox(
-            "Lots à traiter uniquement", key="sf_filtre_traiter",
-            help="Périmés et lots de moins d'un mois.")
-        vue_filtree = stock_ferme.filtrer_inventaire(
-            inventaire, recherche,
-            stock_ferme.STATUTS_A_TRAITER if a_traiter else None, aujourdhui, tri)
-        filtre_actif = bool(recherche.strip()) or a_traiter
-        if inventaire.empty:
-            ui_style.vide("Votre inventaire commence ici", "Cliquez sur « Bip une boîte » pour enregistrer votre premier produit.")
-        elif vue_filtree.empty:
-            ui_style.vide("Aucun lot trouvé", "Modifiez la recherche ou désactivez le filtre des lots à traiter.")
-        else:
-            vue = stock_ferme.vue_essentielle(vue_filtree, aujourdhui, tri)
-            ui_style.tableau(
-                vue[["Nom du produit", "Code CIP", "Statut"]], "Inventaire du stock interne",
-                libelles={"Nom du produit": "Médicament", "Statut": "État du lot"},
-                badges={"Statut": {
-                    stock_ferme.STATUT_PERIME: ("Périmé", "rouge"),
-                    stock_ferme.STATUT_IMMINENT: ("Moins d’un mois", "rouge"),
-                    stock_ferme.STATUT_CRITIQUE: ("Moins de 3 mois", "ambre"),
-                    stock_ferme.STATUT_VIGILANCE: ("Moins de 6 mois", "ambre"),
-                    stock_ferme.STATUT_OK: ("OK", "vert"),
-                    stock_ferme.STATUT_INCONNU: ("Sans date", ""),
-                }})
+    # Tout le reste est replié. Ce sont des exceptions — étiquette abîmée,
+    # boîte sans code-barres, dispensation à l'unité — et une exception
+    # affichée en permanence encombre le geste de tous les jours. Le titre
+    # les nomme : replié ne veut pas dire caché.
+    # Les DEUX gestes y figurent désormais : il n'y a plus de mode pour
+    # décider lequel montrer.
+    with st.expander("⌨️ Le code ne se lit pas ? Sortir à l'unité ?"):
+        gauche, droite = st.columns(2)
+        gauche.button(
+            "⌨️ Saisie manuelle", use_container_width=True,
+            key="sf_bouton_saisie_manuelle",
+            on_click=_saisie_manuelle_vierge,
+            help="Enregistrer une boîte dont le code ne se lit pas, et "
+                 "qui n'est pas non plus au catalogue national.")
+        droite.button(
+            "⌨️ Sortie manuelle", use_container_width=True,
+            key="sf_bouton_sortie_manuelle",
+            on_click=_basculer_sortie_manuelle,
+            disabled=inventaire is None or inventaire.empty,
+            help="Sans douchette : on désigne le lot, puis le "
+                 "nombre de boîtes ou d'unités.")
+        st.caption(
+            "Pour une étiquette abîmée, une boîte sans code-barres — et "
+            "pour sortir **quelques unités** plutôt qu'une boîte entière "
+            "(le reste part en vrac, il reste à l'inventaire).")
+
+    if st.session_state.get("sf_sortie_manuelle") and not (
+            inventaire is None or inventaire.empty):
+        _panneau_sortie_manuelle(
+            inventaire, aujourdhui,
+            st.session_state.get("sf_tri", stock_ferme.TRI_PEREMPTION))
+
+    if "sf_en_attente" in st.session_state:
+        _formulaire_complement()
+        inventaire, repertoire = _etat()
+
+    # --- Inventaire --------------------------------------------------------
+    st.divider()
+    # Ni tuiles ni explication : cinq compteurs tenaient ici — lots,
+    # boîtes, périmés, moins d'un mois, moins de trois mois — au-dessus
+    # d'un tableau qui dit déjà tout cela, ligne par ligne, avec le
+    # statut en tête. Ils repoussaient l'inventaire lui-même sous la
+    # ligne de flottaison, et c'est lui qu'on vient voir.
+    etape("2", "Inventaire", "")
+
+    col_rech, col_tri, col_filtre = st.columns([3, 2, 2])
+    recherche = col_rech.text_input(
+        "🔎 Rechercher (nom, dosage, code CIP ou n° de lot)",
+        key="sf_recherche", placeholder="ex. MORPHINE, 3400937… ou LOT-A")
+    # Deux gestes distincts : décider ce qu'on retire (péremption) et
+    # retrouver un produit dans l'armoire (nom). Le classement suit jusqu'au
+    # CSV et au PDF — sinon la liste papier contredirait l'écran.
+    tri = col_tri.selectbox("↕️ Classer par", stock_ferme.TRIS, key="sf_tri")
+    a_traiter = col_filtre.checkbox(
+        "⚠️ N'afficher que les lots à traiter", key="sf_filtre_traiter",
+        help="Périmés et lots de moins d'un mois.")
+    vue_filtree = stock_ferme.filtrer_inventaire(
+        inventaire, recherche,
+        stock_ferme.STATUTS_A_TRAITER if a_traiter else None, aujourdhui, tri)
+    filtre_actif = bool(recherche) or a_traiter
+    if filtre_actif and vue_filtree.empty:
+        st.info("Aucun lot ne correspond à ce filtre.")
+
+    # TROIS colonnes : le nom, le code CIP, et si la boîte est périmée.
+    # Demande de la pharmacie, mot pour mot — « rien de plus ». Onze
+    # colonnes tenaient ici ; devant l'armoire on ne cherche que deux
+    # choses : est-ce le bon produit, et est-il encore bon.
+    st.dataframe(
+        stock_ferme.vue_essentielle(
+            vue_filtree if filtre_actif else inventaire, aujourdhui, tri),
+        use_container_width=True, hide_index=True,
+        column_config=_colonnes_inventaire())
+    if filtre_actif:
+        st.caption(f"{len(vue_filtree)} lot(s) sur {len(inventaire)}.")
+
+    # Le détail — quantités, lot, péremption exacte — reste à une clic. Il
+    # ne se corrige que sur l'inventaire ENTIER : rectifier une vue filtrée
+    # réécrirait le stock en perdant les lignes masquées.
+    corrige = None
+    with st.expander("🔧 Voir le détail et corriger les quantités"):
         if filtre_actif:
-            st.caption(f"{len(vue_filtree)} lot(s) affiché(s) sur {len(inventaire)}.")
+            st.dataframe(
+                stock_ferme.inventaire_affichable(vue_filtree, aujourdhui,
+                                                  tri),
+                use_container_width=True, hide_index=True,
+                column_config=_colonnes_inventaire())
+            st.caption("Videz la recherche et décochez le filtre pour "
+                       "corriger l'inventaire.")
+        else:
+            corrige = _tableau_editable(inventaire, aujourdhui, tri)
+    if corrige is not None:
+        _enregistrer_corrections(corrige)
+        st.rerun()
 
-        corrige = None
-        with st.expander("Détail des lots et correction des quantités"):
-            if filtre_actif:
-                st.dataframe(
-                    stock_ferme.inventaire_affichable(vue_filtree, aujourdhui, tri),
-                    use_container_width=True, hide_index=True,
-                    column_config=_colonnes_inventaire())
-                st.caption("Videz la recherche et décochez le filtre pour corriger l'inventaire.")
-            else:
-                corrige = _tableau_editable(inventaire, aujourdhui, tri)
-        if corrige is not None:
-            _enregistrer_corrections(corrige)
-            st.rerun()
-        with exports:
-            _zone_impression(inventaire, aujourdhui, tri)
+    # --- Impression --------------------------------------------------------
+    st.divider()
+    etape("3", "Imprimez ou exportez", "Liste de contrôle du stock physique.")
+    _zone_impression(inventaire, aujourdhui, tri)

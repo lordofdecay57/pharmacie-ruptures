@@ -27,7 +27,7 @@ DEMARRAGE_MAX_S = 60
 #: Libellés des espaces de travail, tels qu'affichés dans les onglets.
 #: Les garder ici plutôt qu'éparpillés : un renommage se répercute en un
 #: seul endroit — et fait échouer ces tests s'il est oublié quelque part.
-ESPACE_CADENCIER = "Cadencier"
+ESPACE_CADENCIER = "Cadencier — stock & ruptures"
 ESPACE_STOCK_FERME = "Stock interne"
 ESPACE_COMMANDES = "Commandes spéciales"
 ESPACE_LOCATION = "Location"
@@ -217,7 +217,6 @@ def _saisir(page, texte: str, attente: int = 5000):
     Le délai de 8 ms par caractère est celui d'une douchette réelle : elle
     tape vite, et c'est justement ce qu'il faut éprouver.
     """
-    _ouvrir_la_saisie(page)
     champ = page.get_by_placeholder("Douchez la boîte").first
     champ.click()
     # Vidé au clavier et non par `fill("")` : le champ garde peut-être une
@@ -250,7 +249,6 @@ def _choisir_dans_la_liste(page, fragment: str, attente: int = 6000):
     panneau de quantité. Entrée valide « ce que j'ai tapé », le clic
     désigne « cette boîte-là ».
     """
-    _ouvrir_la_saisie(page)
     champ = page.get_by_placeholder("Douchez la boîte").first
     champ.click()
     page.wait_for_selector("[role='option']", timeout=15000)
@@ -299,18 +297,23 @@ def _sans_exception(page) -> None:
         page.locator('[data-testid="stException"]').first.inner_text())
 
 
-def _ouvrir_la_saisie(page) -> None:
-    """Le panneau est replié tant qu'on n'a pas cliqué Bip une boîte."""
-    if page.locator(".st-key-sf_saisie").count() == 0:
-        page.get_by_role("button", name="Bip une boîte", exact=True).click()
-        page.locator(".st-key-sf_zone_scan input").wait_for(state="visible")
-
-
 def _ouvrir_les_autres_gestes(page) -> None:
-    """Les gestes manuels sont accessibles dans le panneau de mouvement."""
-    _ouvrir_la_saisie(page)
-    assert page.locator(".st-key-sf_bouton_saisie_manuelle button:visible").count() == 1
-    assert page.locator(".st-key-sf_bouton_sortie_manuelle button:visible").count() == 1
+    """Déplie « Le code ne se lit pas ? Sortir à l'unité ? ».
+
+    L'écran de saisie tient désormais en DEUX lignes — on bipe, on dit le
+    sens — et tout le reste est replié : ce sont des exceptions, et une
+    exception affichée en permanence encombre le geste de tous les jours.
+    Replié ne veut pas dire caché : le titre nomme les deux cas.
+    """
+    # La liste des médicaments ne compte PLUS comme témoin d'ouverture :
+    # elle a quitté le dépliant, puis fusionné avec le champ de scan, où
+    # elle est visible en permanence. L'y chercher ferait croire le
+    # dépliant déjà ouvert, et plus rien ne serait jamais déplié.
+    if page.locator(".st-key-sf_bouton_sortie_manuelle:visible, "
+                    ".st-key-sf_bouton_saisie_manuelle:visible").count():
+        return                              # déjà déplié
+    page.get_by_text("Le code ne se lit pas").first.click()
+    page.wait_for_timeout(2500)
 
 
 def _onglet_actif(page, cle: str) -> str:
@@ -467,12 +470,9 @@ class TestEspaceStockFerme:
         _onglet(page, ESPACE_STOCK_FERME).first.click()
         page.wait_for_timeout(5000)
         _sans_exception(page)
-        assert page.get_by_role("button", name="Bip une boîte", exact=True).is_visible()
-        assert page.locator(".st-key-sf_saisie").count() == 0
-        _ouvrir_la_saisie(page)
         contenu = page.content()
-        for attendu in ("Enregistrer un mouvement", "Inventaire",
-                        "Exporter", "Entrée", "Sortie",
+        for attendu in ("Scannez le produit", "Inventaire",
+                        "Imprimez ou exportez", "Entrée", "Sortie",
                         "Base publique des médicaments",
                         "Pré-remplir les noms", "Classer par"):
             assert attendu in contenu, f"« {attendu} » absent de l'écran"
@@ -500,7 +500,9 @@ class TestEspaceStockFerme:
                     const e = document.querySelector(s);
                     return e ? e.getBoundingClientRect().top : -1;
                 };
-                const exceptions = document.querySelector('.st-key-sf_gestes');
+                const exceptions = [...document.querySelectorAll(
+                        '[data-testid="stExpander"]')].find(
+                    e => e.innerText.includes('Le code ne se lit pas'));
                 return {champ: y('.st-key-sf_zone_scan'),
                         bouton: y('.st-key-sf_base_installer'),
                         depliant: exceptions
@@ -655,7 +657,9 @@ class TestEspaceStockFerme:
         positions = page.evaluate(
             """() => {
                 const champ = document.querySelector('.st-key-sf_zone_scan');
-                const exceptions = document.querySelector('.st-key-sf_gestes');
+                const exceptions = [...document.querySelectorAll(
+                        '[data-testid="stExpander"]')].find(
+                    e => e.innerText.includes('Le code ne se lit pas'));
                 return [champ ? champ.getBoundingClientRect().top : -1,
                         exceptions
                             ? exceptions.getBoundingClientRect().top : -1];
@@ -718,11 +722,13 @@ class TestEspaceStockFerme:
         # Agrandie : un champ de saisie ordinaire fait ~40 px de haut.
         assert fonds["hauteur"] >= 60, fonds
 
-    def test_les_gestes_manuels_sont_visibles_sous_le_scan(self, page):
-        _ouvrir_les_autres_gestes(page)
-        scan = page.locator(".st-key-sf_zone_scan").bounding_box()
-        gestes = page.locator(".st-key-sf_gestes").bounding_box()
-        assert gestes["y"] > scan["y"]
+    def test_les_exceptions_sont_repliees(self, page):
+        """Étiquette abîmée, sortie à l'unité : des exceptions. Affichées en
+        permanence, elles encombraient le geste de tous les jours."""
+        contenu = page.content()
+        assert "Le code ne se lit pas" in contenu
+        # Replié ne veut pas dire caché : le titre nomme les deux cas.
+        assert "Sortir à l'unité" in contenu
 
     def test_la_saisie_manuelle_reste_accessible(self, page):
         """Elle vit dans le dépliant : c'est une exception (code illisible),
@@ -745,7 +751,6 @@ class TestSortieALUnite:
 
     def _ouvrir_le_panneau(self, page_avec_stock):
         page = page_avec_stock
-        _ouvrir_la_saisie(page)
         if page.locator(".st-key-sf_sortie_choix").count() == 0:
             _ouvrir_les_autres_gestes(page)
             page.locator(
@@ -819,7 +824,7 @@ class TestSaisieAssistee:
         barres = page_avec_base.evaluate(
             """() => {
                 const zone = document.querySelector(
-                    '.st-key-sf_zone_scan');
+                    '[data-testid="stMainBlockContainer"]') || document.body;
                 return [...zone.querySelectorAll('input')].filter(e => {
                     const r = e.getBoundingClientRect();
                     // Au-dessus du dépliant des exceptions : la zone de
@@ -893,10 +898,10 @@ class TestSaisieAssistee:
         """
         invite = page_avec_base.locator(
             ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
-        assert "produits déjà connus ici" in page_avec_base.content()
+        assert "produits déjà connus ici" in invite, invite
         # Et la recherche complète reste promise, sinon on croirait avoir
         # perdu le reste du répertoire national.
-        assert "base publique" in page_avec_base.content()
+        assert "base publique" in invite, invite
 
     def test_le_repertoire_national_est_disponible_au_choix(
             self, page_avec_base):
@@ -916,7 +921,6 @@ class TestSaisieAssistee:
         écran.
         """
         page = page_avec_base
-        page.get_by_role("button", name="Réglages", exact=True).click()
         case = page.locator(".st-key-sf_liste_complete")
         assert case.count() == 1, "le réglage est introuvable"
         assert case.first.is_visible(), (
@@ -927,12 +931,11 @@ class TestSaisieAssistee:
             _sans_exception(page)
             invite = page.locator(
                 ".st-key-sf_zone_scan input").first.get_attribute("placeholder")
-            assert "répertoire national proposés" in page.content()
+            assert "répertoire national" in invite, invite
         finally:
             # Décochée pour les tests suivants : ce réglage est global.
             case.locator("label").first.click()
             page.wait_for_timeout(6000)
-            page.keyboard.press("Escape")
 
     def test_chaque_ligne_porte_le_conditionnement(self, page_avec_base):
         champ = page_avec_base.locator(".st-key-sf_zone_scan input").first
@@ -1195,20 +1198,28 @@ class TestCommandesSpeciales:
         """C'est l'unique raison d'être de l'écran : dire quoi faire
         aujourd'hui avant de montrer un tableau."""
         contenu = page_commandes.content()
-        assert "À facturer" in contenu
-        assert "À commander" in contenu
-        assert "En retard" in contenu
+        assert "À facturer aujourd'hui" in contenu
+        assert "À commander maintenant" in contenu
 
     def test_les_dossiers_en_place_sont_affiches(self, page_commandes):
         contenu = page_commandes.content()
         assert "LEA DUPONT" in contenu
         assert "PAUL MARTIN" in contenu
 
-    def test_le_bouton_d_ajout_est_visible_avant_la_liste(self, page_commandes):
-        bouton = page_commandes.locator(".st-key-cs_ouvrir_ajout button")
-        liste = page_commandes.locator(".st-key-cs_liste")
-        assert bouton.is_visible()
-        assert bouton.bounding_box()["y"] < liste.bounding_box()["y"]
+    def test_le_panneau_d_ajout_est_visible_sans_defiler(self):
+        """L'ajout était en troisième position, sous deux sections : on ne
+        le voyait pas, et l'écran donnait l'impression de ne gérer qu'un
+        seul patient — celui de la liste déroulante des gestes.
+
+        Contrôle sur la source : l'ordre d'affichage est une décision, et
+        c'est elle qu'on protège."""
+        source = (RACINE / "ui_commandes_speciales.py").read_text(
+            encoding="utf-8")
+        corps = source.split("def rendre(", 1)[1]
+        assert corps.index("_panneau_ajout(") < corps.index("_listes_du_matin("), (
+            "l'ajout doit venir AVANT les listes du matin")
+        assert corps.index("_panneau_ajout(") < corps.index("_actions_rapides("), (
+            "l'ajout doit venir AVANT les gestes sur un dossier existant")
 
     def test_les_trois_gestes_du_comptoir_sont_la(self, page_commandes):
         contenu = page_commandes.content()
@@ -1219,12 +1230,10 @@ class TestCommandesSpeciales:
     def test_l_import_est_propose_pour_les_trois_formats(self, page_commandes):
         """Retaper trente patients qui existent déjà dans un tableur, c'est
         une demi-journée et des fautes de frappe sur des noms."""
-        page_commandes.get_by_role("button", name="Réglages", exact=True).click()
         contenu = page_commandes.content()
         assert "Importer depuis un fichier" in contenu
         for format_ in ("Excel", "CSV", "PDF"):
             assert format_ in contenu, format_
-        page_commandes.keyboard.press("Escape")
 
     def test_un_fichier_importe_ouvre_les_dossiers(self, page_commandes,
                                                    tmp_path):
@@ -1236,7 +1245,6 @@ class TestCommandesSpeciales:
             "Nom du patient;Spécialité;Code CIP;Dernière délivrance\n"
             "Mme IMPORTEE;HERCEPTIN 150 mg;3400930000057;01/08/2026\n",
             encoding="utf-8-sig")
-        page_commandes.get_by_role("button", name="Réglages", exact=True).click()
         page_commandes.get_by_text("Importer depuis un fichier").first.click()
         page_commandes.wait_for_timeout(1500)
         page_commandes.locator('input[type="file"]').set_input_files(
@@ -1248,7 +1256,6 @@ class TestCommandesSpeciales:
         page_commandes.wait_for_timeout(6000)
         _sans_exception(page_commandes)
         assert "Mme IMPORTEE" in page_commandes.content()
-        page_commandes.keyboard.press("Escape")
 
     def test_facturer_relance_les_22_jours(self, page_commandes):
         """Le geste complet : la date repart, et une boîte sort du stock.
@@ -1615,28 +1622,185 @@ def _panneau_du_sous_onglet(page) -> str:
 
 class TestEspaceLocation:
     def test_l_espace_est_propose_des_l_arrivee(self, page, application):
+        """Le module ne sert à rien s'il faut savoir qu'il existe. La page
+        est ouverte ICI : un test qui dépend de l'ordre d'exécution ne
+        prouve rien."""
         _ouvrir(page, application)
         assert _onglet(page, ESPACE_LOCATION).count() == 1
 
-    def test_le_nouveau_suivi_est_branche_sur_l_application(self, page_location):
+    def test_l_ecran_s_ouvre_sans_exception(self, page_location):
         _sans_exception(page_location)
-        assert page_location.get_by_role("heading", name="Locations & achats", exact=True).count() == 1
-        for label in ["À faire", "Dossiers patients", "Facturation", "Réglages & essai"]:
-            assert page_location.get_by_role("tab", name=label, exact=True).count() == 1
+        assert "ententes préalables CAFAT" in page_location.content()
 
-    def test_les_anciens_dossiers_demandent_une_reprise(self, page_location):
-        page_location.get_by_role("tab", name="Dossiers patients", exact=True).click()
-        page_location.get_by_text("Dossier conservé depuis l'ancienne version.", exact=False).wait_for()
+    def test_les_sous_onglets_demandes_sont_la(self, page_location):
+        """« Un sous-onglet donnant entente préalable faite la date, puis un
+        sous-onglet pour les facturations, et un sous-onglet qui nous
+        donnerait les dossiers à renouveler », puis « un sous-onglet avec
+        achat ». Les quatre, dans cet ordre."""
+        libelles = page_location.evaluate(
+            """() => [...document.querySelectorAll('[role="tab"]')].map(
+                t => t.innerText.replace(/\\s+/g, ' ').trim())""")
+        assert len(libelles) == 4, libelles
+        assert "Ententes préalables" in libelles[0], libelles
+        assert "Facturations" in libelles[1], libelles
+        assert "À renouveler" in libelles[2], libelles
+        assert "Achats" in libelles[3], libelles
+
+    def test_les_dossiers_en_place_sont_affiches(self, page_location):
+        contenu = page_location.content()
+        assert "ANNE VALIDE" in contenu
+        assert "SOPHIE EXPIREE" in contenu
+
+    def test_le_bandeau_compte_les_ententes_expirees(self, page_location):
+        """Une entente expirée n'est plus prise en charge : c'est le chiffre
+        qu'on doit voir sans ouvrir quoi que ce soit."""
+        contenu = page_location.content()
+        assert "Ententes expirées" in contenu
+        assert "À renouveler" in contenu
+
+    def test_un_dossier_sans_entente_est_signale(self, page_location):
+        """Tant que l'accord n'est pas saisi, la location n'est prise en
+        charge par personne — et rien d'autre ne le rappelle."""
+        assert "sans entente préalable" in page_location.content()
+
+    def test_le_sous_onglet_renouveler_liste_les_echeances(self,
+                                                           page_location):
+        """Les expirées d'abord : chaque jour compte double quand la prise
+        en charge est déjà tombée."""
+        _sous_onglet(page_location, "À renouveler").first.click()
+        page_location.wait_for_timeout(4000)
         _sans_exception(page_location)
-        assert page_location.get_by_role("button", name="Valider la reprise", exact=True).count() == 1
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "SOPHIE EXPIREE" in liste, liste
+        assert "PIERRE BIENTOT" in liste, liste
+        # Celle-ci tient encore : elle n'a rien à faire dans cette liste.
+        assert "ANNE VALIDE" not in liste, liste
 
-    def test_reglages_mail_et_demo_accessibles(self, page_location):
-        page_location.get_by_role("tab", name="Réglages & essai", exact=True).click()
-        assert page_location.get_by_label("Adresse mail de la pharmacie", exact=True).count() == 1
-        assert page_location.get_by_text("Essayer le scénario du matelas à air", exact=True).count() == 1
+    def test_le_sous_onglet_facturation_compte_les_mois_dus(self,
+                                                            page_location):
+        """Une location oubliée depuis trois mois, ce sont trois mois à
+        facturer — pas un. Afficher « à facturer » tout court ferait
+        encaisser un mois et croire le dossier à jour."""
+        _sous_onglet(page_location, "Facturations").first.click()
+        page_location.wait_for_timeout(4000)
         _sans_exception(page_location)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Mois dus" in liste, liste
+        # Jamais facturée : le cas qu'aucune date ne vient rappeler.
+        assert "LUC SANSRIEN" in liste, liste
 
-    def test_les_donnees_patients_et_smtp_ne_partent_pas_au_depot(self):
+    def test_enregistrer_une_entente_repousse_l_echeance(self, page_location):
+        """Le geste central du module : l'accord revient de la caisse, et
+        l'échéance repart de SA date — pas de celle de la demande."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        page_location.get_by_role(
+            "button", name="✅ Entente préalable faite", exact=True
+        ).first.click()
+        page_location.wait_for_timeout(6000)
+        _sans_exception(page_location)
+        assert "entente accordée le" in page_location.content()
+
+    def test_le_panneau_d_ajout_est_visible_sans_defiler(self):
+        """Même leçon que les commandes spéciales : l'ajout placé sous deux
+        sections ne se voit pas, et l'écran donne l'impression de ne gérer
+        que les dossiers déjà là.
+
+        Contrôle sur la source : l'ordre d'affichage est une décision, et
+        c'est elle qu'on protège."""
+        source = (RACINE / "ui_location.py").read_text(encoding="utf-8")
+        corps = source.split("def rendre(", 1)[1]
+        assert corps.index("_panneau_ajout(") < corps.index("st.tabs("), (
+            "l'ajout doit venir AVANT les trois sous-onglets")
+
+    def test_les_dossiers_patients_ne_partent_pas_au_depot(self):
+        """`location.csv` porte des noms de patients : il doit être ignoré
+        par git, comme les commandes spéciales. Un oubli ici publierait des
+        données nominatives sur GitHub."""
         ignores = (RACINE / ".gitignore").read_text(encoding="utf-8")
-        for nom in ["location.csv", "locations_suivi.json*", "rappels_location.local.json*", "rappels_location_envois.json*"]:
-            assert nom in ignores
+        assert "location.csv" in ignores
+
+
+class TestLouerOuAcheter:
+    """« On peut soit acheter soit louer, mais harmonisé par patient. »
+
+    Le fond du sujet : un achat ne se lit pas comme une location. Il se
+    facture une fois, et une fois réglé il ne revient plus — ni dans les
+    facturations, ni dans les renouvellements. Le confondre avec une
+    location ferait facturer deux fois le même fauteuil, et remonter tous
+    les mois un dossier clos.
+    """
+
+    def test_le_sous_onglet_achats_existe_et_les_liste(self, page_location):
+        _sous_onglet(page_location, "Achats").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Déambulateur" in liste, liste
+        assert "Lève-personne" in liste, liste
+
+    def test_un_achat_livre_et_jamais_regle_est_signale(self, page_location):
+        """Aucune date ne viendra le rappeler : c'est l'écran ou rien."""
+        _sous_onglet(page_location, "Achats").first.click()
+        page_location.wait_for_timeout(4000)
+        assert "achat(s) à facturer" in _panneau_du_sous_onglet(page_location)
+
+    def test_un_achat_regle_ne_revient_pas_dans_les_facturations(
+            self, page_location):
+        """Le fauteuil est payé. L'y laisser ferait le facturer deux fois."""
+        _sous_onglet(page_location, "Facturations").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        # Le lève-personne, jamais réglé, est dû ; le déambulateur, non.
+        assert "Lève-personne" in liste, liste
+        assert "Déambulateur" not in liste.split("Toutes les locations")[0], (
+            liste)
+
+    def test_un_achat_regle_ne_remonte_pas_dans_les_renouvellements(
+            self, page_location):
+        """Son entente a expiré il y a des mois, et c'est sans conséquence :
+        l'y laisser noierait les vraies échéances sous des dossiers clos.
+
+        La preuve se fait sur PIERRE BIENTOT, que rien n'a touché : un test
+        antérieur de ce module a renouvelé la première ligne de la liste,
+        et s'appuyer sur elle ferait dépendre celui-ci de cet ordre."""
+        _sous_onglet(page_location, "À renouveler").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "PIERRE BIENTOT" in liste, "la liste est vide"
+        assert "Déambulateur" not in liste, "l'achat réglé y figure encore"
+
+    def test_le_mode_se_lit_dans_les_listes(self, page_location):
+        """Sans lui, il faut retourner au tableau complet pour chaque
+        patient — et c'est ce va-et-vient que ces vues évitent."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        liste = _panneau_du_sous_onglet(page_location)
+        assert "Location" in liste, liste
+        assert "Achat" in liste, liste
+
+    def test_la_vue_par_patient_reunit_ses_deux_modes(self, page_location):
+        """Le patient au téléphone ne demande pas « où en est ma location
+        de lit » : il demande où il en est. Mme CLAIRE ACHAT a deux
+        dossiers — ils doivent tenir sur UNE ligne."""
+        _sans_exception(page_location)
+        contenu = page_location.content()
+        assert "Vue par patient" in contenu
+        # 5 patients pour 6 dossiers : les deux achats de Mme CLAIRE ACHAT
+        # sont réunis. Le nombre est dans le titre du dépliant.
+        assert "5 personne(s) suivie(s)" in contenu, [
+            l for l in contenu.split("<") if "personne(s)" in l]
+
+    def test_le_bandeau_distingue_loue_et_achete(self, page_location):
+        assert "loué(s)" in page_location.content()
+        assert "acheté(s)" in page_location.content()
+
+    def test_le_mode_est_une_liste_fermee_dans_le_tableau(self):
+        """« loc. », « LOCATION » ou « louée » tapés à la main sortiraient
+        le dossier de son sous-onglet sans que rien ne le signale.
+
+        Contrôle sur la source : c'est une décision d'ergonomie, et le
+        tableau de référence n'est pas toujours à l'écran."""
+        source = (RACINE / "ui_location.py").read_text(encoding="utf-8")
+        assert "SelectboxColumn" in source
+        assert "options=list(loc.MODES)" in source
