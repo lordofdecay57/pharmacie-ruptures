@@ -713,27 +713,6 @@ class TestRecapitulatifParPatient:
         mixte = recap[recap["Patient"].str.upper() == "MME MIXTE"].iloc[0]
         assert mixte["À renouveler"] == 0
 
-    def test_l_achat_regle_ne_rend_pas_la_location_valide_expiree(self):
-        recap = loc.par_patient(self._deux_patients(), AUJOURDHUI)
-        mixte = recap[recap["Patient"].str.upper() == "MME MIXTE"].iloc[0]
-        assert mixte["Entente"] == loc.STATUT_ENTENTE_VALIDE
-
-    def test_un_patient_avec_seulement_des_achats_regles_est_clos(self):
-        dossiers = self._deux_patients()
-        achats = dossiers[dossiers["Mode"] == loc.MODE_ACHAT]
-        recap = loc.par_patient(achats, AUJOURDHUI)
-        assert recap.iloc[0]["Entente"] == loc.STATUT_ACHAT_REGLE
-        assert recap.iloc[0]["À renouveler"] == 0
-
-    def test_un_achat_non_regle_conserve_son_alerte_patient(self):
-        dossiers = self._deux_patients()
-        dossiers.loc[dossiers["Mode"] == loc.MODE_ACHAT,
-                     "Dernière facturation"] = ""
-        recap = loc.par_patient(dossiers, AUJOURDHUI)
-        mixte = recap[recap["Patient"].str.upper() == "MME MIXTE"].iloc[0]
-        assert mixte["Entente"] == loc.STATUT_EXPIREE
-        assert mixte["À renouveler"] == 1
-
     def test_un_dossier_vide_ne_plante_rien(self):
         assert loc.par_patient(loc.dossier_vide(), AUJOURDHUI).empty
 

@@ -180,28 +180,14 @@ def _libelles(vue: pd.DataFrame) -> list:
 
 
 def _choisir_un_dossier(vue: pd.DataFrame, cle: str):
-    """Conserve le dossier choisi même si les échéances le reclassent."""
+    """Liste déroulante des dossiers ; renvoie la ligne choisie."""
     libelles = _libelles(vue)
     if not libelles:
         return None
-    identites = [_identite_dossier(ligne) for _, ligne in vue.iterrows()]
-    positions = {identite: i for i, identite in enumerate(identites)}
-    if cle in st.session_state and st.session_state[cle] not in positions:
-        # Le dossier a disparu ou son identité a changé sur un autre poste.
-        # Ne pas proposer silencieusement un autre patient à sa place.
-        st.session_state[cle] = None
-    choix = st.selectbox("Dossier", identites,
-                         format_func=lambda identite: libelles[positions[identite]],
-                         key=cle, label_visibility="collapsed",
-                         placeholder="Choisissez un dossier")
-    return None if choix is None else vue.iloc[positions[choix]]
-
-
-def _identite_dossier(ligne) -> tuple:
-    """La même identité patient / matériel / mode que le moteur."""
-    return (loc.cle_patient(ligne["Patient"]),
-            loc.cle_patient(ligne["Matériel"]),
-            loc.parser_mode(ligne["Mode"]))
+    rang = st.selectbox("Dossier", range(len(libelles)),
+                        format_func=lambda i: libelles[i], key=cle,
+                        label_visibility="collapsed")
+    return vue.iloc[rang]
 
 
 # ---------------------------------------------------------------------------
@@ -321,19 +307,12 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
         ligne = _choisir_un_dossier(vue, "lo_entente_dossier")
         if ligne is None:
             return
-        duree = int(ligne["Validité (mois)"] or loc.VALIDITE_DEFAUT_MOIS)
-        reference = (_identite_dossier(ligne), duree)
-        if st.session_state.get("lo_entente_reference") != reference:
-            # Une clé de widget fixe garde sinon la durée du patient précédent.
-            st.session_state["lo_entente_validite"] = duree
-            st.session_state["lo_entente_date"] = aujourdhui
-            st.session_state["lo_entente_reference"] = reference
         c1, c2 = st.columns([3, 2])
         accordee = c1.date_input("Accordée le", value=aujourdhui,
                                  format="DD/MM/YYYY", key="lo_entente_date")
         validite = c2.number_input(
             "Validité (mois)", min_value=1, max_value=60,
-            value=duree,
+            value=int(ligne["Validité (mois)"] or loc.VALIDITE_DEFAUT_MOIS),
             step=1, key="lo_entente_validite")
         if st.button("✅ Entente préalable faite", type="primary",
                      use_container_width=True, key="lo_entente_valider"):
@@ -395,10 +374,6 @@ def _onglet_facturations(dossiers: pd.DataFrame, vue: pd.DataFrame,
         ligne = _choisir_un_dossier(vue, "lo_facture_dossier")
         if ligne is None:
             return
-        identite = _identite_dossier(ligne)
-        if st.session_state.get("lo_facture_reference") != identite:
-            st.session_state["lo_facture_date"] = aujourdhui
-            st.session_state["lo_facture_reference"] = identite
         jour = st.date_input("Facturé le", value=aujourdhui,
                              format="DD/MM/YYYY", key="lo_facture_date")
         if st.button("💰 Facturé", type="primary",
@@ -578,15 +553,14 @@ def _enregistrer_corrections(corrige: pd.DataFrame) -> None:
 # Écran
 # ---------------------------------------------------------------------------
 
-def _bandeau(resume: dict, tuile,
-             alerte_j: int = loc.ALERTE_RENOUVELLEMENT_J) -> None:
+def _bandeau(resume: dict, tuile) -> None:
     st.markdown('<div class="kpi-row">' + "".join([
         tuile("Dossiers suivis", resume["dossiers"], "accent",
               sous=f'{resume["locations"]} loué(s) · '
                    f'{resume["achats"]} acheté(s)'),
         tuile("🔁 À renouveler", resume["a_renouveler"],
               "accent" if resume["a_renouveler"] else "",
-              sous=f'échéance sous {alerte_j} jours'),
+              sous=f'échéance sous {loc.ALERTE_RENOUVELLEMENT_J} jours'),
         tuile("⛔ Ententes expirées", resume["expirees"],
               "critical" if resume["expirees"] else "",
               sous="plus prises en charge"),
@@ -625,6 +599,85 @@ def _barre_laterale(dossiers: pd.DataFrame, aujourdhui: date) -> tuple:
 
 
 def rendre(etape, tuile_kpi) -> None:
-    """Le parcours de travail réel ; les aides historiques restent testées."""
-    from ui_locations_suivi import rendre as rendre_suivi
-    rendre_suivi(DOSSIERS_PATH)
+    """Affiche l'écran complet du module.
+
+    ``etape`` et ``tuile_kpi`` sont les fonctions d'habillage de ``app.py``,
+    passées en paramètre pour garder ce module indépendant de l'application.
+    """
+    dossiers = _etat()
+    aujourdhui, alerte = _barre_laterale(dossiers, date.today())
+
+    message = st.session_state.pop("lo_message", None)
+    if message:
+        niveau, texte = message
+        (st.success if niveau == "ok" else st.warning)(texte)
+
+    _bandeau(loc.resume(dossiers, aujourdhui, alerte), tuile_kpi)
+
+    _panneau_ajout(dossiers)
+
+    etape("1", "Les trois questions de la location",
+          "L'entente est-elle faite, qu'y a-t-il à facturer, et qu'est-ce "
+          "qui expire bientôt.")
+
+    vue = loc.vue_affichable(dossiers, aujourdhui, loc.TRI_ECHEANCE, alerte)
+    onglets = st.tabs(["✅ Ententes préalables", "💰 Facturations",
+                       "🔁 À renouveler", "🛒 Achats"])
+    with onglets[0]:
+        _onglet_ententes(dossiers, vue, aujourdhui)
+    with onglets[1]:
+        _onglet_facturations(dossiers, vue, aujourdhui)
+    with onglets[2]:
+        _onglet_renouvellement(dossiers, aujourdhui, alerte)
+    with onglets[3]:
+        _onglet_achats(vue)
+
+    st.divider()
+    etape("2", "Chaque patient d'un coup d'œil",
+          "Ce qu'il loue, ce qu'il a acheté, et ce qui presse — sur une "
+          "seule ligne.")
+    _recapitulatif_par_patient(dossiers, aujourdhui, alerte)
+
+    st.divider()
+    etape("3", "Tous les dossiers", "La référence, corrigeable à la main.")
+    colonne_recherche, colonne_tri = st.columns([3, 2])
+    recherche = colonne_recherche.text_input(
+        "🔍 Rechercher", key="lo_recherche",
+        placeholder="Nom du patient ou matériel loué")
+    tri = colonne_tri.selectbox("↕️ Classer par", loc.TRIS, key="lo_tri")
+
+    # Recalculée avec le tri demandé : les sous-onglets ci-dessus sont
+    # toujours classés par échéance — ce qui expire en premier doit sauter
+    # aux yeux — tandis que la référence se classe comme on veut la lire.
+    classee = loc.vue_affichable(dossiers, aujourdhui, tri, alerte)
+    if dossiers.empty:
+        st.info("Aucun dossier — ouvrez-en un tout en haut de l'écran.")
+    elif recherche.strip():
+        # Le tableau ne devient modifiable que sur la liste ENTIÈRE :
+        # corriger une vue filtrée réécrirait les dossiers en perdant les
+        # lignes masquées.
+        motif = recherche.strip().lower()
+        garde = classee.apply(
+            lambda l: motif in f"{l['Patient']} {l['Matériel']} "
+                               f"{l['Mode']}".lower(),
+            axis=1)
+        filtree = classee[garde]
+        st.dataframe(loc.pour_affichage(filtree[loc.COLONNES_VUE]),
+                     use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
+        st.caption(f"{len(filtree)} dossier(s) trouvé(s). Videz la recherche "
+                   "pour corriger le tableau.")
+    else:
+        corrige = _tableau(classee)
+        if corrige is not None:
+            _enregistrer_corrections(corrige)
+            st.rerun()
+
+    st.divider()
+    etape("4", "Imprimez ou exportez",
+          "La liste des ententes, à poser à côté du téléphone.")
+    st.download_button(
+        "📄 Exporter en CSV",
+        loc.exporter_csv(dossiers, aujourdhui, tri, alerte),
+        file_name=loc.nom_fichier("csv", aujourdhui), mime=_MIME_CSV,
+        use_container_width=True)

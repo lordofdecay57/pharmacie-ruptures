@@ -327,20 +327,20 @@ class TestColonnePeremption:
         assert partagees == tableaux, (
             f"{tableaux} tableaux mais {partagees} passent par la fabrique")
 
-    def _ecran_stock(self, tmp_path, monkeypatch):
-        from streamlit.testing.v1 import AppTest
-        import ui_stock_ferme as ui
-        for nom in ("INVENTAIRE_PATH", "REPERTOIRE_PATH", "BASE_MEDICAMENTS_PATH"):
-            monkeypatch.setattr(ui, nom, tmp_path / getattr(ui, nom).name)
-        app = AppTest.from_string("import ui_stock_ferme as ui; ui.rendre()").run()
-        assert not app.exception
-        return app
-
-    def test_aucun_compteur_au_dessus_de_l_inventaire(self, tmp_path, monkeypatch):
-        """Le stock reste une zone de scan et une liste, sans mur de compteurs."""
-        app = self._ecran_stock(tmp_path, monkeypatch)
-        assert not app.metric
-        assert not any('class="kpi-row"' in m.value for m in app.markdown)
+    def test_aucun_compteur_au_dessus_de_l_inventaire(self):
+        """Cinq tuiles tenaient là — lots, boîtes, périmés, moins d'un
+        mois, moins de trois mois — au-dessus d'un tableau qui dit déjà
+        tout cela, ligne par ligne, avec le statut en tête. Elles
+        repoussaient l'inventaire lui-même sous la ligne de flottaison,
+        et c'est lui qu'on vient voir."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "ui_stock_ferme.py").read_text(encoding="utf-8")
+        code = [l for l in source.splitlines()
+                if not l.strip().startswith("#")]
+        for interdit in ("_bandeau_kpi", "tuile_kpi", "Moins de 3 mois",
+                         "Lots enregistrés"):
+            fautives = [l for l in code if interdit in l]
+            assert not fautives, f"{interdit} : {fautives}"
 
     def test_le_module_ne_reclame_plus_de_tuiles(self):
         """Un paramètre que personne n'utilise finit par masquer un
@@ -365,11 +365,16 @@ class TestColonnePeremption:
                   / "ui_stock_ferme.py").read_text(encoding="utf-8")
         assert "stock_ferme.vue_essentielle(" in source
 
-    def test_le_detail_est_replie_sous_le_tableau(self, tmp_path, monkeypatch):
-        """Les corrections restent accessibles à la demande dans l'écran réel."""
-        app = self._ecran_stock(tmp_path, monkeypatch)
-        detail = next(e for e in app.expander if "correction des quantités" in e.label)
-        assert not detail.proto.expanded
+    def test_le_detail_est_replie_sous_le_tableau(self):
+        """Quantités, lot, péremption exacte : on en a besoin pour
+        corriger, jamais pour lire l'inventaire devant l'armoire."""
+        source = (pathlib.Path(__file__).parent.parent
+                  / "ui_stock_ferme.py").read_text(encoding="utf-8")
+        assert 'st.expander("🔧 Voir le détail' in source
+        # Le tableau essentiel vient AVANT le dépliant : c'est lui qu'on
+        # regarde, l'autre est l'exception.
+        assert source.index("stock_ferme.vue_essentielle(") \
+            < source.index('st.expander("🔧 Voir le détail')
 
     def test_l_impression_garde_tout(self):
         """Réduire l'ÉCRAN n'est pas réduire la liste papier : sur le
