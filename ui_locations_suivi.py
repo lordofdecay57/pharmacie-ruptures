@@ -112,7 +112,8 @@ def _a_faire(state, path, acteur, today):
                 for p in tasks["facturer"]])
     else:
         st.success("Aucune facturation prête à préparer aujourd'hui.")
-    _facturer(state, path, acteur, today, tasks["facturer"])
+    if tasks["facturer"]:
+        st.caption("Ouvrez Facturation pour vérifier la demande d'entente puis enregistrer la facture.")
     if tasks["renouveler"]:
         st.subheader("Renouvellements")
         _table([{"Patient": dossiers[t["dossier"]]["patient"], "Matériel": dossiers[t["dossier"]]["materiel"],
@@ -158,6 +159,11 @@ def _facturer(state, path, acteur, today, pretes):
             return
         p = par_id[ident]
         d = suivi.dossier(state, p["dossier"])
+        if d["prise"] != "Non remboursable":
+            st.markdown("**Entente liée à cette période**")
+            _table(_lignes_ententes([
+                a for a in d["accords"] if a["statut"] == "Accordée"
+                and a["du"] <= p["au"] and a["au"] >= p["du"]]))
         if p["dernier"]:
             st.warning("Dernière période de prise en charge : préparez le renouvellement de l'entente. L'alerte restera affichée jusqu'à l'accord suivant.")
         if p["partielle"]:
@@ -201,7 +207,7 @@ def _fiche(state, path, acteur, today):
                     _agir(path, "reprendre", acteur, d, debut=debut, debut_suivi=suite or debut, justification=preuve, achat_deja_facture=deja_facture)
                 else:
                     st.error("Indiquez la première période non facturée.")
-    sections = st.tabs(["Prise en charge & ententes", "Caution & retour", "Échéancier & historique"])
+    sections = st.tabs(["Prise en charge", "Caution & retour", "Échéancier & historique"])
     with sections[0]:
         with st.expander("Conditions de prise en charge", expanded=d["prise"] == "À vérifier" or not d["motif"]):
             if d["categorie"] == "Aérosol":
@@ -216,7 +222,7 @@ def _fiche(state, path, acteur, today):
             if d["verifie_par"]:
                 st.caption(f'Vérifié par {d["verifie_par"]}, le {_date(d["verifie_le"])}')
         if d["prise"] != "Non remboursable":
-            _ententes(d, path, acteur, today, key)
+            st.caption("La date de demande d'entente, son initiateur et la réponse de la caisse se renseignent dans Facturation.")
         else:
             st.caption("Location privée : pas d'entente exigée par ce suivi. Le contrat, la facture et la caution sont suivis dans le même dossier.")
     with sections[1]:
@@ -234,20 +240,33 @@ def _fiche(state, path, acteur, today):
                 for e in reversed(state["journal"]) if e["dossier"] == d["id"]])
 
 
-def _ententes(d, path, acteur, today, key):
-    _table([{"État": a["statut"], "Envoyée le": _date(a["envoyee"]), "Par": a["initiateur"],
+def _lignes_ententes(accords):
+    return [{"Date de demande d'entente préalable": _date(a["envoyee"]),
+             "Membre de l'équipe": a["initiateur"], "État": a["statut"],
              "Reçue le": _date(a["reception"]), "Du": _date(a["du"]), "Au": _date(a["au"]), "Référence": a["reference"] or a["reference_demande"]}
-            for a in d["accords"]])
-    with st.expander("Envoyer / enregistrer une demande d'entente", expanded=not d["accords"]):
-        st.caption("Ce geste enregistre une demande déjà envoyée. Il n'envoie pas de mail à la CAFAT.")
+            for a in accords]
+
+
+def _ententes(d, path, acteur, today, key):
+    _table(_lignes_ententes(d["accords"]))
+    with st.expander("Enregistrer une demande d'entente préalable", expanded=not d["accords"]):
+        st.caption("Renseignez la date réelle d'envoi et le membre de l'équipe à l'origine de la demande. Cet enregistrement n'envoie pas de mail à la CAFAT.")
         with st.form("ls_demande_" + key):
-            c1, c2 = st.columns(2)
-            date_envoi = c1.date_input("Envoyée le", value=today, format="DD/MM/YYYY")
-            canal = c2.selectbox("Mode d'envoi", ["Mail", "Courrier", "Autre"])
-            initiateur = st.text_input("Demande initiée par", value=acteur)
-            reference = st.text_input("Référence de la demande / du mail")
+            c1, c2 = st.columns([2, 3])
+            date_envoi = c1.date_input("Date de demande d'entente préalable", value=None,
+                                       max_value=today, format="DD/MM/YYYY")
+            initiateur = c2.text_input("Membre de l'équipe ayant initié la demande", value=acteur,
+                                       help="La personne qui a initié la demande, même si un collègue l'enregistre aujourd'hui.")
+            c1, c2 = st.columns([1, 2])
+            canal = c1.selectbox("Mode d'envoi", ["Mail", "Courrier", "Autre"])
+            reference = c2.text_input("Référence de la demande / du mail")
             if st.form_submit_button("Enregistrer la demande", type="primary"):
-                _agir(path, "demander", acteur, d, date=date_envoi, canal=canal, reference=reference, initiateur=initiateur)
+                if date_envoi is None:
+                    st.error("Renseignez la date de demande d'entente préalable.")
+                elif not initiateur.strip():
+                    st.error("Renseignez le membre de l'équipe ayant initié la demande.")
+                else:
+                    _agir(path, "demander", acteur, d, date=date_envoi, canal=canal, reference=reference, initiateur=initiateur)
     demandes = suivi.accords_en_attente(d)
     if demandes:
         with st.expander("Enregistrer la réponse de la caisse", expanded=True):
@@ -322,6 +341,25 @@ def _caution(d, path, acteur, today, key):
                 _agir(path, "caution_restituer", acteur, d, date=jour_retour, reference=ref)
     if c["etat"] == "Restituée":
         st.success(f'Caution restituée par {c["rendu_par"]} le {_date(c["restitution"])}.')
+
+
+def _facturation(state, path, acteur, today):
+    d = _choisir(state, "ls_dossier_facturation")
+    if not d:
+        return
+    st.subheader("1. Demande d'entente préalable")
+    if d["prise"] == "Non remboursable":
+        st.info("Dossier non remboursable : pas de demande d'entente à renseigner dans ce suivi.")
+    else:
+        _ententes(d, path, acteur, today, f'{d["id"]}_{d["revision"]}')
+    st.subheader("2. Facturation")
+    pretes = [p for p in suivi.taches(state, today)["facturer"] if p["dossier"] == d["id"]]
+    if pretes:
+        _facturer(state, path, acteur, today, pretes)
+    else:
+        st.info("Aucune période prête à facturer pour ce dossier. Vérifiez la prise en charge, l'accord et les échéances.")
+    with st.expander("Historique de toutes les factures et règlements"):
+        _journal_factures(state, path, acteur, today)
 
 
 def _journal_factures(state, path, acteur, today):
@@ -434,10 +472,10 @@ def rendre(ancien_csv):
         if state["equipe"]:
             st.caption("Équipe : " + ", ".join(state["equipe"]))
         st.caption(f'Nouvelle-Calédonie · {_date(today)}')
-        st.caption("Location · version 6.36")
+        st.caption("Location · version 6.38")
     with st.container(key="locations_suivi"):
         st.markdown(STYLE, unsafe_allow_html=True)
-        st.markdown('<div class="loc-intro"><div><div class="loc-eyebrow">Le suivi du matériel patient</div><h2>Locations & achats</h2><p>Les bonnes périodes. Les bons accords. Chaque geste tracé.</p></div><span class="loc-pill">Suivi quotidien · 6.36</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="loc-intro"><div><div class="loc-eyebrow">Le suivi du matériel patient</div><h2>Locations & achats</h2><p>Les bonnes périodes. Les bons accords. Chaque geste tracé.</p></div><span class="loc-pill">Suivi quotidien · 6.38</span></div>', unsafe_allow_html=True)
         message = st.session_state.pop("ls_message", "")
         if message:
             st.success(message)
@@ -448,12 +486,12 @@ def rendre(ancien_csv):
                 ("Cautions à rendre", len(tasks["cautions"]), "après retour du matériel")]
         st.markdown('<div class="loc-kpis">' + ''.join(f'<div class="loc-kpi"><span>{escape(n)}</span><strong>{v}</strong><small>{escape(s)}</small></div>' for n, v, s in kpis) + '</div>', unsafe_allow_html=True)
         _nouveau(state, path, acteur, today)
-        onglets = st.tabs(["À faire", "Dossiers patients", "Factures", "Réglages & essai"])
+        onglets = st.tabs(["À faire", "Dossiers patients", "Facturation", "Réglages & essai"])
         with onglets[0]:
             _a_faire(state, path, acteur, today)
         with onglets[1]:
             _fiche(state, path, acteur, today)
         with onglets[2]:
-            _journal_factures(state, path, acteur, today)
+            _facturation(state, path, acteur, today)
         with onglets[3]:
             _reglages(state, path, acteur, today)

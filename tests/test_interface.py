@@ -1621,7 +1621,7 @@ class TestEspaceLocation:
     def test_le_nouveau_suivi_est_branche_sur_l_application(self, page_location):
         _sans_exception(page_location)
         assert page_location.get_by_role("heading", name="Locations & achats", exact=True).count() == 1
-        for label in ["À faire", "Dossiers patients", "Factures", "Réglages & essai"]:
+        for label in ["À faire", "Dossiers patients", "Facturation", "Réglages & essai"]:
             assert page_location.get_by_role("tab", name=label, exact=True).count() == 1
 
     def test_les_anciens_dossiers_demandent_une_reprise(self, page_location):

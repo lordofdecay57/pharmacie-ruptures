@@ -1,6 +1,6 @@
 # 💊 Pilotage pharmacie — stock & ruptures
 
-## Version 6.38 — « Bip une boîte » ouvre les mouvements
+## Version 6.38 — mouvements à la demande et suivi des ententes
 
 L'onglet **Stock interne** s'ouvre directement sur l'inventaire. Le scan et
 les formulaires d'entrée/sortie sont masqués tant que vous n'avez pas cliqué
@@ -11,6 +11,14 @@ unique : les boutons **Entrée** et **Sortie** apparaissent pour cette boîte.
 Les saisies manuelles restent accessibles dans ce panneau. **Fermer** le
 replie et annule seulement le mouvement qui n'a pas été validé. Le panneau
 reste ouvert après une validation pour enchaîner plusieurs boîtes.
+
+Dans **Location → Facturation**, le dossier commence par la **date de demande
+d'entente préalable** et le **membre de l'équipe ayant initié la demande**, puis
+la réponse de la caisse et les factures. La date réelle d'envoi doit être
+renseignée ; elle n'est pas remplacée par la date du jour. Les demandes déjà
+enregistrées sont reprises avec leur auteur, et l'entente correspondant à la
+période est rappelée avant l'enregistrement de la facture. Les locations non
+remboursables restent suivies sans demande d'entente.
 
 Après la mise à jour et le redémarrage de l'utilitaire, le bandeau doit afficher
 **v6.38** et le bouton **Bip une boîte** doit être visible dans Stock interne.
