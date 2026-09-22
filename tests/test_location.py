@@ -254,7 +254,9 @@ class TestLesTroisVues:
         compte = loc.resume(self._trois_dossiers(), AUJOURDHUI)
         assert compte == {"dossiers": 3, "patients": 3, "locations": 3,
                           "achats": 0, "a_renouveler": 1, "expirees": 1,
-                          "a_facturer": 1, "mois_dus": 3}
+                          "a_facturer": 1, "mois_dus": 3,
+                          "demandes_en_attente": 0, "dernier_mois": 0,
+                          "hors_caisse": 0, "cautions": 0}
 
     def test_un_dossier_vide_ne_plante_rien(self):
         vide = loc.dossier_vide()
@@ -721,3 +723,271 @@ class TestRecapitulatifParPatient:
         assert compte["locations"] == 2
         assert compte["achats"] == 1
         assert compte["patients"] == 2
+
+
+# ---------------------------------------------------------------------------
+# La DEMANDE d'entente : ce qui précède l'accord
+# ---------------------------------------------------------------------------
+
+class TestDemandeDEntente:
+    """« Il y a des demandes d'entente préalable à effectuer. »
+
+    L'étape manquait : un dossier parti à la caisse se lisait comme un
+    dossier oublié — et on le refaisait. Elle porte une date ET un prénom,
+    parce que trois semaines plus tard, c'est la seule façon de savoir à
+    qui demander ce qui a été envoyé.
+    """
+
+    def test_rien_de_fait_et_demande_envoyee_ne_se_lisent_pas_pareil(self):
+        assert loc.statut_entente("", 6, AUJOURDHUI) == loc.STATUT_SANS_ENTENTE
+        assert loc.statut_entente("", 6, AUJOURDHUI,
+                                  demande_le="2026-09-01") == (
+            loc.STATUT_DEMANDE_ENVOYEE)
+
+    def test_l_accord_recu_efface_l_attente(self):
+        """Une fois l'accord arrivé, la date de demande n'est plus un
+        statut : c'est une archive."""
+        assert loc.statut_entente("2026-09-01", 6, AUJOURDHUI,
+                                  demande_le="2026-08-01") == (
+            loc.STATUT_ENTENTE_VALIDE)
+
+    def test_les_jours_d_attente_se_comptent(self):
+        """Une demande qui dort depuis six semaines est une location que
+        personne ne paie, et rien d'autre ne la rappelle."""
+        assert loc.jours_depuis_demande("2026-09-01", AUJOURDHUI) == 17
+        assert loc.jours_depuis_demande("", AUJOURDHUI) is None
+
+    def test_le_prenom_de_qui_a_demande_est_conserve(self):
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. SUIVI", "Lit")
+        d = loc.enregistrer_demande(d, "M. SUIVI", "Lit", "2026-09-01",
+                                    "Sophie")
+        assert d.iloc[0]["Demande le"] == "2026-09-01"
+        assert d.iloc[0]["Demandée par"] == "Sophie"
+
+    def test_la_liste_des_relances_met_les_plus_anciennes_devant(self):
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. RECENT", "Lit",
+                                demande_le="2026-09-10", demandee_par="Léa")
+        d = loc.ajouter_dossier(d, "Mme ANCIENNE", "VNI",
+                                demande_le="2026-07-01", demandee_par="Sophie")
+        # Celui-ci a son accord : il n'attend plus rien.
+        d = loc.ajouter_dossier(d, "M. SERVI", "Fauteuil",
+                                demande_le="2026-06-01", entente="2026-06-20")
+        liste = loc.en_attente_de_reponse(d, AUJOURDHUI)
+        assert list(liste["Patient"]) == ["Mme ANCIENNE", "M. RECENT"]
+
+    def test_le_commentaire_d_entente_ne_se_melange_pas_aux_notes(self):
+        """Les notes décrivent la location, le commentaire raconte le
+        dossier CAFAT. Mélangés, on ne retrouve ni l'un ni l'autre."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. SUIVI", "Lit",
+                                notes="livré le 3, étage 2")
+        d = loc.enregistrer_commentaire(d, "M. SUIVI", "Lit",
+                                        "relancé la caisse le 12/09")
+        assert d.iloc[0]["Notes"] == "livré le 3, étage 2"
+        assert d.iloc[0]["Commentaire entente"] == "relancé la caisse le 12/09"
+
+    def test_le_commentaire_remonte_dans_la_vue_des_ententes(self):
+        assert "Commentaire entente" in loc.COLONNES_ENTENTES
+        assert "Demande le" in loc.COLONNES_ENTENTES
+        assert "Demandée par" in loc.COLONNES_ENTENTES
+
+
+# ---------------------------------------------------------------------------
+# Le dernier mois couvert : le moment où proposer le renouvellement
+# ---------------------------------------------------------------------------
+
+class TestDernierMoisCouvert:
+    """« Au moment de la facturation du dernier mois, une proposition de
+    renouvellement du dossier d'entente préalable. »
+
+    C'est LE moment utile : la facturation est le seul geste mensuel
+    certain sur une location. Attendre l'échéance, c'est la découvrir une
+    fois passée ; prévenir plus tôt, c'est prévenir tous les mois pour
+    rien.
+    """
+
+    def test_le_mois_du_milieu_ne_declenche_rien(self):
+        # Entente du 01/03, six mois → échéance au 01/09. Facturé le 01/05,
+        # la suivante tombe le 01/06 : il reste des mois couverts.
+        assert not loc.au_dernier_mois("2026-03-01", 6, "2026-05-01")
+
+    def test_le_dernier_mois_se_reconnait(self):
+        """Facturé le 15/08, la suivante tomberait le 15/09 — après
+        l'échéance du 01/09. Il n'y aura pas de mois d'après."""
+        assert loc.au_dernier_mois("2026-03-01", 6, "2026-08-15")
+
+    def test_la_facturation_qui_tombe_PILE_sur_l_echeance_est_couverte(self):
+        """La borne, et elle se joue à un jour près.
+
+        Entente du 01/01, six mois → échéance au 01/07. Facturé le 01/06,
+        la suivante tombe le 01/07 : le jour de l'échéance est ENCORE
+        couvert — comme partout ailleurs dans le module. Déclencher ici
+        proposerait le renouvellement un mois trop tôt, tous les mois."""
+        assert not loc.au_dernier_mois("2026-01-01", 6, "2026-06-01")
+        # Un jour plus tard, en revanche, la suivante passe derrière.
+        assert loc.au_dernier_mois("2026-01-01", 6, "2026-06-02")
+
+    def test_sans_entente_il_n_y_a_pas_de_dernier_mois(self):
+        assert not loc.au_dernier_mois("", 6, "2026-08-15")
+
+    def test_sans_facturation_il_n_y_a_pas_de_dernier_mois(self):
+        """On ne peut pas dire « c'était le dernier » d'un mois jamais
+        facturé."""
+        assert not loc.au_dernier_mois("2026-03-01", 6, "")
+
+    def test_un_achat_n_a_pas_de_mois_suivant(self):
+        assert not loc.au_dernier_mois("2026-03-01", 6, "2026-08-15",
+                                       loc.MODE_ACHAT)
+
+    def test_le_statut_le_dit_avant_le_compte_a_rebours(self):
+        """Il passe DEVANT « à renouveler » : c'est un signal de
+        facturation, et il tombe parfois avant que le délai d'alerte,
+        réglable, ne se déclenche."""
+        # Entente du 01/04, six mois → échéance au 01/10, encore devant
+        # nous. Facturé le 15/09, la suivante tomberait le 15/10 : après.
+        statut = loc.statut_entente("2026-04-01", 6, AUJOURDHUI,
+                                    derniere_facturation="2026-09-15")
+        assert statut == loc.STATUT_DERNIER_MOIS
+
+    def test_il_remonte_dans_a_renouveler_meme_si_l_alerte_est_courte(self):
+        """Une alerte réglée à 2 jours ne doit pas faire manquer le seul
+        moment où l'on tenait le dossier en main."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. DERNIER", "Lit",
+                                entente="2026-04-01", validite_mois=6,
+                                derniere_facturation="2026-09-15")
+        liste = loc.a_renouveler(d, AUJOURDHUI, alerte_j=2)
+        assert list(liste["Patient"]) == ["M. DERNIER"]
+        assert liste.iloc[0]["Entente"] == loc.STATUT_DERNIER_MOIS
+
+
+# ---------------------------------------------------------------------------
+# Louer hors caisse : aérosols et tensiomètres
+# ---------------------------------------------------------------------------
+
+class TestSansEntenteRequise:
+    """« Un sous-onglet pour les locations sans besoin d'entente préalable,
+    à savoir aérosol et tensiomètre. »
+
+    Tensiomètre : non remboursé, caution 3 000 F.
+    Aérosol : remboursé sous conditions, caution 5 000 F.
+
+    Les mêler aux dossiers soumis à entente les afficherait « rien de
+    fait » à vie, c'est-à-dire comme un manquement. Ils n'en sont pas un.
+    """
+
+    @pytest.mark.parametrize("nom,caution,rembourse", [
+        ("Tensiomètre", 3000, "Non remboursé"),
+        ("tensiometre OMRON", 3000, "Non remboursé"),
+        ("TENSIOMÈTRE bras", 3000, "Non remboursé"),
+        ("Aérosol", 5000, "Remboursé sous conditions"),
+        ("aerosol Pari Boy", 5000, "Remboursé sous conditions"),
+    ])
+    def test_le_nom_du_materiel_propose_le_regime_et_la_caution(
+            self, nom, caution, rembourse):
+        """« Aérosol Pari Boy » et « aerosol » doivent tomber sur la même
+        fiche : sinon il faudrait écrire le libellé au caractère près."""
+        assert loc.regime_propose(nom) == loc.REGIME_LIBRE
+        assert loc.caution_proposee(nom) == caution
+        assert loc.remboursement(nom) == rembourse
+
+    def test_le_reste_du_materiel_reste_soumis_a_entente(self):
+        """Le défaut penche du côté SURVEILLÉ : un dossier classé hors
+        caisse par erreur sortirait des renouvellements en silence."""
+        assert loc.regime_propose("Lit médicalisé") == loc.REGIME_ENTENTE
+        assert loc.caution_proposee("Lit médicalisé") == 0
+        assert loc.remboursement("Lit médicalisé") == ""
+
+    def test_un_tensiometre_n_est_pas_un_dossier_sans_entente(self):
+        """Il n'a pas d'entente parce qu'il n'en demande pas — et cela ne
+        se lit pas comme « rien de fait »."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "Mme TENSION",
+                                "Tensiomètre")
+        vue = loc.vue_affichable(d, AUJOURDHUI)
+        assert vue.iloc[0]["Entente"] == loc.STATUT_ENTENTE_NON_REQUISE
+        assert vue.iloc[0]["Caution (F)"] == 3000
+
+    def test_il_ne_remonte_jamais_dans_a_renouveler(self):
+        """Sans cette exclusion, il y resterait à vie : aucun geste ne l'en
+        sortirait, puisqu'il n'y a pas d'accord à obtenir."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "Mme TENSION",
+                                "Tensiomètre")
+        assert loc.a_renouveler(d, AUJOURDHUI).empty
+
+    def test_sa_liste_le_retient_lui_et_pas_les_autres(self):
+        d = loc.ajouter_dossier(loc.dossier_vide(), "Mme TENSION",
+                                "Tensiomètre")
+        d = loc.ajouter_dossier(d, "M. LIT", "Lit médicalisé",
+                                entente="2026-09-01")
+        liste = loc.sans_entente_requise(d, AUJOURDHUI)
+        assert list(liste["Patient"]) == ["Mme TENSION"]
+        assert liste.iloc[0]["Remboursement"] == "Non remboursé"
+
+    def test_le_regime_reste_modifiable_a_la_main(self):
+        """Une proposition, jamais une contrainte : un cas qui sort de
+        l'ordinaire doit pouvoir être reclassé."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. CAS", "Aérosol",
+                                regime=loc.REGIME_ENTENTE)
+        assert d.iloc[0]["Régime"] == loc.REGIME_ENTENTE
+        vue = loc.vue_affichable(d, AUJOURDHUI)
+        assert vue.iloc[0]["Entente"] == loc.STATUT_SANS_ENTENTE
+
+    def test_un_dossier_d_avant_la_mise_a_jour_se_rattrape(self):
+        """Un tensiomètre saisi quand la colonne « Régime » n'existait pas
+        se lirait « rien de fait » à vie. Le nom du matériel le rattrape."""
+        ancien = pd.DataFrame([{"Patient": "Mme AVANT",
+                                "Matériel": "Tensiomètre", "Régime": ""}],
+                              columns=loc.COLONNES_DOSSIER).fillna("")
+        vue = loc.vue_affichable(ancien, AUJOURDHUI)
+        assert vue.iloc[0]["Entente"] == loc.STATUT_ENTENTE_NON_REQUISE
+
+
+class TestCautions:
+    """La caution est de l'argent encaissé qui appartient au patient tant
+    qu'il n'a pas rendu l'appareil. Ne pas la suivre, c'est laisser
+    5 000 F dans la caisse de quelqu'un d'autre."""
+
+    def _deux_cautions(self):
+        d = loc.ajouter_dossier(loc.dossier_vide(), "Mme TENSION",
+                                "Tensiomètre")
+        return loc.ajouter_dossier(d, "M. SOUFFLE", "Aérosol")
+
+    def test_le_total_detenu_se_compte(self):
+        vue = loc.vue_affichable(self._deux_cautions(), AUJOURDHUI)
+        assert loc.cautions_detenues(vue) == 8000
+
+    def test_une_caution_rendue_sort_du_total(self):
+        d = loc.enregistrer_caution_rendue(self._deux_cautions(),
+                                           "Mme TENSION", "Tensiomètre",
+                                           AUJOURDHUI)
+        vue = loc.vue_affichable(d, AUJOURDHUI)
+        assert loc.cautions_detenues(vue) == 5000
+
+    def test_un_montant_negatif_est_refuse(self):
+        """Une caution négative, c'est de l'argent que la pharmacie devrait
+        au patient sans l'avoir encaissé."""
+        assert loc.parser_montant(-3000) == 0
+        assert loc.parser_montant("") == 0
+        assert loc.parser_montant("pas un montant") == 0
+
+    def test_un_montant_espace_reste_lisible(self):
+        """Recopié depuis un tableur, « 3 000 » doit valoir 3000."""
+        assert loc.parser_montant("3 000") == 3000
+
+    def test_le_montant_s_affiche_avec_son_unite(self):
+        """« 3 000 F » se lit d'un coup d'œil là où « 3000 » se compte."""
+        vue = loc.pour_affichage(loc.vue_affichable(self._deux_cautions(),
+                                                    AUJOURDHUI))
+        assert "3 000 F" in list(vue["Caution (F)"])
+
+    def test_un_dossier_sans_caution_affiche_une_case_vide(self):
+        """Une colonne de zéros se lit comme une panne, pas comme « rien à
+        encaisser »."""
+        d = loc.ajouter_dossier(loc.dossier_vide(), "M. LIT", "Lit")
+        vue = loc.pour_affichage(loc.vue_affichable(d, AUJOURDHUI))
+        assert list(vue["Caution (F)"]) == [""]
+
+    def test_le_resume_et_le_recap_patient_disent_le_meme_total(self):
+        compte = loc.resume(self._deux_cautions(), AUJOURDHUI)
+        recap = loc.par_patient(self._deux_cautions(), AUJOURDHUI)
+        assert compte["cautions"] == 8000
+        assert compte["hors_caisse"] == 2
+        assert int(recap["Caution détenue (F)"].sum()) == 8000

@@ -45,9 +45,11 @@ _MIME_CSV = "text/csv"
 
 #: Colonnes que l'on peut corriger directement dans le tableau. Les statuts,
 #: les échéances et les mois dus n'en font pas partie : ils se déduisent.
-_COLONNES_EDITABLES = ("Patient", "Matériel", "Mode", "Début de location",
+_COLONNES_EDITABLES = ("Patient", "Matériel", "Mode", "Régime",
+                       "Début de location", "Demande le", "Demandée par",
                        "Entente préalable", "Validité (mois)",
-                       "Dernière facturation", "Notes")
+                       "Dernière facturation", "Caution (F)",
+                       "Caution rendue le", "Commentaire entente", "Notes")
 
 MESSAGE_VERROU = (
     "Un autre poste enregistre au même instant — rien n'a été modifié. "
@@ -109,6 +111,27 @@ def _colonnes_vue() -> dict:
         "Mois dus": st.column_config.TextColumn(
             "Mois dus", width="small", alignment="center"),
         "Notes": st.column_config.TextColumn("Notes", alignment="center"),
+        # Le régime et la demande : une liste fermée pour l'un, du texte
+        # pour l'autre. Le prénom est libre — c'est celui de l'équipe, pas
+        # une liste à tenir à jour.
+        "Régime": st.column_config.SelectboxColumn(
+            "Régime", options=list(loc.REGIMES), width="medium",
+            required=True),
+        "Demande le": st.column_config.TextColumn("Demandé le", **jour),
+        "Demandée par": st.column_config.TextColumn(
+            "Par", width="small", alignment="center"),
+        "Attente (j)": st.column_config.TextColumn(
+            "Attente (j)", width="small", alignment="center"),
+        "Remboursement": st.column_config.TextColumn(
+            "Remboursement", alignment="center"),
+        "Caution (F)": st.column_config.TextColumn(
+            "Caution", width="small", alignment="center"),
+        "Caution détenue (F)": st.column_config.TextColumn(
+            "Caution détenue", width="small", alignment="center"),
+        "Caution rendue le": st.column_config.TextColumn(
+            "Caution rendue", **jour),
+        "Commentaire entente": st.column_config.TextColumn(
+            "Commentaire entente", width="large", alignment="center"),
     }
 
 
@@ -213,12 +236,21 @@ def _panneau_ajout(dossiers: pd.DataFrame) -> None:
                    "même patient peut louer un lit et acheter un "
                    "déambulateur, chacun avec sa propre entente préalable. "
                    "Un fauteuil d'abord loué puis acheté fait lui aussi "
-                   "deux dossiers — deux ententes, deux facturations.")
-        _formulaire_nouveau()
+                   "deux dossiers — deux ententes, deux facturations.\n\n"
+                   "**Tensiomètre** ou **aérosol** : tapez simplement le "
+                   "nom, le régime hors caisse et la caution se remplissent "
+                   "seuls.")
+        _formulaire_nouveau(dossiers)
 
 
-def _formulaire_nouveau() -> None:
-    """Ouvrir un dossier : un patient, un matériel, et les dates connues."""
+def _formulaire_nouveau(dossiers: pd.DataFrame) -> None:
+    """Ouvrir un dossier : un patient, un matériel, et les dates connues.
+
+    Le formulaire ne demande QUE ce qui n'est pas déductible. Le régime et
+    la caution se proposent d'après le nom du matériel — taper
+    « Tensiomètre » suffit pour partir hors caisse avec ses 3 000 F. Les
+    ressaisir à chaque appareil, c'est la ligne qu'on finit par oublier.
+    """
     with st.form("lo_nouveau", clear_on_submit=True):
         c1, c2, c0 = st.columns([3, 3, 2])
         patient = c1.text_input("Patient", key="lo_nouveau_patient",
@@ -235,17 +267,36 @@ def _formulaire_nouveau() -> None:
         c3, c4, c5, c6 = st.columns(4)
         debut = c3.text_input("Début de location", key="lo_nouveau_debut",
                               placeholder="jj/mm/aaaa")
-        entente = c4.text_input("Entente préalable faite le",
-                                key="lo_nouveau_entente",
-                                placeholder="jj/mm/aaaa")
-        validite = c5.number_input(
+        demande = c4.text_input(
+            "Demande d'entente envoyée le", key="lo_nouveau_demande",
+            placeholder="jj/mm/aaaa",
+            help="La date d'ENVOI à la caisse. Laissez vide si la demande "
+                 "n'est pas encore partie — ou si le matériel n'en demande "
+                 "pas (tensiomètre, aérosol).")
+        par = c5.selectbox(
+            "Demande faite par", _prenoms_connus(dossiers), index=None,
+            accept_new_options=True, key="lo_nouveau_par",
+            placeholder="Prénom",
+            help="Pour la traçabilité : c'est à cette personne qu'on "
+                 "demandera ce qui a été envoyé, si la caisse tarde.")
+        validite = c6.number_input(
             "Validité (mois)", min_value=1, max_value=60,
             value=loc.VALIDITE_DEFAUT_MOIS, step=1, key="lo_nouveau_validite",
             help="La durée accordée par la caisse pour CE dossier. Elle "
                  "varie selon le matériel — d'où la saisie au cas par cas.")
-        facturation = c6.text_input("Dernière facturation",
+        c7, c8, c9 = st.columns([2, 2, 3])
+        entente = c7.text_input("Entente accordée le",
+                                key="lo_nouveau_entente",
+                                placeholder="jj/mm/aaaa")
+        facturation = c8.text_input("Dernière facturation",
                                     key="lo_nouveau_facturation",
                                     placeholder="jj/mm/aaaa")
+        caution = c9.text_input(
+            "Caution encaissée (F)", key="lo_nouveau_caution",
+            placeholder="Proposée d'après le matériel — laissez vide",
+            help="Laissée vide, elle se déduit du matériel : 3 000 F pour "
+                 "un tensiomètre, 5 000 F pour un aérosol, rien pour le "
+                 "reste.")
         notes = st.text_input("Notes", key="lo_nouveau_notes",
                               placeholder="Facultatif — prescripteur, "
                                           "n° de dossier CAFAT…")
@@ -260,17 +311,29 @@ def _formulaire_nouveau() -> None:
                  "l'échéance de l'entente préalable.")
         return
 
+    # Caution laissée vide → celle du catalogue ; saisie → la sienne.
+    montant = (loc.parser_montant(caution) if loc._texte(caution) else None)
     resultat = _appliquer(lambda courant: loc.ajouter_dossier(
         courant, patient, materiel, debut=debut, entente=entente,
         validite_mois=int(validite), derniere_facturation=facturation,
-        notes=notes, mode=mode))
+        notes=notes, mode=mode, demande_le=demande, demandee_par=par or "",
+        caution=montant))
     if resultat is None:
         return
     st.session_state["lo_ajout_ouvert"] = True
+    regime = loc.regime_propose(materiel)
+    retenue = (montant if montant is not None
+               else loc.caution_proposee(materiel))
+    suite = ""
+    if regime == loc.REGIME_LIBRE:
+        suite = (f" Classé **hors caisse** ({loc.remboursement(materiel)})"
+                 + (f", caution de {retenue:,} F.".replace(",", " ")
+                    if retenue else "."))
     st.session_state["lo_message"] = (
-        "ok", f"📁 {patient} — {materiel} ({mode}) : dossier enregistré. "
-              f"{len(resultat)} dossier(s) suivi(s) — le formulaire est "
-              "vide, vous pouvez enchaîner avec le patient suivant.")
+        "ok", f"📁 {patient} — {materiel} ({mode}) : dossier "
+              f"enregistré.{suite} {len(resultat)} dossier(s) suivi(s) — le "
+              "formulaire est vide, vous pouvez enchaîner avec le patient "
+              "suivant.")
     st.rerun()
 
 
@@ -278,55 +341,158 @@ def _formulaire_nouveau() -> None:
 # Sous-onglet 1 — Ententes préalables
 # ---------------------------------------------------------------------------
 
+def _prenoms_connus(dossiers: pd.DataFrame) -> list:
+    """Les prénoms déjà saisis dans le fichier.
+
+    La liste se remplit toute seule : personne n'a à tenir à jour un
+    annuaire de l'équipe, et au bout de trois demandes on choisit au lieu
+    de taper. Elle reste ouverte — un remplaçant d'un après-midi ne doit
+    pas être un obstacle.
+    """
+    if dossiers is None or dossiers.empty:
+        return []
+    vus = [loc._texte(v) for v in dossiers.get("Demandée par", [])]
+    return sorted({v for v in vus if v})
+
+
 def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
                      aujourdhui: date) -> None:
-    """Où en est chaque entente, et le geste « l'accord est arrivé ».
+    """Le parcours complet d'une entente : demande → accord → suivi.
 
-    La date affichée est celle de l'ACCORD, pas celle de la demande : c'est
-    d'elle que court la validité, et c'est elle que la caisse contrôlera.
+    Quatre étapes, et non deux. L'étape « demande envoyée » manquait : un
+    dossier parti à la caisse se lisait comme un dossier oublié, et on le
+    refaisait. Elle porte une date ET un prénom — trois semaines plus
+    tard, c'est la seule façon de savoir à qui demander ce qui a été
+    envoyé.
     """
-    st.caption("La date affichée est celle où la caisse a **accordé** "
-               "l'entente : c'est de là que court la validité.")
     if vue.empty:
-        st.info("Aucun dossier de location — ouvrez-en un tout en haut de "
-                "l'écran.")
+        st.info("Aucun dossier — ouvrez-en un tout en haut de l'écran.")
+        return
+    # Le matériel hors caisse n'a pas sa place ici : il a son propre
+    # sous-onglet, et l'afficher sous un tableau d'ententes reviendrait à
+    # lui reprocher une démarche que personne ne lui demande.
+    soumis = vue[vue["Régime"] != loc.REGIME_LIBRE]
+    if soumis.empty:
+        st.info("Aucun dossier soumis à entente préalable. Les aérosols et "
+                "tensiomètres se suivent dans « 🆓 Sans entente ».")
         return
 
-    st.dataframe(loc.pour_affichage(vue[loc.COLONNES_ENTENTES]),
+    attente = soumis[soumis["Entente"] == loc.STATUT_DEMANDE_ENVOYEE]
+    rien = soumis[soumis["Entente"] == loc.STATUT_SANS_ENTENTE]
+    if not rien.empty:
+        st.warning(f"**{len(rien)} dossier(s) sans démarche engagée.** Tant "
+                   "que la demande n'est pas partie, la location n'est "
+                   "prise en charge par personne.")
+    if not attente.empty:
+        vieille = max(int(j or 0) for j in attente["Attente (j)"])
+        st.info(f"📨 **{len(attente)} demande(s) en attente de réponse** — "
+                f"la plus ancienne depuis {vieille} jour(s). "
+                "Relancez la caisse : une demande qui dort est une location "
+                "que personne ne paie.")
+        st.dataframe(loc.pour_affichage(attente[loc.COLONNES_DEMANDES]),
+                     use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
+
+    st.markdown("**Toutes les ententes**")
+    st.caption("« Demandé le » est la date d'ENVOI à la caisse ; « Entente "
+               "faite le » est celle de son **accord** — c'est de cette "
+               "dernière que court la validité, et c'est elle que la caisse "
+               "contrôlera.")
+    st.dataframe(loc.pour_affichage(soumis[loc.COLONNES_ENTENTES]),
                  use_container_width=True, hide_index=True,
                  column_config=_colonnes_vue())
 
-    sans = vue[vue["Entente"] == loc.STATUT_SANS_ENTENTE]
-    if not sans.empty:
-        st.warning(f"**{len(sans)} dossier(s) sans entente préalable.** "
-                   "Tant que l'accord n'est pas saisi, la location n'est "
-                   "prise en charge par personne.")
-
     with st.container(border=True):
-        st.markdown("**✅ Enregistrer une entente accordée**")
-        ligne = _choisir_un_dossier(vue, "lo_entente_dossier")
+        st.markdown("**Enregistrer une démarche**")
+        ligne = _choisir_un_dossier(soumis, "lo_entente_dossier")
         if ligne is None:
             return
-        c1, c2 = st.columns([3, 2])
-        accordee = c1.date_input("Accordée le", value=aujourdhui,
-                                 format="DD/MM/YYYY", key="lo_entente_date")
-        validite = c2.number_input(
-            "Validité (mois)", min_value=1, max_value=60,
-            value=int(ligne["Validité (mois)"] or loc.VALIDITE_DEFAUT_MOIS),
-            step=1, key="lo_entente_validite")
-        if st.button("✅ Entente préalable faite", type="primary",
-                     use_container_width=True, key="lo_entente_valider"):
-            patient, materiel = ligne["Patient"], ligne["Matériel"]
-            mode = ligne["Mode"]
-            if _appliquer(lambda courant: loc.enregistrer_entente(
-                    courant, patient, materiel, accordee,
-                    int(validite), mode)) is not None:
-                fin = loc.ajouter_mois(accordee, int(validite))
-                st.session_state["lo_message"] = (
-                    "ok", f"✅ {patient} — {materiel} : entente accordée le "
-                          f"{accordee:%d/%m/%Y}, valable jusqu'au "
-                          f"{fin:%d/%m/%Y}.")
-            st.rerun()
+        patient, materiel, mode = (ligne["Patient"], ligne["Matériel"],
+                                   ligne["Mode"])
+
+        etape_demande, etape_accord, etape_suivi = st.tabs(
+            ["📨 Demande envoyée", "✅ Accord reçu", "💬 Commentaire"])
+
+        with etape_demande:
+            st.caption("Le prénom n'est pas une formalité : c'est à lui "
+                       "qu'on demandera ce qui a été envoyé, si la caisse "
+                       "ne répond pas.")
+            c1, c2 = st.columns([2, 3])
+            envoyee = c1.date_input("Envoyée le", value=aujourdhui,
+                                    format="DD/MM/YYYY",
+                                    key="lo_demande_date")
+            par = c2.selectbox(
+                "Prénom de qui a fait la demande",
+                _prenoms_connus(dossiers), index=None,
+                accept_new_options=True, key="lo_demande_par",
+                placeholder="Tapez un prénom — il sera proposé la "
+                            "prochaine fois")
+            if st.button("📨 Demande envoyée à la caisse", type="primary",
+                         use_container_width=True, key="lo_demande_valider"):
+                if not loc._texte(par):
+                    st.error("**Le prénom est indispensable.** Sans lui, la "
+                             "demande n'est traçable par personne.")
+                else:
+                    if _appliquer(lambda courant: loc.enregistrer_demande(
+                            courant, patient, materiel, envoyee,
+                            par, mode)) is not None:
+                        st.session_state["lo_message"] = (
+                            "ok", f"📨 {patient} — {materiel} : demande "
+                                  f"envoyée le {envoyee:%d/%m/%Y} par "
+                                  f"{par}. Elle apparaîtra dans les "
+                                  "relances tant que la caisse n'aura pas "
+                                  "répondu.")
+                    st.rerun()
+
+        with etape_accord:
+            partie = ligne["Demande le"]
+            if partie is not None and not pd.isna(partie):
+                st.caption(f"Demande partie le {partie:%d/%m/%Y}"
+                           + (f" par {ligne['Demandée par']}."
+                              if ligne["Demandée par"] else "."))
+            c1, c2 = st.columns([3, 2])
+            accordee = c1.date_input("Accordée le", value=aujourdhui,
+                                     format="DD/MM/YYYY",
+                                     key="lo_entente_date")
+            validite = c2.number_input(
+                "Validité (mois)", min_value=1, max_value=60,
+                value=int(ligne["Validité (mois)"]
+                          or loc.VALIDITE_DEFAUT_MOIS),
+                step=1, key="lo_entente_validite")
+            if st.button("✅ Entente préalable faite", type="primary",
+                         use_container_width=True, key="lo_entente_valider"):
+                if _appliquer(lambda courant: loc.enregistrer_entente(
+                        courant, patient, materiel, accordee,
+                        int(validite), mode)) is not None:
+                    fin = loc.ajouter_mois(accordee, int(validite))
+                    st.session_state["lo_message"] = (
+                        "ok", f"✅ {patient} — {materiel} : entente accordée "
+                              f"le {accordee:%d/%m/%Y}, valable jusqu'au "
+                              f"{fin:%d/%m/%Y}.")
+                st.rerun()
+
+        with etape_suivi:
+            st.caption("Relance, pièce manquante, refus, numéro de "
+                       "dossier : ce qui se passe entre la demande et "
+                       "l'accord. Séparé des notes de la location — "
+                       "mélangés, on ne retrouve ni l'un ni l'autre trois "
+                       "mois plus tard.")
+            texte = st.text_area(
+                "Commentaire sur l'entente",
+                value=ligne["Commentaire entente"], height=100,
+                key="lo_commentaire_texte",
+                placeholder="Ex. : relancé la caisse le 12/09, dossier "
+                            "incomplet — manque l'ordonnance du Dr X")
+            if st.button("💬 Enregistrer le commentaire",
+                         use_container_width=True,
+                         key="lo_commentaire_valider"):
+                if _appliquer(lambda courant: loc.enregistrer_commentaire(
+                        courant, patient, materiel, texte,
+                        mode)) is not None:
+                    st.session_state["lo_message"] = (
+                        "ok", f"💬 {patient} — {materiel} : commentaire "
+                              "enregistré.")
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +558,62 @@ def _onglet_facturations(dossiers: pd.DataFrame, vue: pd.DataFrame,
                 st.session_state["lo_message"] = (
                     "ok", f"💰 {patient} — {materiel} ({mode}) : facturé le "
                           f"{jour:%d/%m/%Y}.{suite}")
+                # « Au moment de la facturation du dernier mois, une
+                # proposition de renouvellement. » C'est ici, et nulle part
+                # ailleurs : on tient le dossier en main, et il n'y aura
+                # pas de mois suivant pour y revenir.
+                if loc.au_dernier_mois(ligne["Entente préalable"],
+                                       ligne["Validité (mois)"], jour, mode,
+                                       loc.PERIODE_FACTURATION_MOIS):
+                    st.session_state["lo_renouveler"] = (patient, materiel,
+                                                         mode)
+            st.rerun()
+
+
+def _proposition_de_renouvellement(vue: pd.DataFrame, aujourdhui: date) -> None:
+    """« C'était le dernier mois couvert » — et la demande part d'ici.
+
+    Affichée juste après la facturation qui l'a déclenchée : c'est le seul
+    instant où le dossier est ouvert, le patient identifié et la question
+    encore fraîche. Renvoyée à une liste du lendemain, elle se lit comme
+    une tâche de plus ; ici, c'est la suite du geste qu'on vient de faire.
+    """
+    cible = st.session_state.get("lo_renouveler")
+    if not cible:
+        return
+    patient, materiel, mode = cible
+    with st.container(border=True, key="lo_bulle_renouvellement"):
+        st.markdown(f"### 🔔 Dernier mois couvert — {patient}")
+        st.markdown(
+            f"L'entente de **{materiel}** ne couvre pas le mois prochain. "
+            "Si la location continue, la demande de renouvellement doit "
+            "partir **maintenant** : le temps de revoir le médecin et "
+            "d'attendre la réponse de la caisse.")
+        c1, c2, c3 = st.columns([2, 3, 2])
+        envoyee = c1.date_input("Envoyée le", value=aujourdhui,
+                                format="DD/MM/YYYY", key="lo_renouv_date")
+        par = c2.selectbox(
+            "Prénom", _prenoms_connus(st.session_state.get("lo_dossiers")),
+            index=None, accept_new_options=True, key="lo_renouv_par",
+            placeholder="Qui fait la demande ?")
+        c3.write("")
+        if st.button("📨 Demande de renouvellement envoyée", type="primary",
+                     use_container_width=True, key="lo_renouv_valider"):
+            if not loc._texte(par):
+                st.error("**Le prénom est indispensable.** Sans lui, la "
+                         "demande n'est traçable par personne.")
+            else:
+                if _appliquer(lambda courant: loc.enregistrer_demande(
+                        courant, patient, materiel, envoyee, par,
+                        mode)) is not None:
+                    st.session_state.pop("lo_renouveler", None)
+                    st.session_state["lo_message"] = (
+                        "ok", f"📨 {patient} — {materiel} : renouvellement "
+                              f"demandé le {envoyee:%d/%m/%Y} par {par}.")
+                st.rerun()
+        if st.button("Plus tard — la location s'arrête là",
+                     use_container_width=True, key="lo_renouv_plus_tard"):
+            st.session_state.pop("lo_renouveler", None)
             st.rerun()
 
 
@@ -469,6 +691,77 @@ def _onglet_achats(vue: pd.DataFrame) -> None:
                "« 💰 Facturations » : c'est le même geste que pour une "
                "location, et c'est le mode du dossier qui décide de la "
                "suite.")
+
+
+# ---------------------------------------------------------------------------
+# Sous-onglet 5 — Loué hors caisse : aérosols et tensiomètres
+# ---------------------------------------------------------------------------
+
+def _onglet_sans_entente(vue: pd.DataFrame, aujourdhui: date) -> None:
+    """Ce qui se loue sans passer par la caisse, et ce que ça engage.
+
+    Tensiomètre et aérosol n'ont pas d'entente préalable, pas d'échéance,
+    pas de renouvellement. Mêlés aux autres, ils s'affichaient « rien de
+    fait » à vie, c'est-à-dire comme un manquement — ils n'en sont pas un.
+
+    Ce qu'ils ont, c'est une CAUTION : de l'argent encaissé qui appartient
+    au patient tant qu'il n'a pas rendu l'appareil. C'est la seule chose à
+    suivre, et elle n'a sa place dans aucune autre liste.
+    """
+    libres = loc.du_regime(vue, loc.REGIME_LIBRE)
+    st.caption(
+        f"**Tensiomètre** — non remboursé, caution "
+        f"{loc.CATALOGUE_SANS_ENTENTE['TENSIOMETRE']['caution']:,} F. "
+        f"**Aérosol** — remboursé sous conditions, caution "
+        f"{loc.CATALOGUE_SANS_ENTENTE['AEROSOL']['caution']:,} F. "
+        "Aucun des deux ne demande d'entente préalable : taper le nom de "
+        "l'appareil suffit, le régime et la caution se proposent seuls."
+        .replace(",", " "))
+    if libres.empty:
+        st.info("Aucune location hors caisse. Ouvrez un dossier tout en "
+                "haut de l'écran en tapant « Tensiomètre » ou « Aérosol » "
+                "comme matériel : le reste se remplit tout seul.")
+        return
+
+    detenues = loc.cautions_detenues(libres)
+    en_cours = libres[[r is None or pd.isna(r)
+                       for r in libres["Caution rendue le"]]]
+    if detenues:
+        st.markdown(
+            f"**💰 {detenues:,} F de cautions détenues** pour "
+            f"{len(en_cours)} appareil(s) encore chez des patients. Cet "
+            "argent n'est pas à la pharmacie : il est chez elle."
+            .replace(",", " "))
+    else:
+        st.success("✅ Aucune caution en cours : tous les appareils sont "
+                   "revenus.")
+
+    st.dataframe(loc.pour_affichage(libres[loc.COLONNES_SANS_ENTENTE]),
+                 use_container_width=True, hide_index=True,
+                 column_config=_colonnes_vue())
+
+    if en_cours.empty:
+        return
+    with st.container(border=True):
+        st.markdown("**↩️ L'appareil est revenu, la caution est rendue**")
+        ligne = _choisir_un_dossier(en_cours, "lo_caution_dossier")
+        if ligne is None:
+            return
+        jour = st.date_input("Rendue le", value=aujourdhui,
+                             format="DD/MM/YYYY", key="lo_caution_date")
+        montant = loc.parser_montant(ligne["Caution (F)"])
+        if st.button(f"↩️ Caution de {montant:,} F rendue".replace(",", " "),
+                     type="primary", use_container_width=True,
+                     key="lo_caution_valider"):
+            patient, materiel = ligne["Patient"], ligne["Matériel"]
+            mode = ligne["Mode"]
+            if _appliquer(lambda courant: loc.enregistrer_caution_rendue(
+                    courant, patient, materiel, jour, mode)) is not None:
+                st.session_state["lo_message"] = (
+                    "ok", f"↩️ {patient} — {materiel} : caution de "
+                          f"{montant:,} F rendue le {jour:%d/%m/%Y}."
+                          .replace(",", " "))
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -558,15 +851,21 @@ def _bandeau(resume: dict, tuile) -> None:
         tuile("Dossiers suivis", resume["dossiers"], "accent",
               sous=f'{resume["locations"]} loué(s) · '
                    f'{resume["achats"]} acheté(s)'),
-        tuile("🔁 À renouveler", resume["a_renouveler"],
-              "accent" if resume["a_renouveler"] else "",
-              sous=f'échéance sous {loc.ALERTE_RENOUVELLEMENT_J} jours'),
+        tuile("📨 Demandes en attente", resume["demandes_en_attente"],
+              "accent" if resume["demandes_en_attente"] else "",
+              sous="parties, sans réponse"),
+        tuile("🔁 À renouveler", resume["a_renouveler"] + resume["dernier_mois"],
+              "accent" if resume["a_renouveler"] + resume["dernier_mois"]
+              else "",
+              sous=f'dont {resume["dernier_mois"]} au dernier mois'),
         tuile("⛔ Ententes expirées", resume["expirees"],
               "critical" if resume["expirees"] else "",
               sous="plus prises en charge"),
         tuile("💰 À facturer", resume["a_facturer"],
               "critical" if resume["a_facturer"] else "",
               sous=f'{resume["mois_dus"]} mois dus'),
+        tuile("🆓 Hors caisse", resume["hors_caisse"], "",
+              sous=f'{resume["cautions"]:,} F de cautions'.replace(",", " ")),
     ]) + "</div>", unsafe_allow_html=True)
 
 
@@ -612,7 +911,15 @@ def rendre(etape, tuile_kpi) -> None:
         niveau, texte = message
         (st.success if niveau == "ok" else st.warning)(texte)
 
+    vue_courante = loc.vue_affichable(dossiers, aujourdhui, loc.TRI_ECHEANCE,
+                                      alerte)
+
     _bandeau(loc.resume(dossiers, aujourdhui, alerte), tuile_kpi)
+
+    # La proposition de renouvellement passe AVANT tout le reste : elle
+    # naît d'un geste qu'on vient de faire, et enfouie sous l'écran elle
+    # se lirait comme une tâche de plus au lieu de sa suite immédiate.
+    _proposition_de_renouvellement(vue_courante, aujourdhui)
 
     _panneau_ajout(dossiers)
 
@@ -620,9 +927,9 @@ def rendre(etape, tuile_kpi) -> None:
           "L'entente est-elle faite, qu'y a-t-il à facturer, et qu'est-ce "
           "qui expire bientôt.")
 
-    vue = loc.vue_affichable(dossiers, aujourdhui, loc.TRI_ECHEANCE, alerte)
+    vue = vue_courante
     onglets = st.tabs(["✅ Ententes préalables", "💰 Facturations",
-                       "🔁 À renouveler", "🛒 Achats"])
+                       "🔁 À renouveler", "🛒 Achats", "🆓 Sans entente"])
     with onglets[0]:
         _onglet_ententes(dossiers, vue, aujourdhui)
     with onglets[1]:
@@ -631,6 +938,8 @@ def rendre(etape, tuile_kpi) -> None:
         _onglet_renouvellement(dossiers, aujourdhui, alerte)
     with onglets[3]:
         _onglet_achats(vue)
+    with onglets[4]:
+        _onglet_sans_entente(vue, aujourdhui)
 
     st.divider()
     etape("2", "Chaque patient d'un coup d'œil",
