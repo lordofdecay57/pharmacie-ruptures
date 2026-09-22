@@ -5,14 +5,24 @@
 fichier déposé, et toute la logique vit dans ``location.py``. Ce fichier
 ne fait que l'habillage Streamlit.
 
-Ergonomie visée : **quatre questions, quatre sous-onglets**, dans l'ordre
-où elles se posent au comptoir —
+Ergonomie visée : **une question, un sous-onglet**, dans l'ordre où elles
+se posent au comptoir —
 
-1. l'entente préalable est-elle faite, et jusqu'à quand ;
+1. où en sont les ententes : qu'est-ce qui attend une réponse de la caisse,
+   et quels sont les trois gestes du dossier choisi ;
 2. qu'est-ce qui reste à facturer, et depuis combien de mois ;
 3. quels dossiers faut-il renouveler avant qu'ils n'expirent ;
 4. où en sont les achats — ni mensuels ni renouvelables, ils se
-   perdraient dans des listes faites pour des échéances qui reviennent.
+   perdraient dans des listes faites pour des échéances qui reviennent ;
+5. quel matériel est loué hors caisse, et quelles cautions sont détenues.
+
+RIEN QUE CE QUI APPELLE UN GESTE. « Trop complexe et peu aéré, tout est
+concentré au même endroit » : le formulaire d'ouverture demandait onze
+champs quand trois suffisent — dix se saisissent plus tard, chacun par son
+propre geste — le bandeau alignait six tuiles sur deux rangées, et chaque
+sous-onglet dépliait la liste entière sous celle qui pressait. Tout ce qui
+répond à « montre-moi tout » est désormais REPLIÉ, ou renvoyé au tableau
+de référence en bas d'écran, qui est fait pour ça.
 
 HARMONISATION PAR PATIENT. Louer et acheter partagent ici tout ce qui peut
 l'être : le même dossier, les mêmes statuts, les mêmes couleurs, les mêmes
@@ -232,74 +242,75 @@ def _panneau_ajout(dossiers: pd.DataFrame) -> None:
              f"{'s' if nombre > 1 else ''} suivie"
              f"{'s' if nombre > 1 else ''}")
     with st.expander(titre, expanded=ouvert):
-        st.caption("Un dossier par patient, par matériel ET par mode : le "
-                   "même patient peut louer un lit et acheter un "
-                   "déambulateur, chacun avec sa propre entente préalable. "
-                   "Un fauteuil d'abord loué puis acheté fait lui aussi "
-                   "deux dossiers — deux ententes, deux facturations.\n\n"
-                   "**Tensiomètre** ou **aérosol** : tapez simplement le "
-                   "nom, le régime hors caisse et la caution se remplissent "
-                   "seuls.")
         _formulaire_nouveau(dossiers)
 
 
 def _formulaire_nouveau(dossiers: pd.DataFrame) -> None:
-    """Ouvrir un dossier : un patient, un matériel, et les dates connues.
+    """Ouvrir un dossier : **trois champs**, et rien d'autre à l'écran.
 
-    Le formulaire ne demande QUE ce qui n'est pas déductible. Le régime et
-    la caution se proposent d'après le nom du matériel — taper
-    « Tensiomètre » suffit pour partir hors caisse avec ses 3 000 F. Les
-    ressaisir à chaque appareil, c'est la ligne qu'on finit par oublier.
+    Onze champs tenaient ici, et c'était onze de trop. Dix des onze se
+    saisissent PLUS TARD, chacun par son propre geste : la demande dans
+    l'onglet des ententes, l'accord juste à côté, la facturation dans le
+    sien, la caution dans celui du hors-caisse. Les demander tous à
+    l'ouverture, c'était demander à la pharmacie de connaître d'avance ce
+    qu'elle apprendra dans les semaines qui viennent — et noyer les trois
+    seules réponses qu'elle a vraiment : QUI, QUOI, LOUÉ OU ACHETÉ.
+
+    Le régime et la caution ne sont pas demandés du tout : ils se
+    proposent d'après le nom du matériel. Taper « Tensiomètre » suffit.
+
+    Le reste reste accessible, replié, pour le seul cas qui le justifie :
+    reprendre un dossier qui a déjà une histoire — une location commencée
+    avant l'arrivée de l'outil.
     """
     with st.form("lo_nouveau", clear_on_submit=True):
-        c1, c2, c0 = st.columns([3, 3, 2])
+        c1, c2, c0 = st.columns([4, 4, 3])
         patient = c1.text_input("Patient", key="lo_nouveau_patient",
                                 placeholder="Nom du patient")
         materiel = c2.text_input("Matériel", key="lo_nouveau_materiel",
-                                 placeholder="Lit médicalisé, VNI, "
-                                             "concentrateur…")
+                                 placeholder="Lit, VNI, tensiomètre…")
         mode = c0.selectbox(
             "Mode", loc.MODES, key="lo_nouveau_mode",
             help="Louer ou acheter. Les deux passent par une entente "
                  "préalable ; seule la suite diffère — la location se "
                  "facture tous les mois et se renouvelle, l'achat se "
                  "facture une fois et se termine.")
-        c3, c4, c5, c6 = st.columns(4)
-        debut = c3.text_input("Début de location", key="lo_nouveau_debut",
-                              placeholder="jj/mm/aaaa")
-        demande = c4.text_input(
-            "Demande d'entente envoyée le", key="lo_nouveau_demande",
-            placeholder="jj/mm/aaaa",
-            help="La date d'ENVOI à la caisse. Laissez vide si la demande "
-                 "n'est pas encore partie — ou si le matériel n'en demande "
-                 "pas (tensiomètre, aérosol).")
-        par = c5.selectbox(
-            "Demande faite par", _prenoms_connus(dossiers), index=None,
-            accept_new_options=True, key="lo_nouveau_par",
-            placeholder="Prénom",
-            help="Pour la traçabilité : c'est à cette personne qu'on "
-                 "demandera ce qui a été envoyé, si la caisse tarde.")
-        validite = c6.number_input(
-            "Validité (mois)", min_value=1, max_value=60,
-            value=loc.VALIDITE_DEFAUT_MOIS, step=1, key="lo_nouveau_validite",
-            help="La durée accordée par la caisse pour CE dossier. Elle "
-                 "varie selon le matériel — d'où la saisie au cas par cas.")
-        c7, c8, c9 = st.columns([2, 2, 3])
-        entente = c7.text_input("Entente accordée le",
-                                key="lo_nouveau_entente",
-                                placeholder="jj/mm/aaaa")
-        facturation = c8.text_input("Dernière facturation",
-                                    key="lo_nouveau_facturation",
+
+        with st.expander("📋 Ce dossier a déjà une histoire ? "
+                         "(dates connues, caution)"):
+            st.caption("À ne remplir que pour reprendre une location "
+                       "commencée avant l'outil. Au quotidien, chaque date "
+                       "s'enregistre par son propre geste, dans son "
+                       "sous-onglet.")
+            h1, h2, h3 = st.columns(3)
+            debut = h1.text_input("Début de location",
+                                  key="lo_nouveau_debut",
+                                  placeholder="jj/mm/aaaa — sinon aujourd'hui")
+            demande = h2.text_input("Demande envoyée le",
+                                    key="lo_nouveau_demande",
                                     placeholder="jj/mm/aaaa")
-        caution = c9.text_input(
-            "Caution encaissée (F)", key="lo_nouveau_caution",
-            placeholder="Proposée d'après le matériel — laissez vide",
-            help="Laissée vide, elle se déduit du matériel : 3 000 F pour "
-                 "un tensiomètre, 5 000 F pour un aérosol, rien pour le "
-                 "reste.")
-        notes = st.text_input("Notes", key="lo_nouveau_notes",
-                              placeholder="Facultatif — prescripteur, "
-                                          "n° de dossier CAFAT…")
+            par = h3.selectbox(
+                "par", _prenoms_connus(dossiers), index=None,
+                accept_new_options=True, key="lo_nouveau_par",
+                placeholder="Prénom")
+            h4, h5, h6, h7 = st.columns(4)
+            entente = h4.text_input("Entente accordée le",
+                                    key="lo_nouveau_entente",
+                                    placeholder="jj/mm/aaaa")
+            validite = h5.number_input(
+                "Validité (mois)", min_value=1, max_value=60,
+                value=loc.VALIDITE_DEFAUT_MOIS, step=1,
+                key="lo_nouveau_validite")
+            facturation = h6.text_input("Dernière facturation",
+                                        key="lo_nouveau_facturation",
+                                        placeholder="jj/mm/aaaa")
+            caution = h7.text_input(
+                "Caution (F)", key="lo_nouveau_caution",
+                placeholder="Sinon, celle du matériel")
+            notes = st.text_input("Notes", key="lo_nouveau_notes",
+                                  placeholder="Facultatif — prescripteur, "
+                                              "n° de dossier CAFAT…")
+
         valide = st.form_submit_button("➕ Ouvrir le dossier", type="primary",
                                        use_container_width=True)
 
@@ -313,6 +324,10 @@ def _formulaire_nouveau(dossiers: pd.DataFrame) -> None:
 
     # Caution laissée vide → celle du catalogue ; saisie → la sienne.
     montant = (loc.parser_montant(caution) if loc._texte(caution) else None)
+    # Début laissé vide → aujourd'hui. Un dossier s'ouvre le jour où le
+    # matériel part chez le patient, neuf fois sur dix : le demander
+    # revenait à faire retaper la date du jour.
+    debut = debut if loc._texte(debut) else date.today()
     resultat = _appliquer(lambda courant: loc.ajouter_dossier(
         courant, patient, materiel, debut=debut, entente=entente,
         validite_mois=int(validite), derniere_facturation=facturation,
@@ -393,14 +408,16 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
                      use_container_width=True, hide_index=True,
                      column_config=_colonnes_vue())
 
-    st.markdown("**Toutes les ententes**")
-    st.caption("« Demandé le » est la date d'ENVOI à la caisse ; « Entente "
-               "faite le » est celle de son **accord** — c'est de cette "
-               "dernière que court la validité, et c'est elle que la caisse "
-               "contrôlera.")
-    st.dataframe(loc.pour_affichage(soumis[loc.COLONNES_ENTENTES]),
-                 use_container_width=True, hide_index=True,
-                 column_config=_colonnes_vue())
+    # REPLIÉ. Le sous-onglet répond à « qu'est-ce qui attend ? » ; la liste
+    # entière répond à « montre-moi tout », ce que fait déjà le tableau de
+    # référence en bas d'écran. La laisser dépliée, c'était donner deux
+    # fois la même chose et pousser le geste hors de l'écran.
+    with st.expander(f"Toutes les ententes — {len(soumis)} dossier(s)"):
+        st.caption("« Demandé le » = envoi à la caisse · « Entente faite "
+                   "le » = son accord, d'où court la validité.")
+        st.dataframe(loc.pour_affichage(soumis[loc.COLONNES_ENTENTES]),
+                     use_container_width=True, hide_index=True,
+                     column_config=_colonnes_vue())
 
     with st.container(border=True):
         st.markdown("**Enregistrer une démarche**")
@@ -414,9 +431,6 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
             ["📨 Demande envoyée", "✅ Accord reçu", "💬 Commentaire"])
 
         with etape_demande:
-            st.caption("Le prénom n'est pas une formalité : c'est à lui "
-                       "qu'on demandera ce qui a été envoyé, si la caisse "
-                       "ne répond pas.")
             c1, c2 = st.columns([2, 3])
             envoyee = c1.date_input("Envoyée le", value=aujourdhui,
                                     format="DD/MM/YYYY",
@@ -425,8 +439,9 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
                 "Prénom de qui a fait la demande",
                 _prenoms_connus(dossiers), index=None,
                 accept_new_options=True, key="lo_demande_par",
-                placeholder="Tapez un prénom — il sera proposé la "
-                            "prochaine fois")
+                placeholder="Tapez un prénom",
+                help="C'est à cette personne qu'on demandera ce qui a été "
+                     "envoyé, si la caisse ne répond pas.")
             if st.button("📨 Demande envoyée à la caisse", type="primary",
                          use_container_width=True, key="lo_demande_valider"):
                 if not loc._texte(par):
@@ -472,17 +487,15 @@ def _onglet_ententes(dossiers: pd.DataFrame, vue: pd.DataFrame,
                 st.rerun()
 
         with etape_suivi:
-            st.caption("Relance, pièce manquante, refus, numéro de "
-                       "dossier : ce qui se passe entre la demande et "
-                       "l'accord. Séparé des notes de la location — "
-                       "mélangés, on ne retrouve ni l'un ni l'autre trois "
-                       "mois plus tard.")
             texte = st.text_area(
-                "Commentaire sur l'entente",
+                "Ce qui se passe entre la demande et l'accord",
                 value=ligne["Commentaire entente"], height=100,
                 key="lo_commentaire_texte",
                 placeholder="Ex. : relancé la caisse le 12/09, dossier "
-                            "incomplet — manque l'ordonnance du Dr X")
+                            "incomplet — manque l'ordonnance du Dr X",
+                help="Relance, pièce manquante, refus, n° de dossier. "
+                     "Séparé des notes de la location : mélangés, on ne "
+                     "retrouve ni l'un ni l'autre trois mois plus tard.")
             if st.button("💬 Enregistrer le commentaire",
                          use_container_width=True,
                          key="lo_commentaire_valider"):
@@ -508,10 +521,9 @@ def _onglet_facturations(dossiers: pd.DataFrame, vue: pd.DataFrame,
     « à facturer » tout court ferait encaisser un mois et croire le dossier
     à jour.
     """
-    st.caption(f"La location se facture tous les "
-               f"{loc.PERIODE_FACTURATION_MOIS} mois. Les dossiers jamais "
-               "facturés sont comptés : c'est le cas le plus facile à "
-               "oublier, puisqu'aucune date ne vient le rappeler.")
+    st.caption(f"Facturation tous les {loc.PERIODE_FACTURATION_MOIS} mois. "
+               "Les dossiers jamais facturés sont comptés : aucune date ne "
+               "vient les rappeler.")
     if vue.empty:
         st.info("Aucun dossier de location — ouvrez-en un tout en haut de "
                 "l'écran.")
@@ -630,9 +642,8 @@ def _onglet_renouvellement(dossiers: pd.DataFrame, aujourdhui: date,
     latérale, parce qu'une demande de renouvellement met un temps variable
     à revenir de la caisse.
     """
-    st.caption(f"Alerte {alerte_j} jours avant l'échéance : le temps de "
-               "revoir le médecin, d'envoyer la demande, et d'attendre la "
-               "réponse de la caisse.")
+    st.caption(f"Alerte {alerte_j} jours avant l'échéance — réglable dans "
+               "la barre latérale.")
     a_traiter = loc.a_renouveler(dossiers, aujourdhui, alerte_j)
     if a_traiter.empty:
         st.success("🔁 Aucun dossier à renouveler : toutes les ententes "
@@ -647,9 +658,8 @@ def _onglet_renouvellement(dossiers: pd.DataFrame, aujourdhui: date,
     st.dataframe(loc.pour_affichage(a_traiter[loc.COLONNES_RENOUVELLEMENT]),
                  use_container_width=True, hide_index=True,
                  column_config=_colonnes_vue())
-    st.caption("Quand l'accord revient de la caisse, enregistrez-le dans le "
-               "sous-onglet « ✅ Ententes préalables » : l'échéance repart "
-               "de la date d'accord.")
+    st.caption("L'accord revenu, enregistrez-le dans « ✅ Ententes "
+               "préalables » : l'échéance repart de sa date.")
 
 
 # ---------------------------------------------------------------------------
@@ -664,10 +674,8 @@ def _onglet_achats(vue: pd.DataFrame) -> None:
     ferait douter d'une panne — et une fois réglé, il ne revient plus.
     """
     achats = loc.du_mode(vue, loc.MODE_ACHAT)
-    st.caption("L'achat passe par la même entente préalable qu'une location, "
-               "mais il se facture **une seule fois** : une fois réglé, il "
-               "ne revient ni dans les facturations ni dans les "
-               "renouvellements.")
+    st.caption("Même entente qu'une location, mais **une seule "
+               "facturation** : une fois réglé, l'achat ne revient plus.")
     if achats.empty:
         st.info("Aucun achat enregistré. Ouvrez un dossier tout en haut de "
                 "l'écran en choisissant le mode « 🛒 Achat ».")
@@ -687,10 +695,8 @@ def _onglet_achats(vue: pd.DataFrame) -> None:
     st.dataframe(loc.pour_affichage(achats[loc.COLONNES_ACHATS]),
                  use_container_width=True, hide_index=True,
                  column_config=_colonnes_vue())
-    st.caption("Enregistrez le règlement dans le sous-onglet "
-               "« 💰 Facturations » : c'est le même geste que pour une "
-               "location, et c'est le mode du dossier qui décide de la "
-               "suite.")
+    st.caption("Le règlement s'enregistre dans « 💰 Facturations » — même "
+               "geste que pour une location.")
 
 
 # ---------------------------------------------------------------------------
@@ -711,16 +717,14 @@ def _onglet_sans_entente(vue: pd.DataFrame, aujourdhui: date) -> None:
     libres = loc.du_regime(vue, loc.REGIME_LIBRE)
     st.caption(
         f"**Tensiomètre** — non remboursé, caution "
-        f"{loc.CATALOGUE_SANS_ENTENTE['TENSIOMETRE']['caution']:,} F. "
+        f"{loc.CATALOGUE_SANS_ENTENTE['TENSIOMETRE']['caution']:,} F · "
         f"**Aérosol** — remboursé sous conditions, caution "
-        f"{loc.CATALOGUE_SANS_ENTENTE['AEROSOL']['caution']:,} F. "
-        "Aucun des deux ne demande d'entente préalable : taper le nom de "
-        "l'appareil suffit, le régime et la caution se proposent seuls."
+        f"{loc.CATALOGUE_SANS_ENTENTE['AEROSOL']['caution']:,} F."
         .replace(",", " "))
     if libres.empty:
-        st.info("Aucune location hors caisse. Ouvrez un dossier tout en "
-                "haut de l'écran en tapant « Tensiomètre » ou « Aérosol » "
-                "comme matériel : le reste se remplit tout seul.")
+        st.info("Aucune location hors caisse. Ouvrez un dossier en tapant "
+                "« Tensiomètre » ou « Aérosol » comme matériel : le régime "
+                "et la caution se remplissent seuls.")
         return
 
     detenues = loc.cautions_detenues(libres)
@@ -728,9 +732,8 @@ def _onglet_sans_entente(vue: pd.DataFrame, aujourdhui: date) -> None:
                        for r in libres["Caution rendue le"]]]
     if detenues:
         st.markdown(
-            f"**💰 {detenues:,} F de cautions détenues** pour "
-            f"{len(en_cours)} appareil(s) encore chez des patients. Cet "
-            "argent n'est pas à la pharmacie : il est chez elle."
+            f"**💰 {detenues:,} F de cautions détenues** — "
+            f"{len(en_cours)} appareil(s) encore chez des patients."
             .replace(",", " "))
     else:
         st.success("✅ Aucune caution en cours : tous les appareils sont "
@@ -782,9 +785,8 @@ def _recapitulatif_par_patient(dossiers: pd.DataFrame, aujourdhui: date,
         return
     with st.expander(f"👤 Vue par patient — {len(recap)} personne(s) suivie(s)",
                      expanded=True):
-        st.caption("Ceux dont une entente est tombée passent en tête. Un "
-                   "patient = une ligne, qu'il loue, qu'il achète, ou les "
-                   "deux.")
+        st.caption("Un patient = une ligne. Ceux dont une entente est "
+                   "tombée passent en tête.")
         st.dataframe(recap, use_container_width=True, hide_index=True,
                      column_config=_colonnes_vue())
 
@@ -807,11 +809,9 @@ def _tableau(vue: pd.DataFrame):
         affiche, hide_index=True, use_container_width=True,
         num_rows="dynamic", column_config=_colonnes_vue(),
         key=f"lo_editeur_{st.session_state.get('lo_generation', 0)}")
-    st.caption("Corrigez une date ou une durée directement dans le tableau, "
-               "**ajoutez un dossier** avec le « + » de la dernière ligne, "
-               "ou supprimez-en un (sélection puis touche Suppr) — la "
-               "location est terminée, le matériel est revenu. Tout est "
-               "enregistré automatiquement.")
+    st.caption("Corrigez directement dans le tableau · « + » en dernière "
+               "ligne pour ajouter · sélection puis Suppr pour retirer un "
+               "dossier terminé. Tout est enregistré automatiquement.")
 
     colonnes = [c for c in _COLONNES_EDITABLES if c in edite.columns]
     # La comparaison se fait sur le tableau TEL QU'AFFICHÉ : comparer du
@@ -847,25 +847,35 @@ def _enregistrer_corrections(corrige: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def _bandeau(resume: dict, tuile) -> None:
-    st.markdown('<div class="kpi-row">' + "".join([
+    """QUATRE tuiles, et pas six.
+
+    Six tenaient sur deux rangées : la sixième s'étirait seule sur toute la
+    largeur, et une rangée qui déborde ne se lit plus d'un coup d'œil — ce
+    qui est exactement ce qu'on demande à un bandeau.
+
+    Les quatre retenues sont celles qui appellent un GESTE. Ce qui les
+    précise — combien de loués, combien d'expirées, combien de mois dus,
+    combien de cautions — tient sur leur seconde ligne, où l'on n'a rien à
+    décider.
+    """
+    a_renouveler = resume["a_renouveler"] + resume["dernier_mois"]
+    return st.markdown('<div class="kpi-row">' + "".join([
         tuile("Dossiers suivis", resume["dossiers"], "accent",
               sous=f'{resume["locations"]} loué(s) · '
-                   f'{resume["achats"]} acheté(s)'),
+                   f'{resume["achats"]} acheté(s) · '
+                   f'{resume["hors_caisse"]} hors caisse'),
         tuile("📨 Demandes en attente", resume["demandes_en_attente"],
-              "accent" if resume["demandes_en_attente"] else "",
-              sous="parties, sans réponse"),
-        tuile("🔁 À renouveler", resume["a_renouveler"] + resume["dernier_mois"],
-              "accent" if resume["a_renouveler"] + resume["dernier_mois"]
-              else "",
-              sous=f'dont {resume["dernier_mois"]} au dernier mois'),
-        tuile("⛔ Ententes expirées", resume["expirees"],
-              "critical" if resume["expirees"] else "",
-              sous="plus prises en charge"),
+              "warning" if resume["demandes_en_attente"] else "",
+              sous="parties, sans réponse de la caisse"),
+        tuile("🔁 À renouveler", a_renouveler,
+              "critical" if resume["expirees"] else
+              ("accent" if a_renouveler else ""),
+              sous=f'dont {resume["dernier_mois"]} au dernier mois · '
+                   f'{resume["expirees"]} expirée(s)'),
         tuile("💰 À facturer", resume["a_facturer"],
               "critical" if resume["a_facturer"] else "",
-              sous=f'{resume["mois_dus"]} mois dus'),
-        tuile("🆓 Hors caisse", resume["hors_caisse"], "",
-              sous=f'{resume["cautions"]:,} F de cautions'.replace(",", " ")),
+              sous=f'{resume["mois_dus"]} mois dus · '
+                   f'{resume["cautions"]:,} F de cautions'.replace(",", " ")),
     ]) + "</div>", unsafe_allow_html=True)
 
 
@@ -923,9 +933,10 @@ def rendre(etape, tuile_kpi) -> None:
 
     _panneau_ajout(dossiers)
 
-    etape("1", "Les trois questions de la location",
-          "L'entente est-elle faite, qu'y a-t-il à facturer, et qu'est-ce "
-          "qui expire bientôt.")
+    st.divider()
+    etape("1", "Ce qu'il y a à faire aujourd'hui",
+          "Un sous-onglet par question : chacun ne montre que ce qui la "
+          "concerne.")
 
     vue = vue_courante
     onglets = st.tabs(["✅ Ententes préalables", "💰 Facturations",

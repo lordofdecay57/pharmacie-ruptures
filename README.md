@@ -1028,6 +1028,17 @@ caution se remplit. Modifiable ligne à ligne.
 > Mêlés aux dossiers soumis à entente, ils s'afficheraient « rien de
 > fait » à vie — c'est-à-dire comme un manquement. Ils n'en sont pas un.
 
+### Ouvrir un dossier : trois champs
+
+**Patient · Matériel · Mode**, et c'est tout. Les dix autres champs se
+saisissent plus tard, chacun par son propre geste — la demande dans
+l'onglet des ententes, l'accord juste à côté, la facturation dans le sien,
+la caution dans celui du hors-caisse.
+
+Le régime et la caution ne sont pas demandés : ils se proposent d'après le
+nom du matériel. Le début de location, laissé vide, vaut aujourd'hui. Le
+reste est **replié**, pour reprendre une location commencée avant l'outil.
+
 ### Cinq sous-onglets, dans l'ordre des questions
 
 1. **✅ Ententes préalables** — le parcours complet. Les demandes parties
@@ -1041,6 +1052,10 @@ caution se remplit. Modifiable ligne à ligne.
    « mois dus », qui n'ont pas de sens pour un achat.
 5. **🆓 Sans entente** — aérosols et tensiomètres, avec leurs **cautions**
    et le total détenu.
+
+Chacun montre **ce qui appelle un geste** et replie ce qui répond à
+« montre-moi tout » : le tableau de référence en bas d'écran est déjà fait
+pour ça, et le dupliquer poussait le geste hors de l'écran.
 
 ### La demande d'entente, et qui l'a faite
 

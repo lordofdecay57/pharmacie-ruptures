@@ -544,8 +544,12 @@ COLONNES_VUE = [
 #: La DEMANDE figure dans la vue des ententes, avec son auteur : c'est la
 #: traçabilité demandée — savoir qui a envoyé quoi, et quand, sans avoir à
 #: appeler la caisse pour le lui demander.
+#: Sans « Attente (j) » : le compte à rebours ne dit quelque chose que
+#: d'une demande SANS réponse, et celles-là ont leur propre liste juste
+#: au-dessus. Ici il serait vide neuf fois sur dix, et une colonne vide
+#: coûte la place d'une colonne pleine.
 COLONNES_ENTENTES = ["Entente", "Patient", "Matériel", "Mode",
-                     "Demande le", "Demandée par", "Attente (j)",
+                     "Demande le", "Demandée par",
                      "Entente préalable", "Échéance", "Commentaire entente"]
 
 #: Ce qui attend une réponse de la caisse : sans accord, mais la demande
