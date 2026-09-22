@@ -2,7 +2,7 @@
 
 **Ententes préalables CAFAT, matériel médical loué ou vendu au patient.**
 
-Version 6.35 · Pharmacie de La Foa · Nouvelle-Calédonie
+Version 6.36 · Pharmacie de La Foa · Nouvelle-Calédonie
 
 ---
 
@@ -286,14 +286,60 @@ valide : c'est elle que la caisse contrôlera le jour du règlement.
   personne**. Sans cette réduction, le même patient reviendrait en trois
   lignes, chacune avec sa moitié d'historique.
 
-### 4.3 Le bandeau
+### 4.3 Le bandeau — quatre tuiles, pas six
 
-Six nombres, visibles sans rien ouvrir : dossiers suivis (dont loués /
-achetés), **demandes en attente de réponse**, à renouveler (dont combien
-au dernier mois), ententes expirées, à facturer (avec le total des mois
-dus), **locations hors caisse et cautions détenues**.
+Six tenaient sur deux rangées, la sixième s'étirant seule sur toute la
+largeur. **Une rangée qui déborde ne se lit plus d'un coup d'œil**, ce qui
+est pourtant tout ce qu'on demande à un bandeau.
 
-### 4.4 Le tableau de référence
+Les quatre retenues sont celles qui appellent un **geste** :
+
+| Tuile | Seconde ligne |
+| --- | --- |
+| Dossiers suivis | loués · achetés · hors caisse |
+| 📨 Demandes en attente | parties, sans réponse de la caisse |
+| 🔁 À renouveler | dont N au dernier mois · N expirée(s) |
+| 💰 À facturer | N mois dus · N F de cautions |
+
+Ce qui les précise tient sur leur seconde ligne, où l'on n'a rien à
+décider.
+
+### 4.4 Ouvrir un dossier : trois champs
+
+**Patient · Matériel · Mode.** Rien d'autre à l'écran.
+
+Onze champs tenaient ici, et c'était onze de trop. **Dix des onze se
+saisissent plus tard**, chacun par son propre geste : la demande dans
+l'onglet des ententes, l'accord juste à côté, la facturation dans le sien,
+la caution dans celui du hors-caisse. Les demander à l'ouverture, c'était
+réclamer d'avance ce que la pharmacie apprendra dans les semaines qui
+viennent — et noyer les trois seules réponses qu'elle a vraiment : **qui,
+quoi, loué ou acheté**.
+
+Le régime et la caution ne sont pas demandés du tout : ils se proposent
+d'après le nom du matériel. Le début de location, laissé vide, vaut
+aujourd'hui — un dossier s'ouvre le jour où le matériel part chez le
+patient, neuf fois sur dix.
+
+Le reste reste accessible, **replié**, pour le seul cas qui le justifie :
+reprendre une location commencée avant l'arrivée de l'outil.
+
+### 4.5 Ce qui est replié
+
+Chaque sous-onglet montre **ce qui appelle un geste**, et replie ce qui
+répond à « montre-moi tout » :
+
+- les ententes montrent les **relances** ; la liste entière est dans un
+  dépliant ;
+- les facturations montrent ce qui est **dû** ; le reste est dans un
+  dépliant ;
+- les achats montrent ceux **à régler**, puis tous ;
+- le hors-caisse montre les **cautions détenues**.
+
+Le tableau de référence en bas d'écran répond déjà à « montre-moi tout » :
+le dupliquer dans chaque onglet poussait le geste hors de l'écran.
+
+### 4.6 Le tableau de référence
 
 Corrigeable à la main : dates, durées, mode. Le mode est une **liste
 fermée** — « loc. », « LOCATION » ou « louée » tapés librement sortiraient

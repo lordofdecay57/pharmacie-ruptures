@@ -1619,6 +1619,26 @@ def _sous_onglet(page, libelle: str):
         has_text=libelle)
 
 
+def _ouvrir_le_panneau_d_ajout(page):
+    """Déplie « ➕ Ouvrir un dossier » et renvoie son formulaire.
+
+    Le panneau est REPLIÉ dès qu'un dossier existe — c'est voulu, il ne
+    doit pas manger l'écran de l'usage quotidien. Un test qui lirait le
+    formulaire sans l'ouvrir ne verrait qu'un texte vide.
+
+    Le clic BASCULE : on ne le donne que si le formulaire est encore
+    masqué. Sans cette garde, un second test de la même page refermerait
+    ce que le premier vient d'ouvrir — et l'ordre d'exécution déciderait
+    du résultat.
+    """
+    formulaire = page.locator('[data-testid="stForm"]').first
+    if not formulaire.is_visible():
+        page.get_by_text("Ouvrir un dossier").first.click()
+        page.wait_for_timeout(2500)
+    formulaire.wait_for(timeout=15000)
+    return formulaire
+
+
 def _panneau_du_sous_onglet(page) -> str:
     """Le texte du sous-onglet OUVERT, et de lui seul.
 
@@ -1674,12 +1694,34 @@ class TestEspaceLocation:
         assert "ANNE VALIDE" in contenu
         assert "SOPHIE EXPIREE" in contenu
 
-    def test_le_bandeau_compte_les_ententes_expirees(self, page_location):
-        """Une entente expirée n'est plus prise en charge : c'est le chiffre
-        qu'on doit voir sans ouvrir quoi que ce soit."""
-        contenu = page_location.content()
-        assert "Ententes expirées" in contenu
-        assert "À renouveler" in contenu
+    def test_le_bandeau_tient_sur_QUATRE_tuiles(self, page_location):
+        """Six tenaient sur deux rangées, la sixième s'étirant seule sur
+        toute la largeur — et une rangée qui déborde ne se lit plus d'un
+        coup d'œil, ce qui est pourtant tout ce qu'on demande à un bandeau.
+
+        Les quatre retenues sont celles qui appellent un GESTE ; ce qui les
+        précise tient sur leur seconde ligne."""
+        tuiles = page_location.evaluate(
+            """() => [...document.querySelectorAll('.kpi')].map(t => ({
+                label: t.querySelector('.label').innerText.trim(),
+                sous: (t.querySelector('.sub') || {}).innerText || ''}))""")
+        assert len(tuiles) == 4, tuiles
+        libelles = [t["label"] for t in tuiles]
+        assert "Dossiers suivis" in libelles[0], libelles
+        assert "Demandes en attente" in libelles[1], libelles
+        assert "À renouveler" in libelles[2], libelles
+        assert "À facturer" in libelles[3], libelles
+
+    def test_le_bandeau_dit_les_expirees_sans_tuile_en_plus(self,
+                                                             page_location):
+        """Une entente expirée n'est plus prise en charge : le chiffre doit
+        se voir sans rien ouvrir — mais sur la seconde ligne de « à
+        renouveler », pas dans une cinquième tuile."""
+        sous = page_location.evaluate(
+            """() => [...document.querySelectorAll('.kpi')].map(
+                t => (t.querySelector('.sub') || {}).innerText || '')""")
+        assert any("expirée" in s for s in sous), sous
+        assert any("dernier mois" in s for s in sous), sous
 
     def test_un_dossier_sans_demarche_est_signale(self, page_location):
         """Tant que la demande n'est pas partie, la location n'est prise en
@@ -1741,6 +1783,48 @@ class TestEspaceLocation:
         assert corps.index("_panneau_ajout(") < corps.index("st.tabs("), (
             "l'ajout doit venir AVANT les trois sous-onglets")
 
+    def test_ouvrir_un_dossier_ne_demande_que_TROIS_champs(self,
+                                                            page_location):
+        """« Trop complexe et peu aéré, tout est concentré au même
+        endroit. »
+
+        Onze champs tenaient dans ce formulaire, et c'était onze de trop :
+        dix se saisissent plus tard, chacun par son propre geste. Les
+        demander à l'ouverture, c'était réclamer d'avance ce que la
+        pharmacie apprendra dans les semaines qui viennent — et noyer les
+        trois seules réponses qu'elle a : qui, quoi, loué ou acheté.
+
+        Le reste reste accessible, REPLIÉ, pour le seul cas qui le
+        justifie : reprendre une location commencée avant l'outil.
+        """
+        formulaire = _ouvrir_le_panneau_d_ajout(page_location)
+        # Les champs VISIBLES : ceux du dépliant replié sont dans le DOM
+        # mais masqués, et c'est exactement ce qu'on mesure.
+        visibles = formulaire.evaluate(
+            r"""f => [...f.querySelectorAll('label')]
+                .filter(l => l.offsetParent !== null)
+                .map(l => l.innerText.replace(/\s+/g, ' ').trim())
+                .filter(t => t.length)""")
+        assert len(visibles) == 3, visibles
+        assert any("Patient" in v for v in visibles), visibles
+        assert any("Matériel" in v for v in visibles), visibles
+        assert any("Mode" in v for v in visibles), visibles
+
+    def test_le_reste_du_dossier_reste_accessible_mais_replie(self,
+                                                               page_location):
+        """Replié n'est pas supprimé : une location reprise en cours de
+        route doit pouvoir arriver avec ses dates."""
+        formulaire = _ouvrir_le_panneau_d_ajout(page_location)
+        assert "déjà une histoire" in formulaire.inner_text()
+        formulaire.get_by_text("déjà une histoire").first.click()
+        page_location.wait_for_timeout(2000)
+        _sans_exception(page_location)
+        ouvert = formulaire.inner_text()
+        for champ in ("Début de location", "Demande envoyée le",
+                      "Entente accordée le", "Dernière facturation",
+                      "Caution (F)", "Notes"):
+            assert champ in ouvert, champ
+
     def test_les_dossiers_patients_ne_partent_pas_au_depot(self):
         """`location.csv` porte des noms de patients : il doit être ignoré
         par git, comme les commandes spéciales. Un oubli ici publierait des
@@ -1800,12 +1884,20 @@ class TestLouerOuAcheter:
 
     def test_le_mode_se_lit_dans_les_listes(self, page_location):
         """Sans lui, il faut retourner au tableau complet pour chaque
-        patient — et c'est ce va-et-vient que ces vues évitent."""
+        patient — et c'est ce va-et-vient que ces vues évitent.
+
+        La liste entière est désormais REPLIÉE — le sous-onglet montre ce
+        qui appelle un geste, pas tout. Replier n'est pas retirer : la
+        colonne doit toujours y être une fois le dépliant ouvert, et c'est
+        ce que ce test vérifie."""
         _sous_onglet(page_location, "Ententes préalables").first.click()
         page_location.wait_for_timeout(4000)
+        page_location.get_by_text("Toutes les ententes").first.click()
+        page_location.wait_for_timeout(3000)
+        _sans_exception(page_location)
         liste = _panneau_du_sous_onglet(page_location)
-        assert "Location" in liste, liste
-        assert "Achat" in liste, liste
+        assert "Location" in liste, "le mode « Location » manque"
+        assert "Achat" in liste, "le mode « Achat » manque"
 
     def test_la_vue_par_patient_reunit_ses_deux_modes(self, page_location):
         """Le patient au téléphone ne demande pas « où en est ma location
@@ -2001,9 +2093,15 @@ class TestLocationsHorsCaisse:
         _sans_exception(page_location)
         assert "rendue le" in page_location.content()
 
-    def test_le_bandeau_compte_les_cautions(self, page_location):
-        assert "de cautions" in page_location.content()
-        assert "Hors caisse" in page_location.content()
+    def test_le_bandeau_dit_les_cautions_et_le_hors_caisse(self,
+                                                            page_location):
+        """Les deux chiffres restent visibles sans rien ouvrir — mais sur
+        les secondes lignes, là où l'on n'a rien à décider."""
+        sous = page_location.evaluate(
+            """() => [...document.querySelectorAll('.kpi')].map(
+                t => (t.querySelector('.sub') || {}).innerText || '')""")
+        assert any("hors caisse" in s for s in sous), sous
+        assert any("de cautions" in s for s in sous), sous
 
     def test_ouvrir_un_tensiometre_remplit_le_regime_et_la_caution(self):
         """« Taper le nom suffit » : ressaisir régime et caution à chaque
@@ -2120,3 +2218,40 @@ class TestPropositionDeRenouvellement:
         _sans_exception(page_dernier_mois)
         assert page_dernier_mois.locator(
             ".st-key-lo_bulle_renouvellement").count() == 0
+
+
+class TestOuvrirUnDossierDeBoutEnBout:
+    """Le parcours réel : deux champs tapés, un dossier ouvert.
+
+    Placé en DERNIER sur cette page : il ajoute un dossier, et les
+    comptages des classes précédentes en dépendent. Un test qui change
+    l'état partagé se met en queue, sinon c'est l'ordre d'exécution qui
+    décide du résultat.
+    """
+
+    def test_deux_champs_suffisent_et_le_debut_vaut_aujourd_hui(
+            self, page_location):
+        """« Début de location » n'est plus demandé à l'écran : un dossier
+        s'ouvre le jour où le matériel part chez le patient, neuf fois sur
+        dix. Le laisser vide et le voir rester vide obligerait à le
+        retaper — c'est la date du jour, elle est connue."""
+        from datetime import date
+        formulaire = _ouvrir_le_panneau_d_ajout(page_location)
+        formulaire.get_by_placeholder("Nom du patient").fill("M. TOUT NEUF")
+        formulaire.get_by_placeholder("Lit, VNI, tensiomètre…").fill(
+            "Déambulateur")
+        formulaire.get_by_role("button", name="Ouvrir le dossier").click()
+        page_location.wait_for_timeout(7000)
+        _sans_exception(page_location)
+        assert "dossier enregistré" in page_location.content()
+
+        # Retrouvé dans le tableau de référence, avec la date du jour.
+        page_location.get_by_placeholder(
+            "Nom du patient ou matériel loué").fill("TOUT NEUF")
+        page_location.wait_for_timeout(6000)
+        _sans_exception(page_location)
+        cellules = page_location.evaluate(
+            """() => [...document.querySelectorAll('td[role="gridcell"]')]
+                .map(c => c.innerText.trim())""")
+        assert "M. TOUT NEUF" in cellules, cellules
+        assert f"{date.today():%d/%m/%Y}" in cellules, cellules
