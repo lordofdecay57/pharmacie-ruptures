@@ -1011,16 +1011,65 @@ Les deux vivent dans le même fichier, avec le même vocabulaire de statuts
 et les mêmes gestes : deux fichiers séparés auraient coupé chaque patient
 en deux.
 
-### Quatre sous-onglets, dans l'ordre des questions
+### Deux régimes : avec ou sans entente
 
-1. **✅ Ententes préalables** — laquelle est accordée, depuis quand,
-   jusqu'à quand, et le geste « l'accord est arrivé ». La date saisie est
-   celle de l'**accord**, pas celle de la demande : c'est d'elle que court
-   la validité.
+Tout le matériel ne passe pas par la caisse.
+
+| Régime | Matériel | Entente | Remboursement | Caution |
+| --- | --- | --- | --- | --- |
+| 📋 Soumis à entente | lit, VNI, concentrateur, fauteuil… | oui | selon l'accord | — |
+| 🆓 Sans entente requise | **tensiomètre** | non | **non remboursé** | **3 000 F** |
+| 🆓 Sans entente requise | **aérosol** | non | **remboursé sous conditions** | **5 000 F** |
+
+Le régime **se propose d'après le nom du matériel** : tapez « Tensiomètre
+OMRON » ou « Aérosol Pari Boy », le régime bascule hors caisse et la
+caution se remplit. Modifiable ligne à ligne.
+
+> Mêlés aux dossiers soumis à entente, ils s'afficheraient « rien de
+> fait » à vie — c'est-à-dire comme un manquement. Ils n'en sont pas un.
+
+### Cinq sous-onglets, dans l'ordre des questions
+
+1. **✅ Ententes préalables** — le parcours complet. Les demandes parties
+   sans réponse en tête, puis toutes les ententes. Trois gestes distincts
+   sur le dossier choisi : **📨 demande envoyée** (date + prénom),
+   **✅ accord reçu** (date + durée), **💬 commentaire**.
 2. **💰 Facturations** — ce qui est dû, et **depuis combien de mois**.
-3. **🔁 À renouveler** — ce qui expire sous 30 jours, les expirées en tête.
+3. **🔁 À renouveler** — ce qui expire sous 30 jours ou arrive à son
+   dernier mois couvert, les expirées en tête.
 4. **🛒 Achats** — leur propre liste : ni « prochaine facturation » ni
    « mois dus », qui n'ont pas de sens pour un achat.
+5. **🆓 Sans entente** — aérosols et tensiomètres, avec leurs **cautions**
+   et le total détenu.
+
+### La demande d'entente, et qui l'a faite
+
+L'étape manquait entre « rien de fait » et « accord reçu ». Elle porte la
+**date d'envoi** et le **prénom** de la personne de la pharmacie qui l'a
+envoyée — obligatoire, et proposé ensuite dans une liste qui se remplit
+toute seule.
+
+> Trois semaines plus tard, quand la caisse n'a pas répondu, c'est la
+> seule façon de savoir à qui demander ce qui a été envoyé.
+
+Tant que la réponse n'est pas là, le dossier figure dans une **liste de
+relances**, les plus anciennes en tête, avec le nombre de jours d'attente.
+Un **commentaire d'entente** — relance, pièce manquante, refus, n° de
+dossier — l'accompagne, séparé des notes de la location.
+
+### Le renouvellement proposé au dernier mois
+
+**Au moment de facturer le dernier mois couvert**, le module propose de
+renouveler l'entente : le dossier est « au dernier mois » quand la
+facturation suivante tomberait après l'échéance.
+
+C'est le moment utile — la facturation est le seul geste mensuel certain
+sur une location. Attendre l'échéance, c'est la découvrir une fois passée ;
+prévenir plus tôt, c'est prévenir tous les mois pour rien.
+
+La proposition s'affiche dans la foulée du geste, la demande repart de là
+avec sa date et son prénom, et se refuse d'un clic — la location s'arrête
+parfois là.
 
 ### Les règles
 
@@ -1041,12 +1090,16 @@ en deux.
 - **Un achat réglé sort des deux listes** : facturé, il ne revient plus
   (on facturerait deux fois le même fauteuil), et son entente peut expirer
   sans conséquence (l'y laisser noierait les vraies échéances).
+- **Une caution appartient au patient** tant qu'il n'a pas rendu
+  l'appareil. Le total détenu est affiché, la restitution s'enregistre
+  d'un clic. Cet argent n'est pas à la pharmacie : il est chez elle.
 
 ### Harmonisé par patient
 
 La colonne **Mode** figure dans toutes les listes, et une **vue par
 patient** ouvre le tableau de référence : une ligne par personne,
-locations et achats confondus, le pire statut de ses dossiers en tête.
+locations et achats confondus, le pire statut de ses dossiers en tête et
+la caution qu'elle a déposée.
 
 > Le patient au téléphone ne demande pas « où en est ma location de
 > lit » : il demande **où il en est**.

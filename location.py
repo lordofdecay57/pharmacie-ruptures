@@ -71,8 +71,10 @@ _journal = logging.getLogger("pharmacie.location")
 #: se déduit, et n'a donc pas sa place dans le fichier : une valeur
 #: enregistrée qui se déduit finit par contredire ce dont elle est déduite.
 COLONNES_DOSSIER = [
-    "Patient", "Matériel", "Mode", "Début de location",
-    "Entente préalable", "Validité (mois)", "Dernière facturation", "Notes",
+    "Patient", "Matériel", "Mode", "Régime", "Début de location",
+    "Demande le", "Demandée par", "Entente préalable", "Validité (mois)",
+    "Dernière facturation", "Caution (F)", "Caution rendue le",
+    "Commentaire entente", "Notes",
 ]
 
 #: LOUER OU ACHETER. Le même patient peut faire les deux, et la caisse
@@ -85,6 +87,28 @@ COLONNES_DOSSIER = [
 MODE_LOCATION = "🛏️ Location"
 MODE_ACHAT = "🛒 Achat"
 MODES = (MODE_LOCATION, MODE_ACHAT)
+
+#: SOUMIS À ENTENTE, OU NON. Tout le matériel ne passe pas par la caisse :
+#: un tensiomètre n'est pas remboursé, un aérosol l'est sous conditions —
+#: ni l'un ni l'autre ne demande d'entente préalable, mais tous deux
+#: demandent une CAUTION. Les mêler aux dossiers soumis à entente les
+#: ferait apparaître « sans entente » en permanence, c'est-à-dire comme
+#: un manquement : ils n'en sont pas un.
+REGIME_ENTENTE = "📋 Soumis à entente"
+REGIME_LIBRE = "🆓 Sans entente requise"
+REGIMES = (REGIME_ENTENTE, REGIME_LIBRE)
+
+#: Le matériel qui se loue SANS passer par la caisse, et ce qu'il engage.
+#: Les montants sont ceux pratiqués à l'officine ; ils sont proposés à la
+#: saisie et restent modifiables ligne à ligne — un tarif qui change ne
+#: doit pas demander une nouvelle version du programme.
+#: La clé est cherchée dans le nom du matériel, sans accent ni casse.
+CATALOGUE_SANS_ENTENTE = {
+    "TENSIOMETRE": {"caution": 3000,
+                    "remboursement": "Non remboursé"},
+    "AEROSOL": {"caution": 5000,
+                "remboursement": "Remboursé sous conditions"},
+}
 
 #: Durée proposée quand on crée un dossier, en mois. Modifiable ligne à
 #: ligne : la caisse accorde au cas par cas, et ce nombre n'est qu'un
@@ -99,13 +123,23 @@ PERIODE_FACTURATION_MOIS = 1
 #: d'attendre la réponse de la caisse.
 ALERTE_RENOUVELLEMENT_J = 30
 
-STATUT_SANS_ENTENTE = "⚪ Sans entente"
+STATUT_SANS_ENTENTE = "⚪ Rien de fait"
+STATUT_DEMANDE_ENVOYEE = "📨 Demande envoyée"
 STATUT_ENTENTE_VALIDE = "🟢 Valide"
 STATUT_A_RENOUVELER = "🟠 À renouveler"
+STATUT_DERNIER_MOIS = "🔔 Dernier mois couvert"
 STATUT_EXPIREE = "⛔ Expirée"
 
-#: Les deux qui appellent un geste. Le reste peut attendre.
-STATUTS_A_TRAITER = (STATUT_A_RENOUVELER, STATUT_EXPIREE)
+#: Le matériel qui n'a jamais eu besoin d'accord. Ce n'est pas un
+#: manquement : c'est un régime différent, et il doit se lire comme tel.
+STATUT_ENTENTE_NON_REQUISE = "🆓 Non requise"
+
+#: Ceux qui appellent un geste. Le reste peut attendre.
+#: « Dernier mois couvert » en fait partie : c'est le moment où le
+#: renouvellement doit partir, pas celui où l'on constate qu'il aurait
+#: dû partir.
+STATUTS_A_TRAITER = (STATUT_A_RENOUVELER, STATUT_DERNIER_MOIS,
+                     STATUT_EXPIREE)
 
 STATUT_A_FACTURER = "🟢 À facturer"
 STATUT_FACTURATION_A_JOUR = "🟡 À jour"
@@ -208,6 +242,70 @@ def parser_mode(valeur) -> str:
     return MODE_ACHAT if "ACHAT" in texte or "ACHET" in texte else MODE_LOCATION
 
 
+def parser_regime(valeur) -> str:
+    """Soumis à entente, ou non. Le défaut est le régime SURVEILLÉ.
+
+    Un dossier classé « sans entente requise » par erreur sortirait des
+    renouvellements sans que rien ne le signale, et l'entente expirerait
+    en silence. L'inverse n'ajoute qu'une ligne dans une liste.
+    """
+    texte = cle_patient(valeur)
+    return REGIME_LIBRE if "SANS" in texte or "LIBRE" in texte else REGIME_ENTENTE
+
+
+def fiche_sans_entente(materiel) -> Optional[dict]:
+    """Ce que l'officine sait de ce matériel-là, ou ``None``.
+
+    Cherché DANS le nom : « Aérosol Pari Boy » et « aerosol » doivent
+    tomber sur la même fiche, sans quoi il faudrait écrire le libellé au
+    caractère près pour que la caution se propose.
+    """
+    nom = cle_patient(materiel)
+    for cle, fiche in CATALOGUE_SANS_ENTENTE.items():
+        if cle in nom:
+            return dict(fiche, matiere=cle)
+    return None
+
+
+def regime_propose(materiel) -> str:
+    """Le régime que le nom du matériel laisse attendre.
+
+    Une proposition, jamais une contrainte : elle évite de reclasser à la
+    main chaque tensiomètre, et reste modifiable si un cas sort de
+    l'ordinaire.
+    """
+    return REGIME_LIBRE if fiche_sans_entente(materiel) else REGIME_ENTENTE
+
+
+def caution_proposee(materiel) -> int:
+    """La caution d'usage pour ce matériel, 0 s'il n'en demande pas."""
+    fiche = fiche_sans_entente(materiel)
+    return int(fiche["caution"]) if fiche else 0
+
+
+def remboursement(materiel) -> str:
+    """Ce que la caisse fait de ce matériel-là, en clair.
+
+    Tensiomètre et aérosol se ressemblent — ni l'un ni l'autre ne demande
+    d'entente — mais l'un n'est jamais remboursé et l'autre l'est sous
+    conditions. Les afficher côte à côte sans le dire ferait répondre au
+    hasard au patient qui le demande.
+    """
+    fiche = fiche_sans_entente(materiel)
+    return fiche["remboursement"] if fiche else ""
+
+
+def parser_montant(valeur) -> int:
+    """Un montant en francs. Vide, illisible ou négatif → 0.
+
+    Jamais de négatif : une caution négative, c'est de l'argent que la
+    pharmacie devrait au patient sans l'avoir encaissé.
+    """
+    nombre = pd.to_numeric(pd.Series([_texte(valeur).replace(" ", "")]),
+                           errors="coerce").fillna(0)
+    return max(0, int(nombre.iloc[0]))
+
+
 def _mois_texte(valeur, defaut: int = VALIDITE_DEFAUT_MOIS) -> str:
     """La durée, telle qu'elle s'ÉCRIT dans le dossier : en texte.
 
@@ -269,18 +367,80 @@ def jours_avant_echeance(entente, validite_mois,
     return (fin - (aujourdhui or date.today())).days
 
 
+def jours_depuis_demande(demande_le, aujourdhui: Optional[date] = None):
+    """Depuis combien de jours la demande attend une réponse.
+
+    ``None`` si aucune demande n'a été envoyée. C'est ce nombre qui dit
+    quand relancer la caisse : une demande partie et jamais rappelée peut
+    dormir des mois sans que rien ne la réveille.
+    """
+    partie = parser_date(demande_le)
+    if partie is None:
+        return None
+    return ((aujourdhui or date.today()) - partie).days
+
+
 def statut_entente(entente, validite_mois, aujourdhui: Optional[date] = None,
                    alerte_j: int = ALERTE_RENOUVELLEMENT_J,
-                   defaut: int = VALIDITE_DEFAUT_MOIS) -> str:
-    """Feu de circulation d'une entente préalable."""
+                   defaut: int = VALIDITE_DEFAUT_MOIS,
+                   regime: str = REGIME_ENTENTE, demande_le=None,
+                   derniere_facturation=None, mode: str = MODE_LOCATION,
+                   periode_mois: int = PERIODE_FACTURATION_MOIS) -> str:
+    """Feu de circulation d'une entente préalable.
+
+    Quatre étapes, et non deux : rien de fait, demande envoyée, accord
+    reçu, échéance qui approche. L'étape « demande envoyée » manquait — un
+    dossier parti à la caisse se lisait comme un dossier oublié, et on le
+    refaisait.
+
+    Le matériel qui n'a jamais eu besoin d'accord — tensiomètre, aérosol —
+    n'entre pas dans ce feu-là : l'y faire entrer l'afficherait « rien de
+    fait » à vie, c'est-à-dire comme un manquement.
+    """
+    if parser_regime(regime) == REGIME_LIBRE:
+        return STATUT_ENTENTE_NON_REQUISE
     jours = jours_avant_echeance(entente, validite_mois, aujourdhui, defaut)
     if jours is None:
-        return STATUT_SANS_ENTENTE
+        return (STATUT_DEMANDE_ENVOYEE if parser_date(demande_le) is not None
+                else STATUT_SANS_ENTENTE)
     if jours < 0:
         return STATUT_EXPIREE
+    # Le dernier mois couvert passe DEVANT le compte à rebours : c'est un
+    # signal de facturation, et il tombe parfois avant que le délai
+    # d'alerte, réglable, ne se déclenche.
+    if au_dernier_mois(entente, validite_mois, derniere_facturation, mode,
+                       periode_mois, defaut):
+        return STATUT_DERNIER_MOIS
     if jours <= max(0, int(alerte_j)):
         return STATUT_A_RENOUVELER
     return STATUT_ENTENTE_VALIDE
+
+
+def au_dernier_mois(entente, validite_mois, derniere_facturation,
+                    mode: str = MODE_LOCATION,
+                    periode_mois: int = PERIODE_FACTURATION_MOIS,
+                    defaut: int = VALIDITE_DEFAUT_MOIS) -> bool:
+    """Le mois qui vient d'être facturé est-il le dernier que l'entente couvre ?
+
+    « Au moment de la facturation du dernier mois, une proposition de
+    renouvellement. » C'est LE moment utile : la facturation est le seul
+    geste mensuel certain sur un dossier de location. Attendre l'échéance
+    elle-même, c'est la découvrir une fois passée ; prévenir plus tôt,
+    c'est prévenir tous les mois pour rien.
+
+    Vrai quand la facturation SUIVANTE tomberait après l'échéance : il n'y
+    aura donc pas de mois d'après à facturer sous cet accord.
+
+    Un achat n'a pas de mois suivant : la question ne se pose pas.
+    """
+    if parser_mode(mode) == MODE_ACHAT:
+        return False
+    fin = echeance(entente, validite_mois, defaut)
+    suivante = prochaine_facturation(derniere_facturation, periode_mois,
+                                     MODE_LOCATION)
+    if fin is None or suivante is None:
+        return False
+    return suivante > fin
 
 
 # ---------------------------------------------------------------------------
@@ -366,10 +526,13 @@ def mois_de_retard(derniere_facturation, aujourdhui: Optional[date] = None,
 # ---------------------------------------------------------------------------
 
 COLONNES_VUE = [
-    "Entente", "Patient", "Matériel", "Mode", "Entente préalable",
-    "Validité (mois)", "Échéance", "Jours avant échéance",
-    "Facturation", "Dernière facturation", "Prochaine facturation",
-    "Mois dus", "Début de location", "Notes",
+    "Entente", "Patient", "Matériel", "Mode", "Régime",
+    "Demande le", "Demandée par", "Attente (j)",
+    "Entente préalable", "Validité (mois)", "Échéance",
+    "Jours avant échéance", "Facturation", "Dernière facturation",
+    "Prochaine facturation", "Mois dus", "Caution (F)",
+    "Caution rendue le", "Début de location", "Commentaire entente",
+    "Notes",
 ]
 
 #: Ce qu'on LIT dans chaque sous-onglet. Le détail reste disponible — il
@@ -378,13 +541,32 @@ COLONNES_VUE = [
 #: « Mode » figure dans TOUTES : une liste où l'on ne voit pas si la ligne
 #: est louée ou achetée oblige à retourner au tableau complet pour chaque
 #: patient — et c'est exactement le va-et-vient que ces vues évitent.
+#: La DEMANDE figure dans la vue des ententes, avec son auteur : c'est la
+#: traçabilité demandée — savoir qui a envoyé quoi, et quand, sans avoir à
+#: appeler la caisse pour le lui demander.
 COLONNES_ENTENTES = ["Entente", "Patient", "Matériel", "Mode",
-                     "Entente préalable", "Échéance"]
+                     "Demande le", "Demandée par", "Attente (j)",
+                     "Entente préalable", "Échéance", "Commentaire entente"]
+
+#: Ce qui attend une réponse de la caisse : sans accord, mais la demande
+#: est partie. C'est la liste des relances.
+COLONNES_DEMANDES = ["Patient", "Matériel", "Mode", "Demande le",
+                     "Demandée par", "Attente (j)", "Commentaire entente"]
+
 COLONNES_FACTURATION = ["Facturation", "Patient", "Matériel", "Mode",
                         "Dernière facturation", "Prochaine facturation",
-                        "Mois dus"]
+                        "Mois dus", "Entente", "Échéance"]
 COLONNES_RENOUVELLEMENT = ["Entente", "Patient", "Matériel", "Mode",
-                           "Échéance", "Jours avant échéance"]
+                           "Échéance", "Jours avant échéance",
+                           "Demande le", "Demandée par"]
+
+#: Le matériel loué hors caisse. Ni échéance ni mois dus : ce qui compte
+#: est la CAUTION — de l'argent encaissé qui appartient au patient tant
+#: qu'il n'a pas rendu l'appareil — et ce que la caisse en fait.
+COLONNES_SANS_ENTENTE = ["Patient", "Matériel", "Remboursement",
+                         "Début de location", "Caution (F)",
+                         "Caution rendue le", "Dernière facturation",
+                         "Notes"]
 
 #: L'achat : ni « prochaine facturation » ni « mois dus » — il n'y en a
 #: pas. Montrer deux colonnes vides ferait douter d'une panne.
@@ -394,7 +576,8 @@ COLONNES_ACHATS = ["Entente", "Patient", "Matériel", "Entente préalable",
 #: Le récapitulatif par patient : une ligne par personne, tous modes
 #: confondus. C'est la vue qu'on ouvre quand le patient est au téléphone.
 COLONNES_PATIENT = ["Patient", "Locations", "Achats", "Entente",
-                    "À renouveler", "À facturer", "Mois dus"]
+                    "À renouveler", "À facturer", "Mois dus",
+                    "Caution détenue (F)"]
 
 #: Ce qu'on CORRIGE : uniquement ce qui a été saisi à la main. Les statuts
 #: et les échéances se déduisent — les afficher dans un tableau modifiable
@@ -420,12 +603,27 @@ def vue_affichable(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
         fin = echeance(entente, validite, validite_defaut)
         derniere = parser_date(ligne.get("Dernière facturation"))
         mode = parser_mode(ligne.get("Mode"))
+        materiel = _texte(ligne.get("Matériel"))
+        # Un régime jamais renseigné — un dossier ouvert avant que ce
+        # champ n'existe — se déduit du nom du matériel plutôt que de
+        # verser d'office dans « soumis à entente » : un tensiomètre
+        # d'avant la mise à jour se lirait sinon comme un manquement.
+        regime = (parser_regime(ligne.get("Régime"))
+                  if _texte(ligne.get("Régime")) else regime_propose(materiel))
+        demande = parser_date(ligne.get("Demande le"))
         lignes.append({
             "Entente": statut_entente(entente, validite, aujourdhui, alerte_j,
-                                      validite_defaut),
+                                      validite_defaut, regime, demande,
+                                      derniere, mode, periode_mois),
             "Patient": _texte(ligne.get("Patient")),
-            "Matériel": _texte(ligne.get("Matériel")),
+            "Matériel": materiel,
             "Mode": mode,
+            "Régime": regime,
+            "Demande le": demande,
+            "Demandée par": _texte(ligne.get("Demandée par")),
+            "Attente (j)": (jours_depuis_demande(demande, aujourdhui)
+                            if entente is None else None),
+            "Remboursement": remboursement(materiel),
             "Entente préalable": entente,
             "Validité (mois)": validite,
             "Échéance": fin,
@@ -438,10 +636,16 @@ def vue_affichable(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                                                            periode_mois, mode),
             "Mois dus": mois_de_retard(derniere, aujourdhui, periode_mois,
                                        mode),
+            "Caution (F)": parser_montant(ligne.get("Caution (F)")),
+            "Caution rendue le": parser_date(ligne.get("Caution rendue le")),
             "Début de location": parser_date(ligne.get("Début de location")),
+            "Commentaire entente": _texte(ligne.get("Commentaire entente")),
             "Notes": _texte(ligne.get("Notes")),
         })
-    vue = pd.DataFrame(lignes, columns=COLONNES_VUE)
+    # « Remboursement » se déduit du matériel : il n'est pas saisi, donc
+    # pas dans COLONNES_VUE, mais la vue des locations hors caisse en a
+    # besoin — d'où la colonne ajoutée ici et non là.
+    vue = pd.DataFrame(lignes, columns=COLONNES_VUE + ["Remboursement"])
     return _classer(vue, tri)
 
 
@@ -476,15 +680,27 @@ def pour_affichage(vue: pd.DataFrame) -> pd.DataFrame:
         return vue if vue is not None else pd.DataFrame(columns=COLONNES_VUE)
     propre = vue.copy()
     for colonne in ("Entente préalable", "Échéance", "Dernière facturation",
-                    "Prochaine facturation", "Début de location"):
+                    "Prochaine facturation", "Début de location",
+                    "Demande le", "Caution rendue le"):
         if colonne in propre.columns:
             propre[colonne] = [
                 f"{jour:%d/%m/%Y}" if jour is not None and not pd.isna(jour)
                 else "" for jour in propre[colonne]]
-    for colonne in ("Jours avant échéance", "Mois dus", "Validité (mois)"):
+    for colonne in ("Jours avant échéance", "Mois dus", "Validité (mois)",
+                    "Attente (j)"):
         if colonne in propre.columns:
             propre[colonne] = ["" if v is None or pd.isna(v) else str(int(v))
                                for v in propre[colonne]]
+    # Les montants portent leur unité et une espace de millier : « 3 000 F »
+    # se lit d'un coup d'œil là où « 3000 » se compte. Zéro s'efface :
+    # une colonne de zéros se lit comme une panne, pas comme « rien à
+    # encaisser ».
+    for colonne in ("Caution (F)", "Caution détenue (F)"):
+        if colonne in propre.columns:
+            propre[colonne] = [
+                "" if v is None or pd.isna(v) or int(v) == 0
+                else f"{int(v):,} F".replace(",", " ")
+                for v in propre[colonne]]
     return propre
 
 
@@ -505,6 +721,18 @@ def du_mode(vue: pd.DataFrame, mode: str) -> pd.DataFrame:
     return vue[vue["Mode"] == mode].reset_index(drop=True)
 
 
+def du_regime(vue: pd.DataFrame, regime: str) -> pd.DataFrame:
+    """Les lignes d'un seul régime, dans une vue DÉJÀ calculée.
+
+    Même raison que ``du_mode`` : filtrer la vue plutôt que le dossier
+    garde les statuts et les classements rigoureusement d'accord entre
+    les listes.
+    """
+    if vue is None or vue.empty:
+        return pd.DataFrame(columns=COLONNES_VUE + ["Remboursement"])
+    return vue[vue["Régime"] == regime].reset_index(drop=True)
+
+
 def a_renouveler(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                  alerte_j: int = ALERTE_RENOUVELLEMENT_J,
                  validite_defaut: int = VALIDITE_DEFAUT_MOIS) -> pd.DataFrame:
@@ -517,6 +745,11 @@ def a_renouveler(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                          validite_defaut)
     if vue.empty:
         return vue
+    # Le matériel hors caisse en est absent SANS filtre supplémentaire :
+    # `statut_entente` lui rend « 🆓 Non requise », qui n'est pas un statut
+    # à traiter. Un second garde-fou ici serait du code qu'aucun test ne
+    # peut atteindre — et une protection intestable ment sur ce qu'elle
+    # protège. C'est donc `statut_entente` qui décide, et lui seul.
     a_traiter = vue["Entente"].isin(STATUTS_A_TRAITER)
     # Un achat RÉGLÉ ne se renouvelle pas : le fauteuil est payé, il est au
     # patient. Son entente a servi, elle peut expirer sans que personne
@@ -525,6 +758,65 @@ def a_renouveler(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
     a_traiter &= ~((vue["Mode"] == MODE_ACHAT)
                    & (vue["Facturation"] == STATUT_ACHAT_REGLE))
     return vue[a_traiter].reset_index(drop=True)
+
+
+def en_attente_de_reponse(dossier: pd.DataFrame,
+                          aujourdhui: Optional[date] = None,
+                          alerte_j: int = ALERTE_RENOUVELLEMENT_J,
+                          validite_defaut: int = VALIDITE_DEFAUT_MOIS
+                          ) -> pd.DataFrame:
+    """Les demandes parties à la caisse et restées sans réponse.
+
+    Les plus anciennes d'abord : une demande qui dort depuis six semaines
+    est une location que personne ne paie, et rien d'autre ne la rappelle.
+    C'est aussi ce qui permet de dire au patient qui appelle depuis quand
+    son dossier est parti, et par qui.
+    """
+    vue = vue_affichable(dossier, aujourdhui, TRI_ECHEANCE, alerte_j,
+                         validite_defaut)
+    if vue.empty:
+        return vue
+    attente = vue[vue["Entente"] == STATUT_DEMANDE_ENVOYEE].copy()
+    if attente.empty:
+        return attente
+    attente["_attente"] = [-(j or 0) for j in attente["Attente (j)"]]
+    return attente.sort_values("_attente", kind="stable").drop(
+        columns=["_attente"]).reset_index(drop=True)
+
+
+def sans_entente_requise(dossier: pd.DataFrame,
+                         aujourdhui: Optional[date] = None,
+                         alerte_j: int = ALERTE_RENOUVELLEMENT_J,
+                         validite_defaut: int = VALIDITE_DEFAUT_MOIS
+                         ) -> pd.DataFrame:
+    """Le matériel loué hors caisse : aérosols et tensiomètres.
+
+    Ils n'ont pas d'entente, pas d'échéance, pas de renouvellement — mais
+    ils ont une CAUTION, et une caution est de l'argent encaissé qui
+    appartient au patient tant qu'il n'a pas rendu l'appareil. C'est la
+    seule chose à suivre, et elle n'a sa place dans aucune des autres
+    listes.
+    """
+    vue = vue_affichable(dossier, aujourdhui, TRI_PATIENT, alerte_j,
+                         validite_defaut)
+    if vue.empty:
+        return pd.DataFrame(columns=COLONNES_VUE + ["Remboursement"])
+    return vue[vue["Régime"] == REGIME_LIBRE].reset_index(drop=True)
+
+
+def cautions_detenues(vue: pd.DataFrame) -> int:
+    """Le total des cautions encaissées et pas encore rendues.
+
+    Cet argent n'est pas à la pharmacie : il est chez elle. Le compter
+    évite qu'un appareil rendu il y a six mois laisse 5 000 F dans la
+    caisse de quelqu'un d'autre.
+    """
+    if vue is None or vue.empty:
+        return 0
+    encore = [m for m, rendue in zip(vue["Caution (F)"],
+                                     vue["Caution rendue le"])
+              if rendue is None or pd.isna(rendue)]
+    return int(sum(parser_montant(m) for m in encore))
 
 
 def a_facturer(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
@@ -556,7 +848,8 @@ def resume(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
     if vue.empty:
         return {"dossiers": 0, "patients": 0, "locations": 0, "achats": 0,
                 "a_renouveler": 0, "expirees": 0, "a_facturer": 0,
-                "mois_dus": 0}
+                "mois_dus": 0, "demandes_en_attente": 0, "dernier_mois": 0,
+                "hors_caisse": 0, "cautions": 0}
     # « À renouveler » compte ce que la LISTE affiche, achats réglés exclus :
     # deux nombres qui prétendent dire la même chose et n'y arrivent pas
     # font douter des deux.
@@ -575,6 +868,11 @@ def resume(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
         "a_facturer": int(vue["Facturation"].isin(STATUTS_A_FACTURER).sum()),
         "mois_dus": int(pd.to_numeric(vue["Mois dus"],
                                       errors="coerce").fillna(0).sum()),
+        "demandes_en_attente": int(
+            (vue["Entente"] == STATUT_DEMANDE_ENVOYEE).sum()),
+        "dernier_mois": int((vue["Entente"] == STATUT_DERNIER_MOIS).sum()),
+        "hors_caisse": int((vue["Régime"] == REGIME_LIBRE).sum()),
+        "cautions": cautions_detenues(vue),
     }
 
 
@@ -625,6 +923,7 @@ def par_patient(dossier: pd.DataFrame, aujourdhui: Optional[date] = None,
                 STATUTS_A_FACTURER).sum()),
             "Mois dus": int(pd.to_numeric(siens["Mois dus"],
                                           errors="coerce").fillna(0).sum()),
+            "Caution détenue (F)": cautions_detenues(siens),
         })
     recap = pd.DataFrame(lignes, columns=COLONNES_PATIENT)
     recap["_gravite"] = [-_GRAVITE.get(st, 0) for st in recap["Entente"]]
@@ -667,7 +966,9 @@ def ajouter_dossier(dossier: pd.DataFrame, patient: str, materiel: str,
                     debut=None, entente=None,
                     validite_mois: int = VALIDITE_DEFAUT_MOIS,
                     derniere_facturation=None, notes: str = "",
-                    mode: str = MODE_LOCATION) -> pd.DataFrame:
+                    mode: str = MODE_LOCATION, regime=None,
+                    demande_le=None, demandee_par: str = "",
+                    caution=None, commentaire: str = "") -> pd.DataFrame:
     """Ouvre un dossier, ou complète celui qui existe déjà.
 
     Rouvrir un dossier existant plutôt que d'en créer un second : deux
@@ -685,13 +986,27 @@ def ajouter_dossier(dossier: pd.DataFrame, patient: str, materiel: str,
     if not patient or not materiel:
         return dossier
 
+    # Le nom du matériel décide du régime et de la caution quand on ne les
+    # précise pas : taper « Tensiomètre » suffit pour que le dossier parte
+    # hors caisse avec ses 3 000 F. Ressaisir l'un et l'autre à chaque
+    # appareil, c'est la ligne qu'on finit par oublier.
+    regime = (parser_regime(regime) if regime is not None
+              else regime_propose(materiel))
+    caution = (parser_montant(caution) if caution is not None
+               else caution_proposee(materiel))
     existant = _index_dossier(dossier, patient, materiel, mode)
     valeurs = {
         "Patient": patient, "Matériel": materiel, "Mode": mode,
+        "Régime": regime,
         "Début de location": _iso(debut),
+        "Demande le": _iso(demande_le),
+        "Demandée par": _texte(demandee_par),
         "Entente préalable": _iso(entente),
         "Validité (mois)": _mois_texte(validite_mois),
         "Dernière facturation": _iso(derniere_facturation),
+        "Caution (F)": str(caution) if caution else "",
+        "Caution rendue le": "",
+        "Commentaire entente": _texte(commentaire),
         "Notes": _texte(notes),
     }
     if existant is not None:
@@ -719,6 +1034,47 @@ def _modifier(dossier: pd.DataFrame, patient: str, materiel: str,
     if indice is not None:
         dossier.at[indice, colonne] = valeur
     return dossier
+
+
+def enregistrer_demande(dossier: pd.DataFrame, patient: str, materiel: str,
+                        envoyee_le=None, par: str = "",
+                        mode: Optional[str] = None) -> pd.DataFrame:
+    """La demande d'entente est partie : sa date, et QUI l'a envoyée.
+
+    Le prénom n'est pas une formalité. Trois semaines plus tard, quand la
+    caisse n'a toujours pas répondu, c'est la seule façon de savoir à qui
+    demander ce qui a été envoyé — et si ça l'a vraiment été.
+    """
+    dossier = _modifier(dossier, patient, materiel, "Demande le",
+                        _iso(envoyee_le or date.today()), mode)
+    return _modifier(dossier, patient, materiel, "Demandée par",
+                     _texte(par), mode)
+
+
+def enregistrer_commentaire(dossier: pd.DataFrame, patient: str,
+                            materiel: str, texte: str,
+                            mode: Optional[str] = None) -> pd.DataFrame:
+    """Une note sur le suivi de l'entente : relance, pièce manquante, refus.
+
+    Séparée des notes du dossier : celles-ci décrivent la location,
+    celui-là raconte le dossier CAFAT. Mélangés, on ne retrouve ni l'un ni
+    l'autre trois mois plus tard.
+    """
+    return _modifier(dossier, patient, materiel, "Commentaire entente",
+                     _texte(texte), mode)
+
+
+def enregistrer_caution_rendue(dossier: pd.DataFrame, patient: str,
+                               materiel: str, le=None,
+                               mode: Optional[str] = None) -> pd.DataFrame:
+    """L'appareil est revenu, la caution est rendue.
+
+    Tant que cette date est vide, l'argent est encore à la pharmacie sans
+    lui appartenir. C'est ce qui permet de dire, à tout moment, combien
+    elle détient et pour qui.
+    """
+    return _modifier(dossier, patient, materiel, "Caution rendue le",
+                     _iso(le or date.today()), mode)
 
 
 def enregistrer_entente(dossier: pd.DataFrame, patient: str, materiel: str,
@@ -770,14 +1126,24 @@ def normaliser_tableau_edite(tableau: pd.DataFrame) -> pd.DataFrame:
     if tableau is None or tableau.empty:
         return dossier_vide()
     propre = tableau.reindex(columns=COLONNES_DOSSIER).copy()
-    for colonne in ("Patient", "Matériel", "Notes"):
+    for colonne in ("Patient", "Matériel", "Notes", "Demandée par",
+                    "Commentaire entente"):
         propre[colonne] = [_texte(v) for v in propre[colonne]]
+    # Une case « Régime » vide suit le nom du matériel, comme à la saisie :
+    # une ligne ajoutée avec le « + » pour un tensiomètre ne doit pas
+    # réclamer une entente que personne ne demandera.
+    propre["Régime"] = [
+        parser_regime(r) if _texte(r) else regime_propose(m)
+        for r, m in zip(propre["Régime"], propre["Matériel"])]
+    propre["Caution (F)"] = [str(parser_montant(v)) if parser_montant(v)
+                             else "" for v in propre["Caution (F)"]]
     # Une case « Mode » vide — celle d'une ligne ajoutée avec le « + » —
     # devient une location : c'est le mode surveillé, et donc le défaut
     # sans danger.
     propre["Mode"] = [parser_mode(v) for v in propre["Mode"]]
     for colonne in ("Début de location", "Entente préalable",
-                    "Dernière facturation"):
+                    "Dernière facturation", "Demande le",
+                    "Caution rendue le"):
         propre[colonne] = [_iso(v) for v in propre[colonne]]
     propre["Validité (mois)"] = [_mois_texte(v)
                                  for v in propre["Validité (mois)"]]
@@ -798,13 +1164,19 @@ def sauver(dossier: pd.DataFrame, chemin: Path) -> None:
     tableau = (dossier_vide() if dossier is None or dossier.empty
                else dossier.reindex(columns=COLONNES_DOSSIER).copy())
     for colonne in ("Début de location", "Entente préalable",
-                    "Dernière facturation"):
+                    "Dernière facturation", "Demande le",
+                    "Caution rendue le"):
         tableau[colonne] = [_iso(v) for v in tableau[colonne]]
     # Le mode est normalisé À L'ÉCRITURE : un fichier relu ne doit jamais
     # contenir de troisième valeur, sans quoi ces lignes disparaîtraient
     # du sous-onglet des achats comme de celui des locations.
     if not tableau.empty:
         tableau["Mode"] = [parser_mode(v) for v in tableau["Mode"]]
+        tableau["Régime"] = [
+            parser_regime(r) if _texte(r) else regime_propose(m)
+            for r, m in zip(tableau["Régime"], tableau["Matériel"])]
+        tableau["Caution (F)"] = [str(parser_montant(v)) if parser_montant(v)
+                                  else "" for v in tableau["Caution (F)"]]
     stockage_partage.ecrire_atomiquement(tableau, chemin)
 
 
@@ -825,7 +1197,8 @@ def charger(chemin: Path) -> pd.DataFrame:
         _journal.warning("Dossiers de location illisibles : %s", chemin)
         return dossier_vide()
     tableau = tableau.reindex(columns=COLONNES_DOSSIER).fillna("")
-    for colonne in ("Patient", "Matériel", "Notes"):
+    for colonne in ("Patient", "Matériel", "Notes", "Demandée par",
+                    "Commentaire entente"):
         tableau[colonne] = tableau[colonne].astype(str)
     return tableau
 

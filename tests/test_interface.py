@@ -1554,27 +1554,44 @@ def page_location(tmp_path_factory, pilote):
 
     travail = tmp_path_factory.mktemp("appli_location")
     (travail / "location.csv").write_text(
-        "Patient;Matériel;Mode;Début de location;Entente préalable;"
-        "Validité (mois);Dernière facturation;Notes\n"
+        "Patient;Matériel;Mode;Régime;Début de location;Demande le;"
+        "Demandée par;Entente préalable;Validité (mois);"
+        "Dernière facturation;Caution (F);Caution rendue le;"
+        "Commentaire entente;Notes\n"
         # Entente d'il y a un mois, valable six : largement valide.
-        f"Mme ANNE VALIDE;Lit médicalisé;🛏️ Location;{il_y_a(40)};"
-        f"{il_y_a(30)};6;{il_y_a(5)};\n"
+        f"Mme ANNE VALIDE;Lit médicalisé;🛏️ Location;📋 Soumis à entente;"
+        f"{il_y_a(40)};{il_y_a(35)};Sophie;{il_y_a(30)};6;{il_y_a(5)};;;;\n"
         # Entente d'il y a presque six mois : elle entre dans les 30 jours.
-        f"M. PIERRE BIENTOT;Concentrateur O2;🛏️ Location;{il_y_a(200)};"
-        f"{il_y_a(170)};6;{il_y_a(3)};\n"
+        f"M. PIERRE BIENTOT;Concentrateur O2;🛏️ Location;"
+        f"📋 Soumis à entente;{il_y_a(200)};{il_y_a(175)};Léa;"
+        f"{il_y_a(170)};6;{il_y_a(3)};;;;\n"
         # Entente de plus de six mois : expirée, plus prise en charge.
-        f"Mme SOPHIE EXPIREE;VNI;🛏️ Location;{il_y_a(400)};{il_y_a(300)};6;"
-        f"{il_y_a(90)};à relancer\n"
+        f"Mme SOPHIE EXPIREE;VNI;🛏️ Location;📋 Soumis à entente;"
+        f"{il_y_a(400)};{il_y_a(310)};Sophie;{il_y_a(300)};6;{il_y_a(90)};"
+        f";;dossier refusé une fois, refait le 12/03;à relancer\n"
         # Aucune entente, jamais facturé : le dossier qu'on vient d'ouvrir.
-        f"M. LUC SANSRIEN;Fauteuil roulant;🛏️ Location;{il_y_a(10)};;6;;\n"
+        f"M. LUC SANSRIEN;Fauteuil roulant;🛏️ Location;📋 Soumis à entente;"
+        f"{il_y_a(10)};;;;6;;;;;\n"
+        # DEMANDE PARTIE, SANS RÉPONSE : l'étape qui manquait. Un dossier
+        # parti à la caisse se lisait comme un dossier oublié.
+        f"Mme MARIE ATTENTE;Lit médicalisé;🛏️ Location;📋 Soumis à entente;"
+        f"{il_y_a(50)};{il_y_a(45)};Karine;;6;;;;relance téléphonique le 3;\n"
+        # HORS CAISSE : tensiomètre (3 000 F) et aérosol (5 000 F). Aucun
+        # des deux ne demande d'entente — ils n'ont donc rien à faire dans
+        # les listes de renouvellement.
+        f"M. PAUL TENSION;Tensiomètre OMRON;🛏️ Location;"
+        f"🆓 Sans entente requise;{il_y_a(25)};;;;6;;3000;;;\n"
+        f"Mme ROSE SOUFFLE;Aérosol Pari Boy;🛏️ Location;"
+        f"🆓 Sans entente requise;{il_y_a(12)};;;;6;;5000;;;\n"
         # ACHAT RÉGLÉ, entente expirée depuis longtemps : il ne doit
         # apparaître ni dans « à renouveler » ni dans « à facturer ».
-        f"Mme CLAIRE ACHAT;Déambulateur;🛒 Achat;{il_y_a(300)};{il_y_a(290)};"
-        f"6;{il_y_a(280)};\n"
+        f"Mme CLAIRE ACHAT;Déambulateur;🛒 Achat;📋 Soumis à entente;"
+        f"{il_y_a(300)};{il_y_a(295)};Léa;{il_y_a(290)};6;{il_y_a(280)};"
+        f";;;\n"
         # ACHAT LIVRÉ, JAMAIS RÉGLÉ : le cas qu'aucune date ne rappelle.
         # Même patiente : c'est elle qui prouve l'harmonisation par patient.
-        f"Mme CLAIRE ACHAT;Lève-personne;🛒 Achat;{il_y_a(20)};{il_y_a(15)};"
-        f"6;;\n",
+        f"Mme CLAIRE ACHAT;Lève-personne;🛒 Achat;📋 Soumis à entente;"
+        f"{il_y_a(20)};{il_y_a(18)};Karine;{il_y_a(15)};6;;;;;\n",
         encoding="utf-8-sig")
     lanceur = _lancer(travail)
     url = next(lanceur)
@@ -1598,7 +1615,8 @@ def _sous_onglet(page, libelle: str):
     « Facturations ») apparaissent aussi dans les légendes et les titres de
     section, et « le premier texte trouvé » désignerait l'un d'eux.
     """
-    return page.get_by_role("tab").filter(has_text=libelle)
+    return page.locator('[role="tablist"]').first.get_by_role("tab").filter(
+        has_text=libelle)
 
 
 def _panneau_du_sous_onglet(page) -> str:
@@ -1637,14 +1655,19 @@ class TestEspaceLocation:
         sous-onglet pour les facturations, et un sous-onglet qui nous
         donnerait les dossiers à renouveler », puis « un sous-onglet avec
         achat ». Les quatre, dans cet ordre."""
+        # Ciblé sur la PREMIÈRE barre d'onglets : le sous-onglet des
+        # ententes en contient une seconde (demande / accord / commentaire),
+        # et « tous les [role=tab] de la page » les compterait aussi.
         libelles = page_location.evaluate(
-            """() => [...document.querySelectorAll('[role="tab"]')].map(
-                t => t.innerText.replace(/\\s+/g, ' ').trim())""")
-        assert len(libelles) == 4, libelles
+            """() => [...document.querySelector('[role="tablist"]')
+                .querySelectorAll('[role="tab"]')].map(
+                    t => t.innerText.replace(/\\s+/g, ' ').trim())""")
+        assert len(libelles) == 5, libelles
         assert "Ententes préalables" in libelles[0], libelles
         assert "Facturations" in libelles[1], libelles
         assert "À renouveler" in libelles[2], libelles
         assert "Achats" in libelles[3], libelles
+        assert "Sans entente" in libelles[4], libelles
 
     def test_les_dossiers_en_place_sont_affiches(self, page_location):
         contenu = page_location.content()
@@ -1658,10 +1681,10 @@ class TestEspaceLocation:
         assert "Ententes expirées" in contenu
         assert "À renouveler" in contenu
 
-    def test_un_dossier_sans_entente_est_signale(self, page_location):
-        """Tant que l'accord n'est pas saisi, la location n'est prise en
+    def test_un_dossier_sans_demarche_est_signale(self, page_location):
+        """Tant que la demande n'est pas partie, la location n'est prise en
         charge par personne — et rien d'autre ne le rappelle."""
-        assert "sans entente préalable" in page_location.content()
+        assert "sans démarche engagée" in page_location.content()
 
     def test_le_sous_onglet_renouveler_liste_les_echeances(self,
                                                            page_location):
@@ -1694,6 +1717,11 @@ class TestEspaceLocation:
         l'échéance repart de SA date — pas de celle de la demande."""
         _sous_onglet(page_location, "Ententes préalables").first.click()
         page_location.wait_for_timeout(4000)
+        # La démarche se fait en trois étapes désormais : l'accord est
+        # derrière son propre onglet, sous le choix du dossier.
+        page_location.get_by_role("tab").filter(
+            has_text="Accord reçu").first.click()
+        page_location.wait_for_timeout(2500)
         page_location.get_by_role(
             "button", name="✅ Entente préalable faite", exact=True
         ).first.click()
@@ -1786,9 +1814,9 @@ class TestLouerOuAcheter:
         _sans_exception(page_location)
         contenu = page_location.content()
         assert "Vue par patient" in contenu
-        # 5 patients pour 6 dossiers : les deux achats de Mme CLAIRE ACHAT
+        # 8 patients pour 9 dossiers : les deux achats de Mme CLAIRE ACHAT
         # sont réunis. Le nombre est dans le titre du dépliant.
-        assert "5 personne(s) suivie(s)" in contenu, [
+        assert "8 personne(s) suivie(s)" in contenu, [
             l for l in contenu.split("<") if "personne(s)" in l]
 
     def test_le_bandeau_distingue_loue_et_achete(self, page_location):
@@ -1804,3 +1832,291 @@ class TestLouerOuAcheter:
         source = (RACINE / "ui_location.py").read_text(encoding="utf-8")
         assert "SelectboxColumn" in source
         assert "options=list(loc.MODES)" in source
+
+
+class TestDemandeEtTracabilite:
+    """« Une demande d'entente préalable à effectuer, avec la date et le
+    prénom de la personne de la pharma ayant effectué la demande. »
+
+    L'étape manquait entre « rien de fait » et « accord reçu » : un
+    dossier parti à la caisse se lisait comme un dossier oublié, et on le
+    refaisait.
+    """
+
+    def test_une_demande_en_attente_est_distinguee_d_un_dossier_oublie(
+            self, page_location):
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "demande(s) en attente de réponse" in panneau, panneau
+        assert "MARIE ATTENTE" in panneau, panneau
+
+    def test_le_prenom_de_qui_a_demande_est_affiche(self, page_location):
+        """Trois semaines plus tard, c'est la seule façon de savoir à qui
+        demander ce qui a été envoyé.
+
+        Contrôlé sur le PREMIER tableau du sous-onglet — celui des relances.
+        Le prénom figure aussi dans le tableau complet en dessous, et une
+        assertion sur la page entière ne dirait pas lequel le porte.
+        """
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        relances = page_location.evaluate(
+            """() => {
+                const p = [...document.querySelectorAll('[role="tabpanel"]')]
+                    .find(x => x.offsetParent !== null);
+                const t = p && p.querySelector('table[role="grid"]');
+                if (!t) return null;
+                return {
+                  colonnes: [...t.querySelectorAll('th')].map(
+                      c => c.innerText.trim()),
+                  cellules: [...t.querySelectorAll('td')].map(
+                      c => c.innerText.trim()),
+                };
+            }""")
+        assert relances, "aucun tableau de relances"
+        assert "Par" in relances["colonnes"], relances["colonnes"]
+        assert "Attente (j)" in relances["colonnes"], relances["colonnes"]
+        assert "Karine" in relances["cellules"], relances["cellules"]
+
+    def test_les_jours_d_attente_sont_comptes(self, page_location):
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        assert "la plus ancienne depuis" in _panneau_du_sous_onglet(
+            page_location)
+
+    def test_le_commentaire_d_entente_se_lit_dans_la_liste(self,
+                                                           page_location):
+        """« Concernant l'onglet entente préalable, avoir un endroit où
+        noter des commentaires. »"""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "relance téléphonique le 3" in panneau, panneau
+
+    def test_les_trois_etapes_de_la_demarche_sont_proposees(self,
+                                                            page_location):
+        """Demande, accord, commentaire : trois gestes distincts sur le
+        même dossier, et non un seul bouton qui ferait tout."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        # Les LIBELLÉS des onglets, et non le texte de la page : « Accord »
+        # et « Commentaire » se retrouvent aussi dans les légendes et les
+        # en-têtes de colonnes, et l'assertion ne mordrait plus.
+        etapes = page_location.evaluate(
+            """() => [...document.querySelectorAll('[role="tablist"]')]
+                .slice(1).flatMap(l => [...l.querySelectorAll('[role="tab"]')])
+                .map(t => t.innerText.replace(/\\s+/g, ' ').trim())""")
+        assert len(etapes) == 3, etapes
+        assert "Demande envoyée" in etapes[0], etapes
+        assert "Accord reçu" in etapes[1], etapes
+        assert "Commentaire" in etapes[2], etapes
+
+    def test_enregistrer_une_demande_sans_prenom_est_refuse(self,
+                                                            page_location):
+        """Sans prénom, la demande n'est traçable par personne — c'est
+        précisément ce que la traçabilité demandait d'empêcher."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        page_location.get_by_role("tab").filter(
+            has_text="Demande envoyée").first.click()
+        page_location.wait_for_timeout(2500)
+        page_location.get_by_role(
+            "button", name="📨 Demande envoyée à la caisse").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        # Vérifié DANS le sous-onglet : le même refus existe sur la
+        # proposition de renouvellement, et `page.content()` ne saurait
+        # pas dire lequel des deux a parlé.
+        assert "prénom est indispensable" in _panneau_du_sous_onglet(
+            page_location)
+
+    def test_le_bandeau_compte_les_demandes_en_attente(self, page_location):
+        assert "Demandes en attente" in page_location.content()
+
+
+class TestLocationsHorsCaisse:
+    """« Un sous-onglet pour les locations sans besoin d'entente préalable :
+    aérosol et tensiomètre. »
+
+    Tensiomètre : non remboursé, caution 3 000 F.
+    Aérosol : remboursé sous conditions, caution 5 000 F.
+    """
+
+    def test_le_sous_onglet_existe_et_les_liste(self, page_location):
+        _sous_onglet(page_location, "Sans entente").first.click()
+        page_location.wait_for_timeout(4000)
+        _sans_exception(page_location)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "PAUL TENSION" in panneau, panneau
+        assert "ROSE SOUFFLE" in panneau, panneau
+
+    def test_les_deux_cautions_sont_affichees(self, page_location):
+        _sous_onglet(page_location, "Sans entente").first.click()
+        page_location.wait_for_timeout(4000)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "3 000 F" in panneau, panneau
+        assert "5 000 F" in panneau, panneau
+
+    def test_le_total_des_cautions_detenues_est_dit(self, page_location):
+        """Cet argent n'est pas à la pharmacie : il est chez elle."""
+        _sous_onglet(page_location, "Sans entente").first.click()
+        page_location.wait_for_timeout(4000)
+        assert "8 000 F de cautions détenues" in _panneau_du_sous_onglet(
+            page_location)
+
+    def test_le_remboursement_de_chacun_est_dit(self, page_location):
+        """Ils se ressemblent — ni l'un ni l'autre ne demande d'entente —
+        mais l'un n'est jamais remboursé et l'autre l'est sous conditions.
+        Les afficher côte à côte sans le dire ferait répondre au hasard."""
+        _sous_onglet(page_location, "Sans entente").first.click()
+        page_location.wait_for_timeout(4000)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "Non remboursé" in panneau, panneau
+        assert "Remboursé sous conditions" in panneau, panneau
+
+    def test_ils_ne_remontent_pas_dans_les_ententes(self, page_location):
+        """Les y laisser les afficherait « rien de fait » à vie, c'est-à-dire
+        comme un manquement. Ils n'en sont pas un."""
+        _sous_onglet(page_location, "Ententes préalables").first.click()
+        page_location.wait_for_timeout(4000)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "PAUL TENSION" not in panneau, panneau
+        assert "ROSE SOUFFLE" not in panneau, panneau
+
+    def test_ils_ne_remontent_pas_dans_les_renouvellements(self,
+                                                           page_location):
+        _sous_onglet(page_location, "À renouveler").first.click()
+        page_location.wait_for_timeout(4000)
+        panneau = _panneau_du_sous_onglet(page_location)
+        assert "PAUL TENSION" not in panneau, panneau
+
+    def test_rendre_une_caution_la_sort_du_total(self, page_location):
+        """L'appareil est revenu : les 3 000 F cessent d'être détenus."""
+        _sous_onglet(page_location, "Sans entente").first.click()
+        page_location.wait_for_timeout(4000)
+        page_location.get_by_role("button", name="Caution de").first.click()
+        page_location.wait_for_timeout(6000)
+        _sans_exception(page_location)
+        assert "rendue le" in page_location.content()
+
+    def test_le_bandeau_compte_les_cautions(self, page_location):
+        assert "de cautions" in page_location.content()
+        assert "Hors caisse" in page_location.content()
+
+    def test_ouvrir_un_tensiometre_remplit_le_regime_et_la_caution(self):
+        """« Taper le nom suffit » : ressaisir régime et caution à chaque
+        appareil, c'est la ligne qu'on finit par oublier.
+
+        Contrôle sur la logique, appelée telle que l'écran l'appelle : le
+        parcours navigateur est couvert par le sous-onglet ci-dessus."""
+        import location as loc_
+        assert loc_.regime_propose("Tensiomètre OMRON") == loc_.REGIME_LIBRE
+        assert loc_.caution_proposee("Aérosol Pari Boy") == 5000
+
+
+# ---------------------------------------------------------------------------
+# La proposition de renouvellement, au moment de la facturation
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def page_dernier_mois(tmp_path_factory, pilote):
+    """Un seul dossier, et il est à son dernier mois couvert.
+
+    Seul, parce que le geste vise le premier dossier de la liste : en
+    ajouter d'autres ferait dépendre le test de l'ordre de tri, qui n'est
+    pas ce qu'il prouve.
+
+    L'entente expire dans une douzaine de jours, et le mois vient d'être
+    facturé : la facturation suivante tomberait après l'échéance — il n'y
+    aura donc pas de mois d'après à facturer sous cet accord.
+
+    Un dossier à son dernier mois n'est jamais « à facturer » en même
+    temps : on vient précisément de le facturer. Les deux ne peuvent pas
+    coexister, et c'est cohérent.
+    """
+    from datetime import date, timedelta
+    aujourdhui = date.today()
+
+    def il_y_a(jours):
+        return (aujourdhui - timedelta(days=jours)).isoformat()
+
+    travail = tmp_path_factory.mktemp("appli_dernier_mois")
+    (travail / "location.csv").write_text(
+        "Patient;Matériel;Mode;Régime;Début de location;Demande le;"
+        "Demandée par;Entente préalable;Validité (mois);"
+        "Dernière facturation;Caution (F);Caution rendue le;"
+        "Commentaire entente;Notes\n"
+        f"M. DERNIER MOIS;Lit médicalisé;🛏️ Location;📋 Soumis à entente;"
+        f"{il_y_a(200)};{il_y_a(175)};Sophie;{il_y_a(170)};6;"
+        f"{il_y_a(5)};;;;\n",
+        encoding="utf-8-sig")
+    lanceur = _lancer(travail)
+    url = next(lanceur)
+
+    navigateur = pilote.chromium.launch(executable_path=NAVIGATEUR)
+    onglet = navigateur.new_page(viewport={"width": 1500, "height": 1200})
+    onglet.goto(url, wait_until="domcontentloaded")
+    onglet.wait_for_selector(".hero", timeout=60000)
+    _onglet(onglet, ESPACE_LOCATION).first.click()
+    onglet.wait_for_timeout(8000)
+    yield onglet
+    navigateur.close()
+    for _ in lanceur:                       # referme Streamlit
+        pass
+
+
+class TestPropositionDeRenouvellement:
+    """« Pour la location, au moment de la facturation du dernier mois,
+    une proposition de renouvellement du dossier d'entente préalable. »
+
+    C'est LE moment utile : la facturation est le seul geste mensuel
+    certain sur une location. Attendre l'échéance, c'est la découvrir une
+    fois passée ; prévenir plus tôt, c'est prévenir tous les mois pour
+    rien.
+    """
+
+    def test_le_dossier_est_signale_au_dernier_mois(self, page_dernier_mois):
+        _sans_exception(page_dernier_mois)
+        assert "Dernier mois couvert" in page_dernier_mois.content()
+
+    def test_facturer_le_dernier_mois_propose_le_renouvellement(
+            self, page_dernier_mois):
+        """La proposition naît du geste, et s'affiche dans la foulée : le
+        dossier est ouvert, le patient identifié, la question fraîche."""
+        _sous_onglet(page_dernier_mois, "Facturations").first.click()
+        page_dernier_mois.wait_for_timeout(4000)
+        page_dernier_mois.get_by_role("button", name="💰 Facturé",
+                                      exact=True).first.click()
+        # Attendre la bulle elle-même plutôt qu'un délai fixe : sur une
+        # machine chargée, Streamlit met plus longtemps à renvoyer l'écran,
+        # et un `wait_for_timeout` généreux reste un pari.
+        page_dernier_mois.locator(
+            ".st-key-lo_bulle_renouvellement").wait_for(timeout=30000)
+        _sans_exception(page_dernier_mois)
+        contenu = page_dernier_mois.content()
+        assert "Dernier mois couvert — M. DERNIER MOIS" in contenu, [
+            l for l in contenu.split("<") if "Dernier mois" in l]
+        assert "doit partir" in contenu
+
+    def test_la_proposition_porte_la_demande_et_son_auteur(
+            self, page_dernier_mois):
+        """Renouveler, c'est refaire une demande : elle repart avec une
+        date et un prénom, comme la première."""
+        bulle = page_dernier_mois.locator(".st-key-lo_bulle_renouvellement")
+        assert bulle.count() == 1
+        texte = bulle.first.inner_text()
+        assert "Envoyée le" in texte, texte
+        assert "Prénom" in texte, texte
+
+    def test_on_peut_refuser_la_proposition(self, page_dernier_mois):
+        """La location s'arrête parfois là : forcer une demande ferait
+        partir un dossier pour un lit déjà repris."""
+        page_dernier_mois.get_by_role(
+            "button", name="Plus tard — la location s'arrête là").click()
+        page_dernier_mois.locator(".st-key-lo_bulle_renouvellement").wait_for(
+            state="detached", timeout=30000)
+        _sans_exception(page_dernier_mois)
+        assert page_dernier_mois.locator(
+            ".st-key-lo_bulle_renouvellement").count() == 0
